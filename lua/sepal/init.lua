@@ -160,7 +160,7 @@ function M.spec(lines)
 
   local o = { buffer = buf }
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function()
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local lines = vim.tbl_filter(function(l) return not l:match("^%s*%-%s*$") end, vim.api.nvim_buf_get_lines(buf, 0, -1, false)) -- no empty bullets
     while #lines > 0 and vim.trim(lines[#lines]) == "" do lines[#lines] = nil end
     if #lines == 0 then return M.notify("the spec is empty", vim.log.levels.WARN) end
     vim.cmd.stopinsert()

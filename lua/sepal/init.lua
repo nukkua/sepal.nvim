@@ -7,9 +7,13 @@
 
 local M = {}
 
+-- Claude Code runs this after every reply: it calls back into this nvim ($NVIM, set for terminal jobs)
+local STOP_HOOK = vim.fn.shellescape(vim.v.progpath) .. [[ --server "$NVIM" --remote-expr "v:lua.require'sepal'.stopped()" >/dev/null 2>&1]]
+
 local C = {
-  -- agent argv; tui=default keeps Claude Code off the alt screen, so its output stays in the buffer's scrollback
-  cmd = { "claude", "--settings", '{"tui":"default"}' },
+  -- agent argv. tui=default keeps Claude Code off the alt screen, so its output stays in the buffer's
+  -- scrollback; the Stop hook is what notifies "the agent is done"
+  cmd = { "claude", "--settings", vim.json.encode({ tui = "default", hooks = { Stop = { { hooks = { { type = "command", command = STOP_HOOK } } } } } }) },
   resume = { "-c" },  -- appended to cmd to continue this directory's last chat; {} to always start fresh
   side = "right",     -- "right" | "left"
   width = 40,         -- split width, percent of the editor (1-99)
@@ -52,8 +56,9 @@ local function split(buf)
   return vim.api.nvim_open_win(buf, false, { split = C.side, win = -1, width = math.floor(vim.o.columns * C.width / 100) })
 end
 
--- start the agent in a new terminal buffer, in place of the old one (which is killed)
-local function start(resume)
+-- start the agent in a new terminal buffer, in place of the old one (which is killed).
+-- hidden: start it in a split sized like the agent's and hide it, so the pty gets the right width
+local function start(resume, hidden)
   local old, buf = S.buf, vim.api.nvim_create_buf(false, true)
   S.buf = buf
   local win = old and vim.api.nvim_buf_is_valid(old) and vim.fn.bufwinid(old) or -1
@@ -66,7 +71,9 @@ local function start(resume)
     return vim.fn.jobstart(argv, { term = true, on_exit = vim.schedule_wrap(function(_, code)
       if S.buf ~= buf then return end -- replaced by :Sepal new
       -- nothing to continue in this directory: start a fresh chat instead
-      if resume and #C.resume > 0 and code ~= 0 and vim.uv.now() - t < 3000 then return start(false) end
+      if resume and #C.resume > 0 and code ~= 0 and vim.uv.now() - t < 3000 then
+        return start(false, vim.fn.bufwinid(buf) == -1) -- stays hidden if it was
+      end
       S.buf = nil
       if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
     end) })
@@ -76,7 +83,15 @@ local function start(resume)
     vim.api.nvim_buf_delete(buf, { force = true })
     return M.notify("could not start " .. argv[1] .. (ok and "" or "\n" .. (tostring(job):match("E%d+:[^\n]*") or tostring(job):match("[^\n]*"))), vim.log.levels.ERROR)
   end
-  enter(win)
+  if hidden then vim.api.nvim_win_hide(win) else enter(win) end
+end
+
+-- the agent finished a reply (Claude Code's Stop hook); not shown while you're in the agent
+function M.stopped()
+  vim.schedule(function()
+    if not (alive() and vim.api.nvim_get_current_buf() == S.buf) then M.notify("the agent is done") end
+  end)
+  return ""
 end
 
 function M.toggle()
@@ -93,17 +108,16 @@ end
 
 function M.new() start(false) end
 
--- paste text into the agent and press Enter, starting it first if it isn't running.
+-- paste text into the agent and press Enter, without opening its split; starts it (hidden) if it isn't running.
 -- failed(): the text never reached the agent
 local function send(text, failed)
   local function go()
     local ch = vim.bo[S.buf].channel
     vim.fn.chansend(ch, "\27[200~" .. text .. "\27[201~") -- bracketed paste: newlines stay in the prompt
     vim.defer_fn(function() pcall(vim.fn.chansend, ch, "\r") end, 100) -- Enter in the same write lands inside the paste; pcall: the agent may have exited
-    if vim.fn.bufwinid(S.buf) == -1 then enter(split(S.buf)) end
   end
-  if alive() then return go() end
-  start(true)
+  if alive() then go(); return M.notify("spec sent") end
+  start(true, true)
   if not alive() then return failed() end -- start already said why
   local done = progress("starting the agent")
   -- ponytail: a fresh agent is "ready" once its buffer has stayed the same for 3s (past the resume

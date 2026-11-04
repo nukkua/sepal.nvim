@@ -28,7 +28,7 @@ vim.pack.add({ "https://github.com/nukkua/sepal.nvim" })
 
 ```lua
 require("sepal").setup({
-  cmd = { "claude", "--settings", '{"tui":"default"}' }, -- the agent (see below)
+  cmd = { "claude", "--settings", "<tui=default + a Stop hook>" }, -- the agent (see below)
   resume = { "-c" },   -- appended to cmd to continue this directory's last chat; {} to always start fresh
   side = "right",      -- "right" | "left"
   width = 40,          -- split width, percent of the editor (1-99)
@@ -69,16 +69,33 @@ Files:
 | Key          | Action                                                                 |
 | ------------ | ---------------------------------------------------------------------- |
 | `<c-c><c-f>` | add a file under `Files:` (picked with [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) if installed, else a prompt) |
-| `<c-c><c-c>` | send the spec to the agent and close the buffer                       |
+| `<c-c><c-c>` | send the spec to the agent (its split stays as it was) and close the buffer |
 | `<c-c><c-k>` | discard the spec                                                        |
 
-Files go in as `@path`, which Claude Code reads as file references. If the agent isn't running,
-sending starts it and waits for it to be ready. If it can't start, the spec comes back in its
-buffer. Closing the window keeps the draft, and `:Sepal spec` brings it back.
+Files go in as `@path`, which Claude Code reads as file references. Sending doesn't open the
+agent: if it isn't running, it starts in the background and gets the spec once it's ready. If it
+can't start, the spec comes back in its buffer. Closing the window keeps the draft, and
+`:Sepal spec` brings it back.
 
-`{"tui":"default"}` keeps Claude Code on the main screen. Its fullscreen renderer draws on the
-alternate screen, which has no scrollback, so in normal mode `<C-u>`, `gg`, `/` would find nothing
-above the current screen. Keep it in `cmd` if you add your own Claude Code flags.
+When Claude Code finishes a reply you get "the agent is done" (not while you're in the agent).
+
+## The default `cmd`
+
+`claude --settings` with two settings, on top of your own:
+
+- `tui = "default"` keeps Claude Code on the main screen. Its fullscreen renderer draws on the
+  alternate screen, which has no scrollback, so in normal mode `<C-u>`, `gg`, `/` would find
+  nothing above the current screen.
+- a `Stop` hook that tells this Neovim (through `$NVIM`) when a reply is done.
+
+To add your own Claude Code flags, extend it instead of replacing it:
+
+```lua
+local cmd = vim.list_extend(vim.deepcopy(require("sepal").config().cmd), { "--model", "opus" })
+require("sepal").setup({ cmd = cmd })
+```
+
+Other agents don't get the "done" notification.
 
 The agent runs in a terminal buffer, so `<leader>` keys typed there go to the agent. Press
 `<C-\><C-n>` to get back to normal mode first, or map a key in terminal mode:

@@ -3,6 +3,7 @@ vim.opt.rtp:prepend(vim.fn.getcwd())
 
 local sepal = require("sepal")
 local S = sepal._t.state()
+local default_cmd = vim.deepcopy(sepal.config().cmd)
 -- the agent prints its arguments and waits; with -c it fails unless $SEPAL_HISTORY is set,
 -- like an agent with no chat to continue
 local agent = [[
@@ -132,9 +133,44 @@ test("spec starts the agent when it is not running and sends once the resume fal
   vim.api.nvim_buf_set_lines(spec_buf(), 0, 1, false, { "Scope: fresh" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
   screen("agent:[]")
+  eq(win(), -1, "the agent split opened")
   assert(vim.wait(6000, function()
     return S.buf and table.concat(vim.api.nvim_buf_get_lines(S.buf, 0, -1, false), "\n"):find("Scope: fresh", 1, true) ~= nil
   end, 50), "spec never reached the agent")
+end)
+
+test("spec sent to a hidden agent leaves it hidden", function()
+  sepal.spec()
+  vim.api.nvim_buf_set_lines(spec_buf(), 0, 1, false, { "Scope: still hidden" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  screen("Scope: still hidden")
+  eq(win(), -1, "the agent split opened")
+end)
+
+test("Claude Code's Stop hook calls back and notifies the agent is done", function()
+  local hook = vim.json.decode(default_cmd[3]).hooks.Stop[1].hooks[1].command
+  local got = {}
+  local notify = vim.notify
+  vim.notify = function(msg) got[#got + 1] = msg end
+  vim.system({ "sh", "-c", hook }, { env = { NVIM = vim.fn.serverstart() } })
+  local ok = vim.wait(5000, function() return #got > 0 end, 20)
+  vim.notify = notify
+  assert(ok, "no notification")
+  eq(got, { "the agent is done" })
+end)
+
+test("no done notification while you're in the agent", function()
+  sepal.toggle()
+  vim.api.nvim_set_current_win(win())
+  local got = {}
+  local notify = vim.notify
+  vim.notify = function(msg) got[#got + 1] = msg end
+  sepal.stopped()
+  vim.wait(100)
+  vim.notify = notify
+  eq(got, {})
+  vim.cmd.wincmd("p")
+  sepal.toggle()
 end)
 
 test("spec <c-c><c-k> discards it", function()

@@ -17,16 +17,20 @@ and errors always go to |vim.notify()|).
 `setup()` is optional. These are the defaults:
 >lua
   require("sepal").setup({
-    cmd = { "claude", "--settings", '{"tui":"default"}' },
+    cmd = { "claude", "--settings", "<tui=default + a Stop hook>" },
     resume = { "-c" },
     side = "right",
     width = 40,
     focus = true,
   })
 <
-`cmd`        argv of the agent. `{"tui":"default"}` keeps Claude Code off
-             its fullscreen (alternate screen) renderer, which leaves
-             nothing in the buffer to scroll back through.
+`cmd`        argv of the agent. The default passes Claude Code two
+             settings: tui = "default" keeps it off its fullscreen
+             (alternate screen) renderer, which leaves nothing in the
+             buffer to scroll back through, and a Stop hook tells this
+             Neovim when a reply is done ("the agent is done", not shown
+             while you're in the agent). To add flags, extend it:
+             `vim.list_extend(vim.deepcopy(require("sepal").config().cmd), {...})`
 `resume`     arguments appended to `cmd` to continue this directory's last
              chat, e.g. { "resume", "--last" } for codex. {} always starts
              a fresh chat.
@@ -49,8 +53,9 @@ and errors always go to |vim.notify()|).
                     <c-c><c-c>  send the spec to the agent (starting it if
                                 needed) and close the buffer
                     <c-c><c-k>  discard the spec
-                  A spec the agent never got (it could not start) comes back
-                  in its buffer. Closing the window keeps the draft;
+                  Sending doesn't open the agent; if it isn't running it
+                  starts in the background. A spec the agent never got (it
+                  could not start) comes back in its buffer. Closing the window keeps the draft;
                   :Sepal spec reopens it.
 
 Lua: `require("sepal").toggle()`, `.new()`, `.spec()`. There are no default keys.

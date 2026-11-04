@@ -77,7 +77,8 @@ agent: if it isn't running, it starts in the background and gets the spec once i
 can't start, the spec comes back in its buffer. Closing the window keeps the draft, and
 `:Sepal spec` brings it back.
 
-When Claude Code finishes a reply you get "the agent is done" (not while you're in the agent).
+When Claude Code finishes a reply you get `✓ the agent is done: <first line of the reply>` (not
+while you're in the agent). With fidget it stays until you enter the agent.
 
 ## The default `cmd`
 

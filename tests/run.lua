@@ -152,11 +152,29 @@ test("Claude Code's Stop hook calls back and notifies the agent is done", functi
   local got = {}
   local notify = vim.notify
   vim.notify = function(msg) got[#got + 1] = msg end
-  vim.system({ "sh", "-c", hook }, { env = { NVIM = vim.fn.serverstart() } })
+  local reply = vim.json.encode({ last_assistant_message = "\n  Shutdown drains the queue now.\nDetails below." })
+  vim.system({ "sh", "-c", hook }, { env = { NVIM = vim.fn.serverstart() }, stdin = reply })
   local ok = vim.wait(5000, function() return #got > 0 end, 20)
   vim.notify = notify
   assert(ok, "no notification")
-  eq(got, { "the agent is done" })
+  eq(got, { "the agent is done: Shutdown drains the queue now." })
+end)
+
+test("done stays in fidget until you enter the agent", function()
+  local got, removed = {}, {}
+  package.loaded.fidget = {
+    notify = function(msg, _, o) got[#got + 1] = { msg, o.key, o.ttl } end,
+    notification = { remove = function(g, k) removed[#removed + 1] = { g, k } end },
+  }
+  sepal.stopped()
+  vim.wait(100)
+  eq(got, { { "✓ the agent is done", "sepal-done", math.huge } })
+  sepal.toggle()
+  vim.api.nvim_set_current_win(win())
+  package.loaded.fidget = nil
+  eq(removed, { { "default", "sepal-done" } })
+  vim.cmd.wincmd("p")
+  sepal.toggle()
 end)
 
 test("no done notification while you're in the agent", function()

@@ -7,8 +7,10 @@
 
 local M = {}
 
--- Claude Code runs this after every reply: it calls back into this nvim ($NVIM, set for terminal jobs)
-local STOP_HOOK = vim.fn.shellescape(vim.v.progpath) .. [[ --server "$NVIM" --remote-expr "v:lua.require'sepal'.stopped()" >/dev/null 2>&1]]
+-- Claude Code runs this after every reply: it saves the hook's JSON (which has the reply) to a temp
+-- file and calls back into this nvim with it ($NVIM, set for terminal jobs)
+local STOP_HOOK = [[f=$(mktemp) && cat >"$f" && ]] .. vim.fn.shellescape(vim.v.progpath)
+  .. [[ --server "$NVIM" --remote-expr "v:lua.require'sepal'.stopped('$f')" >/dev/null 2>&1]]
 
 local C = {
   -- agent argv. tui=default keeps Claude Code off the alt screen, so its output stays in the buffer's
@@ -27,13 +29,16 @@ local S = { buf = nil } -- the agent's terminal buffer
 -- every message is "what happened", shown under "sepal".
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
+-- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
 local ICON = { [vim.log.levels.ERROR] = { "✗", "DiagnosticError" }, [vim.log.levels.WARN] = { "▲", "DiagnosticWarn" } }
-function M.notify(msg, lvl)
-  lvl = lvl or vim.log.levels.INFO
+function M.notify(msg, lvl, o)
+  lvl, o = lvl or vim.log.levels.INFO, o or {}
   local ok, fidget = pcall(require, "fidget")
-  if ok and lvl <= vim.log.levels.INFO then return fidget.notify(msg, lvl, { annote = "sepal" }) end
+  if ok and lvl <= vim.log.levels.INFO then
+    return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal", key = o.key, ttl = o.ttl })
+  end
   if not (debug.getinfo(vim.notify, "S").source or ""):match("^@?vim/") then return vim.notify(msg, lvl, { title = "sepal" }) end
-  local icon = ICON[lvl] or { "●", "DiagnosticInfo" }
+  local icon = o.icon or ICON[lvl] or { "●", "DiagnosticInfo" }
   vim.api.nvim_echo({ { icon[1] .. " ", icon[2] }, { "sepal ", "Title" }, { msg } }, true, { err = lvl >= vim.log.levels.ERROR })
 end
 
@@ -83,13 +88,33 @@ local function start(resume, hidden)
     vim.api.nvim_buf_delete(buf, { force = true })
     return M.notify("could not start " .. argv[1] .. (ok and "" or "\n" .. (tostring(job):match("E%d+:[^\n]*") or tostring(job):match("[^\n]*"))), vim.log.levels.ERROR)
   end
+  -- you've seen it: the "done" notification can go
+  vim.api.nvim_create_autocmd("BufEnter", { buffer = buf, callback = function()
+    local fok, fidget = pcall(require, "fidget")
+    if fok then pcall(fidget.notification.remove, "default", "sepal-done") end
+  end })
   if hidden then vim.api.nvim_win_hide(win) else enter(win) end
 end
 
--- the agent finished a reply (Claude Code's Stop hook); not shown while you're in the agent
-function M.stopped()
+-- the agent finished a reply (Claude Code's Stop hook, path: its JSON); not shown while you're in the agent.
+-- "✓ the agent is done: <first line of the reply>", kept in fidget until you enter the agent
+function M.stopped(path)
+  local reply
+  if path and path ~= "" then
+    local f = io.open(path)
+    if f then
+      local ok, hook = pcall(vim.json.decode, f:read("a"))
+      f:close()
+      reply = ok and type(hook) == "table" and hook.last_assistant_message or nil
+    end
+    os.remove(path)
+  end
   vim.schedule(function()
-    if not (alive() and vim.api.nvim_get_current_buf() == S.buf) then M.notify("the agent is done") end
+    if alive() and vim.api.nvim_get_current_buf() == S.buf then return end
+    local first = type(reply) == "string" and vim.iter(vim.split(reply, "\n")):map(vim.trim):find(function(l) return l ~= "" end)
+    if first and vim.fn.strchars(first) > 80 then first = vim.fn.strcharpart(first, 0, 79) .. "…" end
+    M.notify("the agent is done" .. (first and ": " .. first or ""), vim.log.levels.INFO,
+      { icon = { "✓", "DiagnosticOk" }, key = "sepal-done", ttl = math.huge })
   end)
   return ""
 end

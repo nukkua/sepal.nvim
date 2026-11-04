@@ -28,8 +28,9 @@ and errors always go to |vim.notify()|).
              settings: tui = "default" keeps it off its fullscreen
              (alternate screen) renderer, which leaves nothing in the
              buffer to scroll back through, and a Stop hook tells this
-             Neovim when a reply is done ("the agent is done", not shown
-             while you're in the agent). To add flags, extend it:
+             Neovim when a reply is done ("✓ the agent is done: <first
+             line of the reply>", not shown while you're in the agent;
+             with fidget it stays until you enter the agent). To add flags, extend it:
              `vim.list_extend(vim.deepcopy(require("sepal").config().cmd), {...})`
 `resume`     arguments appended to `cmd` to continue this directory's last
              chat, e.g. { "resume", "--last" } for codex. {} always starts

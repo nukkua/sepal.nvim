@@ -7,7 +7,9 @@ sepal runs a CLI agent (Claude Code by default) in a terminal split next to
 your code. The first toggle continues the last chat in this directory
 (`claude -c`), so the chat comes back after Neovim or tmux goes away.
 
-Requirements: Neovim 0.12+.
+Requirements: Neovim 0.12+. Optional: fff.nvim to pick files for a spec,
+fidget.nvim for notifications and a spinner while the agent starts (warnings
+and errors always go to |vim.notify()|).
 
 ==============================================================================
 2. SETUP                                                         *sepal-setup*
@@ -47,7 +49,9 @@ Requirements: Neovim 0.12+.
                     <c-c><c-c>  send the spec to the agent (starting it if
                                 needed) and close the buffer
                     <c-c><c-k>  discard the spec
-                  Closing the window keeps the draft; :Sepal spec reopens it.
+                  A spec the agent never got (it could not start) comes back
+                  in its buffer. Closing the window keeps the draft;
+                  :Sepal spec reopens it.
 
 Lua: `require("sepal").toggle()`, `.new()`, `.spec()`. There are no default keys.
 Example:
@@ -63,6 +67,6 @@ CTRL-\ CTRL-N for normal mode, or map a key in terminal mode as above.
 ==============================================================================
 4. HEALTH                                                       *sepal-health*
 
-`:checkhealth sepal` checks `cmd`, `resume`, `side` and `width`.
+`:checkhealth sepal` checks `cmd`, `resume`, `side`, `width`, fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

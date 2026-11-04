@@ -8,6 +8,9 @@ quit Neovim, or after the terminal or tmux session it ran in is gone.
 
 - Neovim 0.12+
 - a CLI agent: [Claude Code](https://claude.com/claude-code) by default, or any other (`codex`, `opencode`, `pi`, `aider`, …)
+- optional: [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) to pick files for a spec (without it you get a path prompt)
+- optional: [fidget.nvim](https://github.com/j-hui/fidget.nvim) for notifications and a spinner while the agent starts
+  (without it you get plain notifications; warnings and errors always go to `vim.notify`)
 
 ## Install
 
@@ -70,8 +73,8 @@ Files:
 | `<c-c><c-k>` | discard the spec                                                        |
 
 Files go in as `@path`, which Claude Code reads as file references. If the agent isn't running,
-sending starts it and waits for it to be ready. Closing the window keeps the draft, and
-`:Sepal spec` brings it back.
+sending starts it and waits for it to be ready. If it can't start, the spec comes back in its
+buffer. Closing the window keeps the draft, and `:Sepal spec` brings it back.
 
 `{"tui":"default"}` keeps Claude Code on the main screen. Its fullscreen renderer draws on the
 alternate screen, which has no scrollback, so in normal mode `<C-u>`, `gg`, `/` would find nothing
@@ -93,7 +96,7 @@ require("sepal").setup({ cmd = { "pi" }, resume = { "--continue" } })
 require("sepal").setup({ cmd = { "aider" }, resume = { "--restore-chat-history" } })
 ```
 
-`:checkhealth sepal` checks `cmd`, `resume`, `side` and `width`.
+`:checkhealth sepal` checks `cmd`, `resume`, `side`, `width`, fidget and fff.
 
 ## Tests
 

@@ -142,5 +142,36 @@ test("spec <c-c><c-k> discards it", function()
   eq(spec_buf(), nil)
 end)
 
+test("notify: info goes to fidget, warnings to vim.notify", function()
+  local got = {}
+  package.loaded.fidget = { notify = function(msg, lvl, o) got[#got + 1] = { "fidget", msg, lvl, o.annote } end }
+  local notify = vim.notify
+  vim.notify = function(msg, lvl, o) got[#got + 1] = { "notify", msg, lvl, o.title } end -- a notifier plugin
+  sepal.notify("spec sent")
+  sepal.notify("the spec is empty", vim.log.levels.WARN)
+  vim.notify, package.loaded.fidget = notify, nil
+  eq(got, { { "fidget", "spec sent", vim.log.levels.INFO, "sepal" }, { "notify", "the spec is empty", vim.log.levels.WARN, "sepal" } })
+end)
+
+test("notify: the builtin vim.notify gets a colored echo", function()
+  vim.cmd.messages("clear")
+  sepal.notify("the agent is the only window", vim.log.levels.WARN)
+  eq(vim.trim(vim.fn.execute("messages")), "▲ sepal the agent is the only window")
+end)
+
+test("a spec that cannot be sent comes back in its buffer", function()
+  vim.fn.jobstop(vim.bo[S.buf].channel)
+  assert(vim.wait(3000, function() return S.buf == nil end, 10), "agent still there")
+  local cmd = sepal.config().cmd
+  sepal.setup({ cmd = { "sepal-no-such-agent" } })
+  sepal.spec()
+  vim.api.nvim_buf_set_lines(spec_buf(), 0, 1, false, { "Scope: keep me" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  sepal.setup({ cmd = cmd })
+  assert(spec_buf(), "spec lost")
+  eq(vim.api.nvim_buf_get_lines(spec_buf(), 0, 1, false), { "Scope: keep me" })
+  eq(vim.fn.bufwinid(spec_buf()) ~= -1, true, "spec not shown")
+end)
+
 print(("%d/%d passed"):format(n - fails, n))
 os.exit(fails == 0 and 0 or 1)

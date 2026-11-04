@@ -20,6 +20,28 @@ function M.config() return C end
 
 local S = { buf = nil } -- the agent's terminal buffer
 
+-- every message is "what happened", shown under "sepal".
+-- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
+-- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
+local ICON = { [vim.log.levels.ERROR] = { "✗", "DiagnosticError" }, [vim.log.levels.WARN] = { "▲", "DiagnosticWarn" } }
+function M.notify(msg, lvl)
+  lvl = lvl or vim.log.levels.INFO
+  local ok, fidget = pcall(require, "fidget")
+  if ok and lvl <= vim.log.levels.INFO then return fidget.notify(msg, lvl, { annote = "sepal" }) end
+  if not (debug.getinfo(vim.notify, "S").source or ""):match("^@?vim/") then return vim.notify(msg, lvl, { title = "sepal" }) end
+  local icon = ICON[lvl] or { "●", "DiagnosticInfo" }
+  vim.api.nvim_echo({ { icon[1] .. " ", icon[2] }, { "sepal ", "Title" }, { msg } }, true, { err = lvl >= vim.log.levels.ERROR })
+end
+
+-- fidget spinner while waiting; returns done(msg), which ends it showing msg.
+-- without fidget: no spinner, done(msg) is a plain notification
+local function progress(msg)
+  local ok, fp = pcall(require, "fidget.progress")
+  if not ok then return function(final) M.notify(final) end end
+  local h = fp.handle.create({ title = "sepal", message = msg, lsp_client = { name = "sepal" } })
+  return function(final) h.message = final; h:finish() end
+end
+
 local function alive() return S.buf ~= nil and vim.api.nvim_buf_is_valid(S.buf) end
 
 local function enter(win)
@@ -52,7 +74,7 @@ local function start(resume)
   if not ok or job <= 0 then
     S.buf = nil
     vim.api.nvim_buf_delete(buf, { force = true })
-    return vim.notify("sepal: could not start " .. argv[1] .. (ok and "" or "\n" .. tostring(job)), vim.log.levels.ERROR)
+    return M.notify("could not start " .. argv[1] .. (ok and "" or "\n" .. (tostring(job):match("E%d+:[^\n]*") or tostring(job):match("[^\n]*"))), vim.log.levels.ERROR)
   end
   enter(win)
 end
@@ -62,7 +84,7 @@ function M.toggle()
   if win ~= -1 then
     -- floats don't count: hiding the last normal window fails with E444 even if a float is open
     local normal = vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative == "" end, vim.api.nvim_tabpage_list_wins(0))
-    if #normal == 1 then return vim.notify("sepal: the agent is the only window", vim.log.levels.WARN) end
+    if #normal == 1 then return M.notify("the agent is the only window", vim.log.levels.WARN) end
     return vim.api.nvim_win_hide(win)
   end
   if alive() then return enter(split(S.buf)) end
@@ -71,8 +93,9 @@ end
 
 function M.new() start(false) end
 
--- paste text into the agent and press Enter, starting it first if it isn't running
-local function send(text)
+-- paste text into the agent and press Enter, starting it first if it isn't running.
+-- failed(): the text never reached the agent
+local function send(text, failed)
   local function go()
     local ch = vim.bo[S.buf].channel
     vim.fn.chansend(ch, "\27[200~" .. text .. "\27[201~") -- bracketed paste: newlines stay in the prompt
@@ -81,15 +104,17 @@ local function send(text)
   end
   if alive() then return go() end
   start(true)
+  if not alive() then return failed() end -- start already said why
+  local done = progress("starting the agent")
   -- ponytail: a fresh agent is "ready" once its buffer has stayed the same for 3s (past the resume
   -- fallback) and shows output; an agent that boots slower than 15s gets the text before its prompt
   local buf, since, tries = S.buf, vim.uv.now(), 0
   local function poll()
-    if not alive() then return vim.notify("sepal: the agent exited, the spec was not sent", vim.log.levels.WARN) end
+    if not alive() then done("the agent exited"); return failed() end
     if S.buf ~= buf then buf, since = S.buf, vim.uv.now() end
     tries = tries + 1
     local shown = vim.iter(vim.api.nvim_buf_get_lines(buf, 0, -1, false)):any(function(l) return l ~= "" end)
-    if (vim.uv.now() - since >= 3000 and shown) or tries >= 75 then return go() end
+    if (vim.uv.now() - since >= 3000 and shown) or tries >= 75 then go(); return done("spec sent") end
     vim.defer_fn(poll, 200)
   end
   vim.defer_fn(poll, 200)
@@ -111,8 +136,9 @@ local function add_file(buf, path)
 end
 
 -- :Sepal spec: write a spec in a buffer above the code, then send it to the agent.
--- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed)
-function M.spec()
+-- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed).
+-- lines: the text to start from (a spec that could not be sent comes back with it)
+function M.spec(lines)
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.b[b].sepal_spec then
       local w = vim.fn.bufwinid(b)
@@ -125,19 +151,24 @@ function M.spec()
   vim.b[buf].sepal_spec = true
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].bufhidden = "hide" -- closing the window keeps the draft; :Sepal spec brings it back
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, TEMPLATE)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or TEMPLATE)
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
-  vim.api.nvim_win_set_cursor(0, { 1, #TEMPLATE[1] })
-  vim.cmd.startinsert({ bang = true })
+  if not lines then
+    vim.api.nvim_win_set_cursor(0, { 1, #TEMPLATE[1] })
+    vim.cmd.startinsert({ bang = true })
+  end
 
   local o = { buffer = buf }
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     while #lines > 0 and vim.trim(lines[#lines]) == "" do lines[#lines] = nil end
-    if #lines == 0 then return vim.notify("sepal: the spec is empty", vim.log.levels.WARN) end
+    if #lines == 0 then return M.notify("the spec is empty", vim.log.levels.WARN) end
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
-    send(table.concat(lines, "\n"))
+    send(table.concat(lines, "\n"), function()
+      M.notify("the spec was not sent, it is back in its buffer", vim.log.levels.WARN)
+      M.spec(lines)
+    end)
   end, vim.tbl_extend("force", o, { desc = "Send the spec to the agent" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
     vim.cmd.stopinsert()

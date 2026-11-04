@@ -165,6 +165,8 @@ end
 
 local TEMPLATE = { "Scope: ", "Goal: ", "", "Constraints:", "- ", "", "Files:" }
 local IDEA = { "", "", "Files:" } -- with spec_suggest: the idea goes on top, <c-c><c-s> writes the spec
+local HINT = "what to change, where and why; <c-c><c-s> writes the spec"
+local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 
 -- add "- @path" at the end of the Files: list
 local function add_file(buf, path)
@@ -202,6 +204,17 @@ function M.spec(lines)
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.cmd.startinsert({ bang = true })
+  end
+  if C.spec_suggest then
+    -- placeholder on an empty idea line: an extmark, so it's never sent or piped (and changedtick stays)
+    local function hint()
+      if not vim.api.nvim_buf_is_valid(buf) then return end
+      vim.api.nvim_buf_clear_namespace(buf, HINT_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
+      if (vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or "") ~= "" then return end
+      vim.api.nvim_buf_set_extmark(buf, HINT_NS, 0, 0, { virt_text = { { HINT, "Comment" } }, virt_text_pos = "overlay" })
+    end
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = hint })
+    hint()
   end
 
   local o = { buffer = buf }

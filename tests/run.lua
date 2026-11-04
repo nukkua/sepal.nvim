@@ -206,6 +206,30 @@ test("<c-c><c-s> turns the idea into the spec with spec_suggest", function()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
+test("an empty idea line shows a hint that goes away when you type", function()
+  local ns = vim.api.nvim_create_namespace("sepal.hint")
+  local function marks(b) return #vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {}) end
+  sepal.spec()
+  local b = spec_buf()
+  eq(marks(b), 1)
+  local tick = vim.b[b].changedtick
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
+  vim.api.nvim_exec_autocmds("TextChanged", { buffer = b })
+  eq(marks(b), 0)
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "" })
+  vim.api.nvim_exec_autocmds("TextChanged", { buffer = b })
+  eq(marks(b), 1)
+  eq(vim.b[b].changedtick, tick + 2, "the hint changed changedtick")
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false) -- still "write the idea first", nothing runs
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  sepal.config().spec_suggest = nil -- setup({ spec_suggest = nil }) is a no-op: nil keys vanish
+  sepal.spec()
+  eq(marks(spec_buf()), 0)
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  sepal.setup({ spec_suggest = suggest })
+end)
+
 test("<c-c><c-s> keeps what you typed while it was writing", function()
   sepal.spec()
   local b = spec_buf()
@@ -232,7 +256,7 @@ test("<c-c><c-s> with a failing spec_suggest leaves the buffer as it was", funct
   eq(got, { "spec_suggest failed (exit 3)\nboom" })
   eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.setup({ spec_suggest = nil })
+  sepal.config().spec_suggest = nil -- setup({ spec_suggest = nil }) is a no-op: nil keys vanish
 end)
 
 test("spec <c-c><c-k> discards it", function()

@@ -71,6 +71,86 @@ end
 
 function M.new() start(false) end
 
+-- paste text into the agent and press Enter, starting it first if it isn't running
+local function send(text)
+  local function go()
+    local ch = vim.bo[S.buf].channel
+    vim.fn.chansend(ch, "\27[200~" .. text .. "\27[201~") -- bracketed paste: newlines stay in the prompt
+    vim.defer_fn(function() pcall(vim.fn.chansend, ch, "\r") end, 100) -- Enter in the same write lands inside the paste; pcall: the agent may have exited
+    if vim.fn.bufwinid(S.buf) == -1 then enter(split(S.buf)) end
+  end
+  if alive() then return go() end
+  start(true)
+  -- ponytail: a fresh agent is "ready" once its buffer has stayed the same for 3s (past the resume
+  -- fallback) and shows output; an agent that boots slower than 15s gets the text before its prompt
+  local buf, since, tries = S.buf, vim.uv.now(), 0
+  local function poll()
+    if not alive() then return vim.notify("sepal: the agent exited, the spec was not sent", vim.log.levels.WARN) end
+    if S.buf ~= buf then buf, since = S.buf, vim.uv.now() end
+    tries = tries + 1
+    local shown = vim.iter(vim.api.nvim_buf_get_lines(buf, 0, -1, false)):any(function(l) return l ~= "" end)
+    if (vim.uv.now() - since >= 3000 and shown) or tries >= 75 then return go() end
+    vim.defer_fn(poll, 200)
+  end
+  vim.defer_fn(poll, 200)
+end
+
+local TEMPLATE = { "Scope: ", "Goal: ", "", "Constraints:", "- ", "", "Files:" }
+
+-- add "- @path" at the end of the Files: list
+local function add_file(buf, path)
+  if not path or path == "" or not vim.api.nvim_buf_is_valid(buf) then return end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for i, l in ipairs(lines) do
+    if l:match("^Files:") then
+      while lines[i + 1] and lines[i + 1]:match("^%- ") do i = i + 1 end
+      return vim.api.nvim_buf_set_lines(buf, i, i, false, { "- @" .. path })
+    end
+  end
+  vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", "Files:", "- @" .. path })
+end
+
+-- :Sepal spec: write a spec in a buffer above the code, then send it to the agent.
+-- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed)
+function M.spec()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.b[b].sepal_spec then
+      local w = vim.fn.bufwinid(b)
+      if w == -1 then w = vim.api.nvim_open_win(b, true, { split = "above", win = 0, height = 12 }) end
+      return vim.api.nvim_set_current_win(w)
+    end
+  end
+  if alive() and vim.api.nvim_get_current_buf() == S.buf then vim.cmd.wincmd("p") end -- not over the agent
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.b[buf].sepal_spec = true
+  vim.bo[buf].filetype = "markdown"
+  vim.bo[buf].bufhidden = "hide" -- closing the window keeps the draft; :Sepal spec brings it back
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, TEMPLATE)
+  vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
+  vim.api.nvim_win_set_cursor(0, { 1, #TEMPLATE[1] })
+  vim.cmd.startinsert({ bang = true })
+
+  local o = { buffer = buf }
+  vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function()
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    while #lines > 0 and vim.trim(lines[#lines]) == "" do lines[#lines] = nil end
+    if #lines == 0 then return vim.notify("sepal: the spec is empty", vim.log.levels.WARN) end
+    vim.cmd.stopinsert()
+    vim.api.nvim_buf_delete(buf, { force = true })
+    send(table.concat(lines, "\n"))
+  end, vim.tbl_extend("force", o, { desc = "Send the spec to the agent" }))
+  vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
+    vim.cmd.stopinsert()
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end, vim.tbl_extend("force", o, { desc = "Discard the spec" }))
+  vim.keymap.set({ "n", "i" }, "<c-c><c-f>", function()
+    vim.cmd.stopinsert()
+    local ok, fff = pcall(require, "fff")
+    if ok then return fff.find_files({ on_submit = function(_, ctx) add_file(buf, ctx.relative_path) end }) end
+    vim.ui.input({ prompt = "File: ", completion = "file" }, function(p) add_file(buf, p) end)
+  end, vim.tbl_extend("force", o, { desc = "Add a file to the spec" }))
+end
+
 M._t = { state = function() return S end }
 
 return M

@@ -94,5 +94,53 @@ test(":Sepal completes by prefix", function()
   eq(vim.fn.getcompletion("Sepal n", "cmdline"), { "new" })
 end)
 
+local function spec_buf()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_spec then return b end end
+end
+
+test("spec opens the template above, <c-c><c-f> adds files with fff", function()
+  sepal.spec()
+  local b = spec_buf()
+  eq(vim.api.nvim_get_current_buf(), b)
+  eq(vim.api.nvim_buf_get_lines(b, 0, 3, false), { "Scope: ", "Goal: ", "" })
+  package.loaded.fff = { find_files = function(o) o.on_submit({}, { relative_path = "src/pool.cpp" }) end }
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-f>"), "tx", false)
+  package.loaded.fff.find_files = function(o) o.on_submit({}, { relative_path = "src/pool.h" }) end
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-f>"), "tx", false)
+  package.loaded.fff = nil
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  eq(vim.list_slice(lines, #lines - 2), { "Files:", "- @src/pool.cpp", "- @src/pool.h" })
+end)
+
+test("spec <c-c><c-c> sends it to the running agent and closes it", function()
+  local b = spec_buf()
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(b))
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "Scope: ThreadPool::shutdown()" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  eq(spec_buf(), nil)
+  screen("Scope: ThreadPool::shutdown()")
+  screen("- @src/pool.h")
+end)
+
+test("spec starts the agent when it is not running and sends once the resume fallback settles", function()
+  vim.wait(3000) -- past the resume fallback window, so the kill isn't taken for "nothing to continue"
+  vim.fn.jobstop(vim.bo[S.buf].channel)
+  assert(vim.wait(3000, function() return S.buf == nil end, 10), "agent still there")
+  vim.env.SEPAL_HISTORY = nil -- the resume fails, so the spec has to reach the fresh agent that replaces it
+  sepal.spec()
+  vim.api.nvim_buf_set_lines(spec_buf(), 0, 1, false, { "Scope: fresh" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  screen("agent:[]")
+  assert(vim.wait(6000, function()
+    return S.buf and table.concat(vim.api.nvim_buf_get_lines(S.buf, 0, -1, false), "\n"):find("Scope: fresh", 1, true) ~= nil
+  end, 50), "spec never reached the agent")
+end)
+
+test("spec <c-c><c-k> discards it", function()
+  sepal.spec()
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  eq(spec_buf(), nil)
+end)
+
 print(("%d/%d passed"):format(n - fails, n))
 os.exit(fails == 0 and 0 or 1)

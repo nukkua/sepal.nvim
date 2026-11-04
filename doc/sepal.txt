@@ -40,8 +40,16 @@ Requirements: Neovim 0.12+.
                   last chat here, or starts a fresh one if there is none
                   (the resumed agent exits with an error within 3 seconds).
 :Sepal new        Kill the agent and start a fresh chat.
+:Sepal spec       Write a spec for the agent in a buffer above the code:
+                  Scope, Goal, Constraints and Files. In it:
+                    <c-c><c-f>  add a file under Files: as @path (fff.nvim
+                                if installed, else a prompt)
+                    <c-c><c-c>  send the spec to the agent (starting it if
+                                needed) and close the buffer
+                    <c-c><c-k>  discard the spec
+                  Closing the window keeps the draft; :Sepal spec reopens it.
 
-Lua: `require("sepal").toggle()`, `.new()`. There are no default keys.
+Lua: `require("sepal").toggle()`, `.new()`, `.spec()`. There are no default keys.
 Example:
 >lua
   vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>")

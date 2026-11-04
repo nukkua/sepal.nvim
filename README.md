@@ -34,9 +34,10 @@ require("sepal").setup({
 
 vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>", { desc = "Agent: toggle" })
 vim.keymap.set("n", "<leader>an", "<cmd>Sepal new<cr>", { desc = "Agent: new chat" })
+vim.keymap.set("n", "<leader>ai", "<cmd>Sepal spec<cr>", { desc = "Agent: implement a spec" })
 ```
 
-The commands are also available as functions: `require("sepal").toggle()`, `.new()`.
+The commands are also available as functions: `require("sepal").toggle()`, `.new()`, `.spec()`.
 
 ## Usage
 
@@ -45,6 +46,32 @@ The commands are also available as functions: `require("sepal").toggle()`, `.new
   starts a fresh chat instead. Hiding the split keeps the agent running.
 - `:Sepal new` kills the agent and starts a fresh chat.
 - If the agent exits, its split closes and the next `:Sepal` starts it again.
+
+## Specs
+
+`:Sepal spec` opens a buffer above your code with a spec to fill in:
+
+```
+Scope: ThreadPool::shutdown()
+Goal: Implement graceful shutdown.
+
+Constraints:
+- Finish queued tasks
+- Don't accept new tasks
+
+Files:
+- @src/thread_pool.cpp
+```
+
+| Key          | Action                                                                 |
+| ------------ | ---------------------------------------------------------------------- |
+| `<c-c><c-f>` | add a file under `Files:` (picked with [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) if installed, else a prompt) |
+| `<c-c><c-c>` | send the spec to the agent and close the buffer                       |
+| `<c-c><c-k>` | discard the spec                                                        |
+
+Files go in as `@path`, which Claude Code reads as file references. If the agent isn't running,
+sending starts it and waits for it to be ready. Closing the window keeps the draft, and
+`:Sepal spec` brings it back.
 
 `{"tui":"default"}` keeps Claude Code on the main screen. Its fullscreen renderer draws on the
 alternate screen, which has no scrollback, so in normal mode `<C-u>`, `gg`, `/` would find nothing

@@ -54,7 +54,8 @@ and errors always go to |vim.notify()|).
                   last chat here, or starts a fresh one if there is none
                   (the resumed agent exits with an error within 3 seconds).
 :Sepal new        Kill the agent and start a fresh chat.
-:Sepal spec       Write a spec for the agent in a buffer above the code:
+:[range]Sepal spec
+                  Write a spec for the agent in a buffer above the code:
                   Scope, Goal, Constraints and Files. In it:
                     <c-c><c-s>  have |sepal-spec_suggest| write the spec
                                 from what's there (u undoes it)
@@ -66,7 +67,10 @@ and errors always go to |vim.notify()|).
                   Sending doesn't open the agent; if it isn't running it
                   starts in the background. A spec the agent never got (it
                   could not start) comes back in its buffer. Closing the window keeps the draft;
-                  :Sepal spec reopens it.
+                  :Sepal spec reopens it. With a [range] (a visual
+                  selection), those lines go in as a "Selection: path:10-20"
+                  code block above Files: and the file is listed; an open
+                  draft gets them added.
 
 Lua: `require("sepal").toggle()`, `.new()`, `.spec()`. There are no default keys.
 Example:

@@ -39,6 +39,7 @@ require("sepal").setup({
 vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>", { desc = "Agent: toggle" })
 vim.keymap.set("n", "<leader>an", "<cmd>Sepal new<cr>", { desc = "Agent: new chat" })
 vim.keymap.set("n", "<leader>ai", "<cmd>Sepal spec<cr>", { desc = "Agent: implement a spec" })
+vim.keymap.set("x", "<leader>ai", ":Sepal spec<cr>", { desc = "Agent: implement a spec with the selection" })
 ```
 
 The commands are also available as functions: `require("sepal").toggle()`, `.new()`, `.spec()`.
@@ -73,6 +74,10 @@ Files:
 | `<c-c><c-f>` | add a file under `Files:` (picked with [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) if installed, else a prompt) |
 | `<c-c><c-c>` | send the spec to the agent (its split stays as it was) and close the buffer |
 | `<c-c><c-k>` | discard the spec                                                        |
+
+`:'<,'>Sepal spec` (the `x` mapping above) puts the selected lines in the spec as a
+`Selection: path:10-20` code block above `Files:` and lists the file. With a draft open, the
+selection is added to it. Selections are whole lines.
 
 Files go in as `@path`, which Claude Code reads as file references. Sending doesn't open the
 agent: if it isn't running, it starts in the background and gets the spec once it's ready. If it

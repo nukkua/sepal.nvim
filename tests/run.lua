@@ -296,5 +296,37 @@ test("a spec that cannot be sent comes back in its buffer", function()
   eq(vim.fn.bufwinid(spec_buf()) ~= -1, true, "spec not shown")
 end)
 
+test(":'<,'>Sepal spec puts the selected lines in the spec and lists the file", function()
+  sepal.config().spec_suggest = nil
+  if spec_buf() then vim.api.nvim_buf_delete(spec_buf(), { force = true }) end -- the unsent spec from before
+  vim.cmd.edit("tests/pool.lua")
+  vim.bo.filetype = "lua"
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })
+  vim.cmd("2,3Sepal spec")
+  local b = spec_buf()
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: ", "Goal: ", "", "Constraints:", "- ", "",
+    "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
+end)
+
+test("a selection joins the open draft, its file listed once", function()
+  vim.cmd.wincmd("j")
+  vim.cmd("4Sepal spec")
+  local lines = vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false)
+  eq(vim.list_slice(lines, 13), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
+end)
+
+test("code in a selection is sent as it is, even a line that is just -", function()
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(spec_buf()))
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  assert(vim.wait(8000, function()
+    local t = S.buf and table.concat(vim.api.nvim_buf_get_lines(S.buf, 0, -1, false), "\n") or ""
+    return t:find("- @tests/pool.lua", 1, true) ~= nil
+  end, 50), "spec never reached the agent")
+  local got = vim.api.nvim_buf_get_lines(S.buf, 0, -1, false)
+  eq(vim.tbl_contains(got, "-"), true, "the - code line was dropped")
+  eq(vim.tbl_contains(got, "- "), false, "the empty bullet was sent")
+  vim.cmd("bwipeout! tests/pool.lua")
+end)
+
 print(("%d/%d passed"):format(n - fails, n))
 os.exit(fails == 0 and 0 or 1)

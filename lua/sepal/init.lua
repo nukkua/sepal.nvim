@@ -168,10 +168,11 @@ local IDEA = { "", "", "Files:" } -- with spec_suggest: the idea goes on top, <c
 local HINT = "what to change, where and why; <c-c><c-s> writes the spec"
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 
--- add "- @path" at the end of the Files: list
+-- add "- @path" at the end of the Files: list (once)
 local function add_file(buf, path)
   if not path or path == "" or not vim.api.nvim_buf_is_valid(buf) then return end
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  if vim.tbl_contains(lines, "- @" .. path) then return end
   for i, l in ipairs(lines) do
     if l:match("^Files:") then
       while lines[i + 1] and lines[i + 1]:match("^%- ") do i = i + 1 end
@@ -181,15 +182,40 @@ local function add_file(buf, path)
   vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", "Files:", "- @" .. path })
 end
 
+-- lines first..last of the current buffer as a "Selection:" block, and the file to list (nil if unnamed)
+local function selection(first, last)
+  local name = vim.api.nvim_buf_get_name(0)
+  local path = name ~= "" and vim.fn.fnamemodify(name, ":.") or nil
+  local block = { "Selection: " .. (path and path .. ":" or "lines ") .. first .. (last > first and "-" .. last or ""),
+    "```" .. vim.bo.filetype }
+  vim.list_extend(block, vim.api.nvim_buf_get_lines(0, first - 1, last, false))
+  vim.list_extend(block, { "```", "" })
+  return block, path
+end
+
+-- put a selection block above Files: (at the end if there's none) and list its file
+local function add_selection(buf, block, path)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local at = #lines
+  for i, l in ipairs(lines) do if l:match("^Files:") then at = i - 1 break end end
+  vim.api.nvim_buf_set_lines(buf, at, at, false, block)
+  add_file(buf, path)
+end
+
 -- :Sepal spec: write a spec in a buffer above the code, then send it to the agent.
 -- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
 -- <c-c><c-s> has spec_suggest turn what's there (an idea + files) into the spec.
+-- range: { first, last } lines of the current buffer to put in the spec (:'<,'>Sepal spec)
 -- lines: the text to start from (a spec that could not be sent comes back with it)
-function M.spec(lines)
+-- ponytail: a range is whole lines; a charwise selection brings its full lines
+function M.spec(range, lines)
+  local block, path
+  if range then block, path = selection(range[1], range[2]) end
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.b[b].sepal_spec then
       local w = vim.fn.bufwinid(b)
       if w == -1 then w = vim.api.nvim_open_win(b, true, { split = "above", win = 0, height = 12 }) end
+      if block then add_selection(b, block, path) end -- a draft is open: the selection joins it
       return vim.api.nvim_set_current_win(w)
     end
   end
@@ -200,6 +226,7 @@ function M.spec(lines)
   vim.bo[buf].bufhidden = "hide" -- closing the window keeps the draft; :Sepal spec brings it back
   local template = C.spec_suggest and IDEA or TEMPLATE
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
+  if block then add_selection(buf, block, path) end
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
@@ -219,14 +246,18 @@ function M.spec(lines)
 
   local o = { buffer = buf }
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function()
-    local lines = vim.tbl_filter(function(l) return not l:match("^%s*%-%s*$") end, vim.api.nvim_buf_get_lines(buf, 0, -1, false)) -- no empty bullets
+    local fenced = false -- no empty bullets, but code in a ``` block is sent as it is
+    local lines = vim.tbl_filter(function(l)
+      if l:match("^%s*```") then fenced = not fenced end
+      return fenced or not l:match("^%s*%-%s*$")
+    end, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
     while #lines > 0 and vim.trim(lines[#lines]) == "" do lines[#lines] = nil end
     if #lines == 0 then return M.notify("the spec is empty", vim.log.levels.WARN) end
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
     send(table.concat(lines, "\n"), function()
       M.notify("the spec was not sent, it is back in its buffer", vim.log.levels.WARN)
-      M.spec(lines)
+      M.spec(nil, lines)
     end)
   end, vim.tbl_extend("force", o, { desc = "Send the spec to the agent" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()

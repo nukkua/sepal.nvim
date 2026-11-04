@@ -22,6 +22,7 @@ and errors always go to |vim.notify()|).
     side = "right",
     width = 40,
     focus = true,
+    spec_suggest = nil,
   })
 <
 `cmd`        argv of the agent. The default passes Claude Code two
@@ -38,6 +39,12 @@ and errors always go to |vim.notify()|).
 `side`       "right" or "left".
 `width`      split width, percent of the editor (1-99).
 `focus`      move to the agent when it opens.
+                                                       *sepal-spec_suggest*
+`spec_suggest` argv that gets the spec buffer on stdin (your idea and
+             Files:) and prints the finished spec. <c-c><c-s> in a spec
+             runs it; with it set, a new spec starts as just the idea and
+             Files:. For Claude Code, pass -p and --no-session-persistence
+             (otherwise `claude -c` continues this run, not your chat).
 
 ==============================================================================
 3. COMMANDS                                                    *sepal-commands*
@@ -49,6 +56,8 @@ and errors always go to |vim.notify()|).
 :Sepal new        Kill the agent and start a fresh chat.
 :Sepal spec       Write a spec for the agent in a buffer above the code:
                   Scope, Goal, Constraints and Files. In it:
+                    <c-c><c-s>  have |sepal-spec_suggest| write the spec
+                                from what's there (u undoes it)
                     <c-c><c-f>  add a file under Files: as @path (fff.nvim
                                 if installed, else a prompt)
                     <c-c><c-c>  send the spec to the agent (starting it if
@@ -73,6 +82,7 @@ CTRL-\ CTRL-N for normal mode, or map a key in terminal mode as above.
 ==============================================================================
 4. HEALTH                                                       *sepal-health*
 
-`:checkhealth sepal` checks `cmd`, `resume`, `side`, `width`, fidget and fff.
+`:checkhealth sepal` checks `cmd`, `resume`, `spec_suggest`, `side`, `width`,
+fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

@@ -20,6 +20,7 @@ local C = {
   side = "right",     -- "right" | "left"
   width = 40,         -- split width, percent of the editor (1-99)
   focus = true,       -- move to the agent when it opens
+  spec_suggest = nil, -- argv: rough spec on stdin -> finished spec on stdout; <c-c><c-s> in a spec runs it
 }
 function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}) end
 function M.config() return C end
@@ -42,13 +43,16 @@ function M.notify(msg, lvl, o)
   vim.api.nvim_echo({ { icon[1] .. " ", icon[2] }, { "sepal ", "Title" }, { msg } }, true, { err = lvl >= vim.log.levels.ERROR })
 end
 
--- fidget spinner while waiting; returns done(msg), which ends it showing msg.
--- without fidget: no spinner, done(msg) is a plain notification
+-- fidget spinner while waiting; returns done(msg), which ends it showing msg, or cancels it without
+-- msg (a failure, which gets its own warning). Without fidget: no spinner, done(msg) is a plain notification
 local function progress(msg)
   local ok, fp = pcall(require, "fidget.progress")
-  if not ok then return function(final) M.notify(final) end end
+  if not ok then return function(final) if final then M.notify(final) end end end
   local h = fp.handle.create({ title = "sepal", message = msg, lsp_client = { name = "sepal" } })
-  return function(final) h.message = final; h:finish() end
+  return function(final)
+    if not final then return h:cancel() end
+    h.message = final; h:finish()
+  end
 end
 
 local function alive() return S.buf ~= nil and vim.api.nvim_buf_is_valid(S.buf) end
@@ -149,7 +153,7 @@ local function send(text, failed)
   -- fallback) and shows output; an agent that boots slower than 15s gets the text before its prompt
   local buf, since, tries = S.buf, vim.uv.now(), 0
   local function poll()
-    if not alive() then done("the agent exited"); return failed() end
+    if not alive() then done(); return failed() end
     if S.buf ~= buf then buf, since = S.buf, vim.uv.now() end
     tries = tries + 1
     local shown = vim.iter(vim.api.nvim_buf_get_lines(buf, 0, -1, false)):any(function(l) return l ~= "" end)
@@ -160,6 +164,7 @@ local function send(text, failed)
 end
 
 local TEMPLATE = { "Scope: ", "Goal: ", "", "Constraints:", "- ", "", "Files:" }
+local IDEA = { "", "", "Files:" } -- with spec_suggest: the idea goes on top, <c-c><c-s> writes the spec
 
 -- add "- @path" at the end of the Files: list
 local function add_file(buf, path)
@@ -175,7 +180,8 @@ local function add_file(buf, path)
 end
 
 -- :Sepal spec: write a spec in a buffer above the code, then send it to the agent.
--- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed).
+-- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
+-- <c-c><c-s> has spec_suggest turn what's there (an idea + files) into the spec.
 -- lines: the text to start from (a spec that could not be sent comes back with it)
 function M.spec(lines)
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -190,10 +196,11 @@ function M.spec(lines)
   vim.b[buf].sepal_spec = true
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].bufhidden = "hide" -- closing the window keeps the draft; :Sepal spec brings it back
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or TEMPLATE)
+  local template = C.spec_suggest and IDEA or TEMPLATE
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
   if not lines then
-    vim.api.nvim_win_set_cursor(0, { 1, #TEMPLATE[1] })
+    vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.cmd.startinsert({ bang = true })
   end
 
@@ -213,6 +220,39 @@ function M.spec(lines)
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
   end, vim.tbl_extend("force", o, { desc = "Discard the spec" }))
+  local job -- the running spec_suggest
+  vim.api.nvim_create_autocmd("BufUnload", { buffer = buf, once = true, callback = function()
+    if job then pcall(job.kill, job, 15) end -- sent or discarded before it answered: don't leave it running
+  end })
+  vim.keymap.set({ "n", "i" }, "<c-c><c-s>", function()
+    if not C.spec_suggest then return M.notify("set spec_suggest to have <c-c><c-s> write the spec, see :h sepal-spec_suggest", vim.log.levels.WARN) end
+    if job then return M.notify("still writing the spec") end
+    local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    if vim.trim((text:gsub("Files:", ""))) == "" then return M.notify("write the idea first", vim.log.levels.WARN) end
+    vim.cmd.stopinsert()
+    local tick, done = vim.b[buf].changedtick, progress("writing the spec")
+    local ok, j = pcall(vim.system, C.spec_suggest, { stdin = text, text = true }, vim.schedule_wrap(function(r)
+      job = nil
+      if not vim.api.nvim_buf_is_valid(buf) then return done() end
+      local out = vim.trim(((r.stdout or ""):gsub("^%s*```%w*\n", "")):gsub("\n?```%s*$", ""))
+      if r.code ~= 0 or out == "" then
+        done()
+        return M.notify("spec_suggest failed" .. (r.code ~= 0 and " (exit " .. r.code .. ")" or ": empty answer")
+          .. ((r.stderr or "") ~= "" and "\n" .. vim.trim(r.stderr):match("[^\n]*") or ""), vim.log.levels.ERROR)
+      end
+      if vim.b[buf].changedtick ~= tick then -- never overwrite what you typed meanwhile
+        done()
+        return M.notify("the spec changed while it was being written, <c-c><c-s> again", vim.log.levels.WARN)
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(out, "\n"))
+      done("spec ready: <c-c><c-c> sends it, u undoes")
+    end))
+    if not ok then
+      done()
+      return M.notify("could not run " .. tostring(C.spec_suggest[1]) .. "\n" .. tostring(j):match("[^\n]*"), vim.log.levels.ERROR)
+    end
+    job = j
+  end, vim.tbl_extend("force", o, { desc = "Write the spec with spec_suggest" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-f>", function()
     vim.cmd.stopinsert()
     local ok, fff = pcall(require, "fff")

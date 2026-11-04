@@ -33,6 +33,7 @@ require("sepal").setup({
   side = "right",      -- "right" | "left"
   width = 40,          -- split width, percent of the editor (1-99)
   focus = true,        -- move to the agent when it opens
+  spec_suggest = nil,  -- argv: rough spec on stdin -> finished spec on stdout (see Specs)
 })
 
 vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>", { desc = "Agent: toggle" })
@@ -68,6 +69,7 @@ Files:
 
 | Key          | Action                                                                 |
 | ------------ | ---------------------------------------------------------------------- |
+| `<c-c><c-s>` | have `spec_suggest` write the spec from what's there (`u` undoes it)  |
 | `<c-c><c-f>` | add a file under `Files:` (picked with [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) if installed, else a prompt) |
 | `<c-c><c-c>` | send the spec to the agent (its split stays as it was) and close the buffer |
 | `<c-c><c-k>` | discard the spec                                                        |
@@ -76,6 +78,25 @@ Files go in as `@path`, which Claude Code reads as file references. Sending does
 agent: if it isn't running, it starts in the background and gets the spec once it's ready. If it
 can't start, the spec comes back in its buffer. Closing the window keeps the draft, and
 `:Sepal spec` brings it back.
+
+### Writing the spec for you
+
+Set `spec_suggest` and the spec buffer starts as just your idea and `Files:`. `<c-c><c-s>` pipes
+it to the command, which answers with the spec (a spinner shows while it thinks), then
+`<c-c><c-c>` sends it. If you edit while it's writing, your text is kept. For example, Opus at
+medium effort, reading the files but not editing them:
+
+```lua
+require("sepal").setup({
+  spec_suggest = { "claude", "-p", "--model", "opus", "--effort", "medium",
+    "--no-session-persistence", "--tools=Read,Grep,Glob",
+    "Turn the rough idea on stdin into a short spec: Scope, Goal, Constraints, Files (as @path). "
+    .. "Read the files so it matches the code. Output only the spec, no code fences, no filler." },
+})
+```
+
+Keep `--no-session-persistence`: without it, `claude -c` in the agent would continue this
+one-off run instead of your chat.
 
 When Claude Code finishes a reply you get `✓ the agent is done: <first line of the reply>` (not
 while you're in the agent). With fidget it stays until you enter the agent.
@@ -114,7 +135,7 @@ require("sepal").setup({ cmd = { "pi" }, resume = { "--continue" } })
 require("sepal").setup({ cmd = { "aider" }, resume = { "--restore-chat-history" } })
 ```
 
-`:checkhealth sepal` checks `cmd`, `resume`, `side`, `width`, fidget and fff.
+`:checkhealth sepal` checks `cmd`, `resume`, `spec_suggest`, `side`, `width`, fidget and fff.
 
 ## Tests
 

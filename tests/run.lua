@@ -191,6 +191,50 @@ test("no done notification while you're in the agent", function()
   sepal.toggle()
 end)
 
+-- writes a fenced spec that quotes stdin, like a model that wraps its answer in ```
+local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n'; sed 's/^/- got: /'; printf '```\n']] }
+
+test("<c-c><c-s> turns the idea into the spec with spec_suggest", function()
+  sepal.setup({ spec_suggest = suggest })
+  sepal.spec()
+  local b = spec_buf()
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "graceful shutdown" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
+  assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "spec not written")
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: graceful shutdown", "- got: ", "- got: Files:" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+end)
+
+test("<c-c><c-s> keeps what you typed while it was writing", function()
+  sepal.spec()
+  local b = spec_buf()
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea, edited" })
+  vim.wait(1500)
+  eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea, edited" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+end)
+
+test("<c-c><c-s> with a failing spec_suggest leaves the buffer as it was", function()
+  sepal.setup({ spec_suggest = { "sh", "-c", "echo boom >&2; exit 3" } })
+  sepal.spec()
+  local b = spec_buf()
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
+  local got = {}
+  local notify = vim.notify
+  vim.notify = function(msg) got[#got + 1] = msg end
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
+  local ok = vim.wait(3000, function() return #got > 0 end, 20)
+  vim.notify = notify
+  assert(ok, "no error")
+  eq(got, { "spec_suggest failed (exit 3)\nboom" })
+  eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  sepal.setup({ spec_suggest = nil })
+end)
+
 test("spec <c-c><c-k> discards it", function()
   sepal.spec()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)

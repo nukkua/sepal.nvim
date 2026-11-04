@@ -1,0 +1,60 @@
+*sepal.txt*  A CLI agent in a terminal split
+
+==============================================================================
+1. INTRODUCTION                                                        *sepal*
+
+sepal runs a CLI agent (Claude Code by default) in a terminal split next to
+your code. The first toggle continues the last chat in this directory
+(`claude -c`), so the chat comes back after Neovim or tmux goes away.
+
+Requirements: Neovim 0.12+.
+
+==============================================================================
+2. SETUP                                                         *sepal-setup*
+
+`setup()` is optional. These are the defaults:
+>lua
+  require("sepal").setup({
+    cmd = { "claude", "--settings", '{"tui":"default"}' },
+    resume = { "-c" },
+    side = "right",
+    width = 40,
+    focus = true,
+  })
+<
+`cmd`        argv of the agent. `{"tui":"default"}` keeps Claude Code off
+             its fullscreen (alternate screen) renderer, which leaves
+             nothing in the buffer to scroll back through.
+`resume`     arguments appended to `cmd` to continue this directory's last
+             chat, e.g. { "resume", "--last" } for codex. {} always starts
+             a fresh chat.
+`side`       "right" or "left".
+`width`      split width, percent of the editor (1-99).
+`focus`      move to the agent when it opens.
+
+==============================================================================
+3. COMMANDS                                                    *sepal-commands*
+
+                                                                      *:Sepal*
+:Sepal [toggle]   Show or hide the agent. The first time, it continues the
+                  last chat here, or starts a fresh one if there is none
+                  (the resumed agent exits with an error within 3 seconds).
+:Sepal new        Kill the agent and start a fresh chat.
+
+Lua: `require("sepal").toggle()`, `.new()`. There are no default keys.
+Example:
+>lua
+  vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>")
+  vim.keymap.set("n", "<leader>an", "<cmd>Sepal new<cr>")
+  vim.keymap.set("t", "<C-q>", "<cmd>Sepal<cr>")
+<
+Hiding the split keeps the agent running. If the agent exits, its split
+closes. Keys typed in the agent's terminal go to the agent: press
+CTRL-\ CTRL-N for normal mode, or map a key in terminal mode as above.
+
+==============================================================================
+4. HEALTH                                                       *sepal-health*
+
+`:checkhealth sepal` checks `cmd`, `resume`, `side` and `width`.
+
+ vim:tw=78:ts=8:ft=help:norl:

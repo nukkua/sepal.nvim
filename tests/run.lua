@@ -351,7 +351,7 @@ end
 test("resume lists what you typed per conversation, newest first, without claude -p runs", function()
   vim.env.CLAUDE_CONFIG_DIR = claude_dir("/work/pool")
   local rows = require("sepal.resume").items("/work/pool")
-  eq(vim.tbl_map(function(r) return { r.id, (r.text:gsub("^%S+  ", "")) } end, rows), {
+  eq(vim.tbl_map(function(r) return { r.id, r.text } end, rows), {
     { "bbb", "fix the flaky test │ fix the flaky test" },
     { "aaa", "ThreadPool shutdown │ Scope: drain the queue" },
     { "aaa", "ThreadPool shutdown │ add graceful shutdown to the pool" },
@@ -366,7 +366,8 @@ test("the picker narrows by fuzzy match and <CR> picks the selected row", functi
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "shtdwn" })
   vim.api.nvim_exec_autocmds("TextChangedI", { buffer = b })
   eq(#vim.api.nvim_buf_get_lines(b, 1, -1, false), 2, "not narrowed to the 2 shutdown rows")
-  local second = vim.api.nvim_buf_get_lines(b, 2, 3, false)[1]
+  local line = vim.api.nvim_buf_get_lines(b, 2, 3, false)[1] -- the second row on screen
+  local second = vim.iter(rows):find(function(r) return vim.endswith(line, r.msg) end)
   -- the picker lives in insert mode, which feedkeys can't drive headless (x leaves it, x! waits for keys)
   local function press(lhs)
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(b, "i")) do if m.lhs == lhs then return m.callback() end end
@@ -375,7 +376,7 @@ test("the picker narrows by fuzzy match and <CR> picks the selected row", functi
   press("<C-N>")
   press("<CR>")
   assert(vim.wait(1000, function() return picked ~= nil end, 10), "nothing picked")
-  eq(picked.text, second)
+  eq(picked, second)
   eq(vim.api.nvim_buf_is_valid(b), false, "picker still open")
 end)
 

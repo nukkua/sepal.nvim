@@ -25,9 +25,12 @@ local function ago(secs)
 end
 
 -- injected context, not something you typed
-local NOT_TYPED = { "^<system%-reminder>", "^<command%-", "^<local%-command", "^Caveat:" }
+-- (<system-reminder>, <task-notification>, <command-name>…: any message that opens with a tag; a paste's
+-- <pasted_content> wrapper is stripped before this)
+local NOT_TYPED = { "^<[%w_-]+[ >]", "^Caveat:" }
 
--- one row per message you typed, newest first: { id = session id, time, text = "2h  title │ message" }
+-- one row per message you typed, newest first: { id = session id, time, age = "2h", title, msg,
+-- text = "title │ message" (what a search matches) }
 function M.items(cwd)
   local rows, now = {}, os.time(os.date("!*t"))
   for name, kind in vim.fs.dir(dir(cwd)) do
@@ -58,7 +61,7 @@ function M.items(cwd)
         for _, m in ipairs(msgs) do
           local text = m.text:gsub("%s+", " ")
           if #text > 300 then text = text:sub(1, 300) end
-          rows[#rows + 1] = { id = id, time = m.time, text = ago(now - m.time) .. "  " .. title .. " │ " .. text }
+          rows[#rows + 1] = { id = id, time = m.time, age = ago(now - m.time), title = title, msg = text, text = title .. " │ " .. text }
         end
       end
     end
@@ -67,45 +70,65 @@ function M.items(cwd)
   return rows
 end
 
-vim.api.nvim_set_hl(0, "SepalPickMatch", { link = "Special", default = true })
-vim.api.nvim_set_hl(0, "SepalPickSelected", { link = "PmenuSel", default = true })
+for k, v in pairs({ SepalPickMatch = "Special", SepalPickSelected = "PmenuSel", SepalPickDim = "Comment", SepalPickPrompt = "Question" }) do
+  vim.api.nvim_set_hl(0, k, { link = v, default = true })
+end
 local NS = vim.api.nvim_create_namespace("sepal.pick")
+local AGE_W, TITLE_W = 4, 26 -- columns: "▸ " age  title  message
 
--- fuzzy picker in a float: you type on the first line, rows below narrow with matchfuzzypos().
--- <CR> picks, <C-n>/<C-p> (<Down>/<Up>) move, <Esc>/<C-c> closes. on_choice(row) only when one is picked.
--- ponytail: shows the best `height` rows, no scrolling past them; type more to narrow instead
+-- s cut to w cells (… when cut) and padded to w
+local function fit(s, w)
+  if vim.fn.strdisplaywidth(s) > w then s = vim.fn.strcharpart(s, 0, w - 1) .. "…" end
+  return s .. string.rep(" ", w - vim.fn.strdisplaywidth(s))
+end
+
+-- sepal's fuzzy picker in a float: you type after › on the first line, rows below narrow with
+-- matchfuzzypos() on "title │ message". <CR> picks, <C-n>/<C-p> (<Down>/<Up>) move and scroll,
+-- <Esc>/<C-c> closes. on_choice(row) only when one is picked.
 function M.pick(rows, prompt, on_choice)
-  local width = math.min(vim.o.columns - 4, 120)
-  local height = math.max(1, math.min(#rows, math.floor(vim.o.lines * 0.5)))
+  local width = math.min(vim.o.columns - 4, 140)
+  local height = math.max(1, math.min(#rows, math.floor(vim.o.lines * 0.6)))
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
   vim.b[buf].completion = false -- blink.cmp/nvim-cmp: no popup over the query
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
   local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor", row = math.floor((vim.o.lines - height - 3) / 2), col = math.floor((vim.o.columns - width) / 2),
-    width = width, height = height + 1, border = "rounded", title = " " .. prompt .. " ", style = "minimal",
+    relative = "editor", row = math.floor((vim.o.lines - height - 4) / 2), col = math.floor((vim.o.columns - width) / 2),
+    width = width, height = height + 2, border = "rounded", title = " " .. prompt .. " ", style = "minimal",
   })
-  local shown, sel = rows, 1
+  vim.wo[win].wrap = false
+  local shown, pos, sel, top = rows, {}, 1, 1
   local function render()
     if not vim.api.nvim_buf_is_valid(buf) then return end
-    local query = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
-    local pos = {}
-    if query == "" then shown = rows else
-      local m = vim.fn.matchfuzzypos(rows, query, { key = "text" })
-      shown, pos = m[1], m[2]
+    sel = math.max(1, math.min(sel, #shown))
+    if sel < top then top = sel elseif sel >= top + height then top = sel - height + 1 end
+    local lines, marks = {}, {}
+    for i = top, math.min(#shown, top + height - 1) do
+      local row = shown[i]
+      local age, title = fit(row.age, AGE_W), fit(row.title, TITLE_W)
+      lines[#lines + 1] = "  " .. age .. "  " .. title .. "  " .. row.msg
+      marks[#lines] = { i, #age, #title }
     end
-    sel = math.max(1, math.min(sel, math.min(#shown, height)))
-    local lines = {}
-    for i = 1, math.min(#shown, height) do lines[i] = shown[i].text end
     vim.api.nvim_buf_set_lines(buf, 1, -1, false, #lines > 0 and lines or { "  no match" })
     vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
-    for i = 1, #lines do
-      for _, c in ipairs(pos[i] or {}) do -- character index -> byte column
-        local col = vim.str_byteindex(lines[i], "utf-32", c)
-        vim.api.nvim_buf_set_extmark(buf, NS, i, col, { end_col = vim.str_byteindex(lines[i], "utf-32", c + 1), hl_group = "SepalPickMatch" })
+    vim.api.nvim_buf_set_extmark(buf, NS, 0, 0, { virt_text = { { "› ", "SepalPickPrompt" } }, virt_text_pos = "inline", right_gravity = false,
+      virt_lines = { { { string.rep("─", width), "FloatBorder" } } } })
+    for l, m in ipairs(marks) do
+      local line, i, agelen, titlelen = lines[l], m[1], m[2], m[3]
+      vim.api.nvim_buf_set_extmark(buf, NS, l, 2, { end_col = 2 + agelen + 2 + titlelen, hl_group = "SepalPickDim" })
+      -- a match in "title │ message" (character positions) -> the title or message column on screen
+      local tlen = vim.fn.strchars(shown[i].title)
+      for _, p in ipairs(pos[i] or {}) do
+        local c = p < tlen and (p < TITLE_W - 1 and 2 + AGE_W + 2 + p) or p >= tlen + 3 and 2 + AGE_W + 2 + TITLE_W + 2 + (p - tlen - 3)
+        local ok, s0 = pcall(vim.str_byteindex, line, "utf-32", c or -1)
+        local ok2, s1 = pcall(vim.str_byteindex, line, "utf-32", (c or -1) + 1)
+        if c and ok and ok2 then vim.api.nvim_buf_set_extmark(buf, NS, l, s0, { end_col = s1, hl_group = "SepalPickMatch" }) end
+      end
+      if i == sel then
+        vim.api.nvim_buf_set_extmark(buf, NS, l, 0, { line_hl_group = "SepalPickSelected", virt_text = { { "▸", "SepalPickPrompt" } }, virt_text_pos = "overlay" })
       end
     end
-    if #lines > 0 then vim.api.nvim_buf_set_extmark(buf, NS, sel, 0, { line_hl_group = "SepalPickSelected" }) end
+    vim.api.nvim_win_set_config(win, { footer = (" %d/%d "):format(#shown, #rows), footer_pos = "right" })
   end
   local function close()
     vim.cmd.stopinsert()
@@ -125,11 +148,26 @@ function M.pick(rows, prompt, on_choice)
   -- redrawing the rows changes the buffer too: only a new query starts over at the first row
   vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, { buffer = buf, callback = function()
     local q = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
-    if q ~= last then last, sel = q, 1; render() end
+    if q == last then return end
+    last, sel, top = q, 1, 1
+    if q == "" then shown, pos = rows, {} else
+      local m = vim.fn.matchfuzzypos(rows, q, { key = "text" })
+      shown, pos = m[1], m[2]
+    end
+    render()
   end })
   vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = close })
   render()
-  vim.cmd.startinsert()
+  -- after keys already typed: a mapping like `cnoremap <CR> <CR>zz` would type its zz into the query
+  vim.schedule(function() if vim.api.nvim_get_current_win() == win then vim.cmd.startinsert() end end)
+end
+
+-- a picker plugin's vim.ui.select (snacks, fzf-lua, telescope…) when there is one, else sepal's
+function M.choose(rows, prompt, on_choice)
+  local src = debug.getinfo(vim.ui.select, "S").source or "" -- the builtin is runtime/lua/vim/ui.lua
+  if src:match("^@?vim/") or src:match("/lua/vim/ui%.lua$") then return M.pick(rows, prompt, on_choice) end
+  vim.ui.select(rows, { prompt = prompt, format_item = function(r) return r.age .. "  " .. r.title .. " │ " .. r.msg end },
+    function(r) if r then on_choice(r) end end)
 end
 
 return M

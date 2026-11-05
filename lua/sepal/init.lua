@@ -150,7 +150,7 @@ function M.resume()
   local r = require("sepal.resume")
   local rows = r.items(vim.fn.getcwd())
   if #rows == 0 then return M.notify("no conversations in this directory yet") end
-  r.pick(rows, "resume a conversation", function(row) start(false, false, { "-r", row.id }) end)
+  r.choose(rows, "resume a conversation", function(row) start(false, false, { "-r", row.id }) end)
 end
 
 -- paste text into the agent and press Enter, without opening its split; starts it (hidden) if it isn't running.
@@ -246,7 +246,7 @@ function M.spec(range, lines)
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
-    vim.cmd.startinsert({ bang = true })
+    vim.schedule(function() vim.cmd.startinsert({ bang = true }) end) -- after keys already typed (see sepal.resume)
   end
   if C.spec_suggest then
     -- placeholder on an empty idea line: an extmark, so it's never sent or piped (and changedtick stays)

@@ -63,8 +63,10 @@ and errors always go to |vim.notify()|).
                   message you typed ("2h  title │ message"), newest first.
                   Type to fuzzy-filter, <C-n>/<C-p> move, <CR> resumes,
                   <Esc> closes. `claude -p` runs are left out. Highlights:
-                  SepalPickMatch, SepalPickSelected. Other agents: their own
-                  picker via `resume_pick`.
+                  SepalPickMatch, SepalPickSelected, SepalPickDim,
+                  SepalPickPrompt. A picker plugin's |vim.ui.select()|
+                  (snacks, fzf-lua, telescope…) is used instead when there
+                  is one. Other agents: their own picker via `resume_pick`.
 :[range]Sepal spec
                   Write a spec for the agent in a buffer above the code:
                   Scope, Goal, Constraints and Files. In it:

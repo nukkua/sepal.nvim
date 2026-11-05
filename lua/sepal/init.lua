@@ -21,6 +21,8 @@ local C = {
   width = 40,         -- split width, percent of the editor (1-99)
   focus = true,       -- move to the agent when it opens
   spec_suggest = nil, -- argv: rough spec on stdin -> finished spec on stdout; <c-c><c-s> in a spec runs it
+  resume_pick = nil,  -- args for the agent's own conversation picker (codex: { "resume" }); :Sepal resume
+                      -- uses them for agents other than Claude Code, whose conversations sepal searches itself
 }
 function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}) end
 function M.config() return C end
@@ -66,15 +68,16 @@ local function split(buf)
 end
 
 -- start the agent in a new terminal buffer, in place of the old one (which is killed).
--- hidden: start it in a split sized like the agent's and hide it, so the pty gets the right width
-local function start(resume, hidden)
+-- hidden: start it in a split sized like the agent's and hide it, so the pty gets the right width.
+-- args: appended to cmd instead of resume (e.g. { "-r", id })
+local function start(resume, hidden, args)
   local old, buf = S.buf, vim.api.nvim_create_buf(false, true)
   S.buf = buf
   local win = old and vim.api.nvim_buf_is_valid(old) and vim.fn.bufwinid(old) or -1
   if win ~= -1 then vim.api.nvim_win_set_buf(win, buf) else win = split(buf) end
   if old and vim.api.nvim_buf_is_valid(old) then vim.api.nvim_buf_delete(old, { force = true }) end
 
-  local argv = vim.list_extend(vim.list_extend({}, C.cmd), resume and C.resume or {})
+  local argv = vim.list_extend(vim.list_extend({}, C.cmd), resume and C.resume or args or {})
   local t = vim.uv.now()
   local ok, job = pcall(vim.api.nvim_win_call, win, function()
     return vim.fn.jobstart(argv, { term = true, on_exit = vim.schedule_wrap(function(_, code)
@@ -136,6 +139,19 @@ function M.toggle()
 end
 
 function M.new() start(false) end
+
+-- :Sepal resume: pick a conversation of this directory by what you wrote in it and continue it.
+-- Claude Code: sepal's fuzzy picker over its saved chats; other agents: their own picker (resume_pick)
+function M.resume()
+  if vim.fs.basename(C.cmd[1]) ~= "claude" then
+    if not C.resume_pick then return M.notify("set resume_pick to the agent's resume arguments, e.g. { \"resume\" } for codex", vim.log.levels.WARN) end
+    return start(false, false, C.resume_pick)
+  end
+  local r = require("sepal.resume")
+  local rows = r.items(vim.fn.getcwd())
+  if #rows == 0 then return M.notify("no conversations in this directory yet") end
+  r.pick(rows, "resume a conversation", function(row) start(false, false, { "-r", row.id }) end)
+end
 
 -- paste text into the agent and press Enter, without opening its split; starts it (hidden) if it isn't running.
 -- failed(): the text never reached the agent
@@ -305,6 +321,6 @@ function M.spec(range, lines)
   end, vim.tbl_extend("force", o, { desc = "Add a file to the spec" }))
 end
 
-M._t = { state = function() return S end }
+M._t = { state = function() return S end, start = function(...) start(...) end }
 
 return M

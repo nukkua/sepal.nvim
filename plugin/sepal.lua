@@ -2,8 +2,8 @@ if vim.g.loaded_sepal then return end
 vim.g.loaded_sepal = true
 
 -- :Sepal toggles the agent split, :Sepal new starts a fresh chat, :Sepal spec writes a spec for it
--- (:'<,'>Sepal spec puts those lines in it)
-local SUB = { toggle = "toggle", new = "new", spec = "spec" }
+-- (:'<,'>Sepal spec puts those lines in it), :Sepal resume picks a conversation to continue
+local SUB = { toggle = "toggle", new = "new", spec = "spec", resume = "resume" }
 vim.api.nvim_create_user_command("Sepal", function(o)
   local f = SUB[o.args == "" and "toggle" or o.args]
   if not f then return require("sepal").notify("unknown subcommand " .. o.args, vim.log.levels.ERROR) end

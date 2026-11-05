@@ -39,6 +39,9 @@ and errors always go to |vim.notify()|).
 `side`       "right" or "left".
 `width`      split width, percent of the editor (1-99).
 `focus`      move to the agent when it opens.
+`resume_pick` arguments for the agent's own conversation picker, used by
+             :Sepal resume for agents other than Claude Code, e.g.
+             { "resume" } for codex.
                                                        *sepal-spec_suggest*
 `spec_suggest` argv that gets the spec buffer on stdin (your idea and
              Files:) and prints the finished spec. <c-c><c-s> in a spec
@@ -54,6 +57,14 @@ and errors always go to |vim.notify()|).
                   last chat here, or starts a fresh one if there is none
                   (the resumed agent exits with an error within 3 seconds).
 :Sepal new        Kill the agent and start a fresh chat.
+                                                              *:Sepal-resume*
+:Sepal resume     Find a Claude Code conversation of this directory by what
+                  you wrote in it and restart the agent on it. One row per
+                  message you typed ("2h  title │ message"), newest first.
+                  Type to fuzzy-filter, <C-n>/<C-p> move, <CR> resumes,
+                  <Esc> closes. `claude -p` runs are left out. Highlights:
+                  SepalPickMatch, SepalPickSelected. Other agents: their own
+                  picker via `resume_pick`.
 :[range]Sepal spec
                   Write a spec for the agent in a buffer above the code:
                   Scope, Goal, Constraints and Files. In it:
@@ -72,7 +83,7 @@ and errors always go to |vim.notify()|).
                   code block above Files: and the file is listed; an open
                   draft gets them added.
 
-Lua: `require("sepal").toggle()`, `.new()`, `.spec()`. There are no default keys.
+Lua: `require("sepal").toggle()`, `.new()`, `.spec()`, `.resume()`. There are no default keys.
 Example:
 >lua
   vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>")

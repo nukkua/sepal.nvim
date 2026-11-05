@@ -328,5 +328,62 @@ test("code in a selection is sent as it is, even a line that is just -", functio
   vim.cmd("bwipeout! tests/pool.lua")
 end)
 
+-- a Claude Code config dir with two chats of `cwd` and a `claude -p` run
+local function claude_dir(cwd)
+  local root = vim.fn.tempname()
+  local d = vim.fs.joinpath(root, "projects", (cwd:gsub("[^%w]", "-")))
+  vim.fn.mkdir(d, "p")
+  local function rec(t) return vim.json.encode(t) end
+  local function user(text, ts, extra)
+    return rec(vim.tbl_extend("force", { type = "user", timestamp = ts, entrypoint = "cli", message = { role = "user", content = text } }, extra or {}))
+  end
+  vim.fn.writefile({
+    user("<system-reminder>\nnot typed", "2026-11-01T10:00:00Z", { isMeta = true }),
+    user("add graceful shutdown\nto the pool", "2026-11-01T10:00:01Z"),
+    rec({ type = "ai-title", aiTitle = "ThreadPool shutdown", sessionId = "aaa" }),
+    user("<pasted_content id=\"x\">\nScope: drain the queue\n</pasted_content id=\"x\">", "2026-11-01T11:00:00Z"),
+  }, vim.fs.joinpath(d, "aaa.jsonl"))
+  vim.fn.writefile({ user("fix the flaky test", "2026-11-02T09:00:00Z") }, vim.fs.joinpath(d, "bbb.jsonl"))
+  vim.fn.writefile({ user("write a commit message", "2026-11-03T09:00:00Z", { entrypoint = "sdk-cli" }) }, vim.fs.joinpath(d, "ccc.jsonl"))
+  return root
+end
+
+test("resume lists what you typed per conversation, newest first, without claude -p runs", function()
+  vim.env.CLAUDE_CONFIG_DIR = claude_dir("/work/pool")
+  local rows = require("sepal.resume").items("/work/pool")
+  eq(vim.tbl_map(function(r) return { r.id, (r.text:gsub("^%S+  ", "")) } end, rows), {
+    { "bbb", "fix the flaky test │ fix the flaky test" },
+    { "aaa", "ThreadPool shutdown │ Scope: drain the queue" },
+    { "aaa", "ThreadPool shutdown │ add graceful shutdown to the pool" },
+  })
+end)
+
+test("the picker narrows by fuzzy match and <CR> picks the selected row", function()
+  local rows = require("sepal.resume").items("/work/pool")
+  local picked
+  require("sepal.resume").pick(rows, "resume", function(r) picked = r end)
+  local b = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "shtdwn" })
+  vim.api.nvim_exec_autocmds("TextChangedI", { buffer = b })
+  eq(#vim.api.nvim_buf_get_lines(b, 1, -1, false), 2, "not narrowed to the 2 shutdown rows")
+  local second = vim.api.nvim_buf_get_lines(b, 2, 3, false)[1]
+  -- the picker lives in insert mode, which feedkeys can't drive headless (x leaves it, x! waits for keys)
+  local function press(lhs)
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(b, "i")) do if m.lhs == lhs then return m.callback() end end
+    error("no insert map " .. lhs)
+  end
+  press("<C-N>")
+  press("<CR>")
+  assert(vim.wait(1000, function() return picked ~= nil end, 10), "nothing picked")
+  eq(picked.text, second)
+  eq(vim.api.nvim_buf_is_valid(b), false, "picker still open")
+end)
+
+test("resuming restarts the agent on that conversation", function()
+  sepal._t.start(false, false, { "-r", "aaa" })
+  screen("agent:[-r aaa]")
+  vim.env.CLAUDE_CONFIG_DIR = nil
+end)
+
 print(("%d/%d passed"):format(n - fails, n))
 os.exit(fails == 0 and 0 or 1)

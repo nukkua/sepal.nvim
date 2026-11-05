@@ -34,15 +34,17 @@ require("sepal").setup({
   width = 40,          -- split width, percent of the editor (1-99)
   focus = true,        -- move to the agent when it opens
   spec_suggest = nil,  -- argv: rough spec on stdin -> finished spec on stdout (see Specs)
+  resume_pick = nil,   -- args for a non-Claude agent's own conversation picker (see Resume)
 })
 
 vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>", { desc = "Agent: toggle" })
 vim.keymap.set("n", "<leader>an", "<cmd>Sepal new<cr>", { desc = "Agent: new chat" })
 vim.keymap.set("n", "<leader>ai", "<cmd>Sepal spec<cr>", { desc = "Agent: implement a spec" })
 vim.keymap.set("x", "<leader>ai", ":Sepal spec<cr>", { desc = "Agent: implement a spec with the selection" })
+vim.keymap.set("n", "<leader>al", "<cmd>Sepal resume<cr>", { desc = "Agent: find a conversation and resume it" })
 ```
 
-The commands are also available as functions: `require("sepal").toggle()`, `.new()`, `.spec()`.
+The commands are also available as functions: `require("sepal").toggle()`, `.new()`, `.spec()`, `.resume()`.
 
 ## Usage
 
@@ -51,6 +53,27 @@ The commands are also available as functions: `require("sepal").toggle()`, `.new
   starts a fresh chat instead. Hiding the split keeps the agent running.
 - `:Sepal new` kills the agent and starts a fresh chat.
 - If the agent exits, its split closes and the next `:Sepal` starts it again.
+
+## Resume
+
+`:Sepal resume` finds a conversation of this directory by what you wrote in it. Each row is one
+message you typed, with its conversation's title and age, newest first:
+
+```
+2h  ThreadPool shutdown │ add graceful shutdown to the pool
+1d  Flaky test │ fix the flaky test in tests/pool.lua
+```
+
+Type to fuzzy-filter by title or message, `<C-n>`/`<C-p>` to move, `<CR>` to restart the agent on
+that conversation, `<Esc>` to close. `claude -p` runs are left out. Matches are highlighted with
+`SepalPickMatch`, the selected row with `SepalPickSelected`.
+
+This reads Claude Code's saved conversations (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR`). For
+other agents, set `resume_pick` to their resume arguments and `:Sepal resume` opens the agent's own
+picker, e.g. `resume_pick = { "resume" }` for codex.
+
+Tip: give `claude -p` tools like petal's `commit_suggest` `--no-session-persistence`, or each run
+is saved as a conversation that `claude -c` may continue.
 
 ## Specs
 

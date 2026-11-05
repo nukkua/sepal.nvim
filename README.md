@@ -176,6 +176,8 @@ require("sepal").setup({ cmd = { "aider" }, resume = { "--restore-chat-history" 
 nvim -l tests/run.lua
 ```
 
+Designed and developed with AI-assisted implementation. I defined the requirements, workflows, and desired behavior.
+
 ## License
 
 [MIT](LICENSE)

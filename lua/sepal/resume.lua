@@ -70,7 +70,10 @@ function M.items(cwd)
   return rows
 end
 
-for k, v in pairs({ SepalPickMatch = "Special", SepalPickSelected = "PmenuSel", SepalPickDim = "Comment", SepalPickPrompt = "Question" }) do
+-- all of the picker's colors, for a colorscheme to set: the header ("continue with" + the selected
+-- conversation's title), the prompt and ▸, each row's age and title, matched letters, the selected row
+for k, v in pairs({ SepalPickHeader = "FloatTitle", SepalPickPrompt = "Question", SepalPickAge = "Comment",
+  SepalPickTitle = "Comment", SepalPickMatch = "Special", SepalPickSelected = "PmenuSel" }) do
   vim.api.nvim_set_hl(0, k, { link = v, default = true })
 end
 local NS = vim.api.nvim_create_namespace("sepal.pick")
@@ -95,6 +98,7 @@ function M.pick(rows, prompt, on_choice)
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor", row = math.floor((vim.o.lines - height - 4) / 2), col = math.floor((vim.o.columns - width) / 2),
     width = width, height = height + 2, border = "rounded", title = " " .. prompt .. " ", style = "minimal",
+    title_pos = "left",
   })
   vim.wo[win].wrap = false
   local shown, pos, sel, top = rows, {}, 1, 1
@@ -115,7 +119,8 @@ function M.pick(rows, prompt, on_choice)
       virt_lines = { { { string.rep("─", width), "FloatBorder" } } } })
     for l, m in ipairs(marks) do
       local line, i, agelen, titlelen = lines[l], m[1], m[2], m[3]
-      vim.api.nvim_buf_set_extmark(buf, NS, l, 2, { end_col = 2 + agelen + 2 + titlelen, hl_group = "SepalPickDim" })
+      vim.api.nvim_buf_set_extmark(buf, NS, l, 2, { end_col = 2 + agelen, hl_group = "SepalPickAge" })
+      vim.api.nvim_buf_set_extmark(buf, NS, l, 2 + agelen + 2, { end_col = 2 + agelen + 2 + titlelen, hl_group = "SepalPickTitle" })
       -- a match in "title │ message" (character positions) -> the title or message column on screen
       local tlen = vim.fn.strchars(shown[i].title)
       for _, p in ipairs(pos[i] or {}) do
@@ -128,7 +133,10 @@ function M.pick(rows, prompt, on_choice)
         vim.api.nvim_buf_set_extmark(buf, NS, l, 0, { line_hl_group = "SepalPickSelected", virt_text = { { "▸", "SepalPickPrompt" } }, virt_text_pos = "overlay" })
       end
     end
-    vim.api.nvim_win_set_config(win, { footer = (" %d/%d "):format(#shown, #rows), footer_pos = "right" })
+    -- header: "<prompt> <selected row's title>", e.g. "continue with ThreadPool shutdown"
+    local header = { { " " .. prompt .. " ", "SepalPickHeader" } }
+    if shown[sel] then header[2] = { shown[sel].title .. " ", "SepalPickTitle" } end
+    vim.api.nvim_win_set_config(win, { title = header, title_pos = "left", footer = (" %d/%d "):format(#shown, #rows), footer_pos = "right" })
   end
   local function close()
     vim.cmd.stopinsert()

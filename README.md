@@ -65,10 +65,13 @@ message you typed, with its conversation's title and age, newest first:
 ```
 
 Type to fuzzy-filter by title or message, `<C-n>`/`<C-p>` to move, `<CR>` to restart the agent on
-that conversation, `<Esc>` to close. `claude -p` runs are left out. Highlights: `SepalPickMatch`
-(matched letters), `SepalPickSelected` (selected row), `SepalPickDim` (age and title),
-`SepalPickPrompt` (`›` and `▸`). If a picker plugin replaces `vim.ui.select` (snacks, fzf-lua,
-telescope, …), sepal uses it instead of its own picker.
+that conversation, `<Esc>` to close. `claude -p` runs are left out.
+
+The header reads "continue with <title of the selected conversation>". Its colors, all yours to set
+in a colorscheme: `SepalPickHeader` ("continue with"), `SepalPickTitle` (conversation titles, also
+in the header), `SepalPickAge`, `SepalPickPrompt` (`›` and `▸`), `SepalPickMatch` (matched
+letters), `SepalPickSelected` (selected row). If a picker plugin replaces `vim.ui.select`
+(snacks, fzf-lua, telescope, …), sepal uses it instead of its own picker.
 
 This reads Claude Code's saved conversations (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR`). For
 other agents, set `resume_pick` to their resume arguments and `:Sepal resume` opens the agent's own

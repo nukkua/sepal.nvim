@@ -150,7 +150,7 @@ function M.resume()
   local r = require("sepal.resume")
   local rows = r.items(vim.fn.getcwd())
   if #rows == 0 then return M.notify("no conversations in this directory yet") end
-  r.choose(rows, "resume a conversation", function(row) start(false, false, { "-r", row.id }) end)
+  r.choose(rows, "continue with", function(row) start(false, false, { "-r", row.id }) end)
 end
 
 -- paste text into the agent and press Enter, without opening its split; starts it (hidden) if it isn't running.

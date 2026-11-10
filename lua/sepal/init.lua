@@ -153,6 +153,12 @@ local function add_selection(buf, block, path)
   add_file(buf, path)
 end
 
+-- the spec's keys, shown when it opens (like petal's commit buffer); one notification, replaced each time
+local function keys()
+  M.notify("spec: <c-c><c-c> sends it" .. (C.spec_suggest and ", <c-c><c-s> writes it for you" or "")
+    .. ", <c-c><c-f> adds a file, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-spec-keys" })
+end
+
 -- :Sepal spec: write a spec in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
 -- <c-c><c-s> has spec_suggest turn what's there (an idea + files) into the spec.
@@ -167,6 +173,7 @@ function M.spec(range, lines)
       local w = vim.fn.bufwinid(b)
       if w == -1 then w = vim.api.nvim_open_win(b, true, { split = "above", win = 0, height = 12 }) end
       if block then add_selection(b, block, path) end -- a draft is open: the selection joins it
+      keys()
       return vim.api.nvim_set_current_win(w)
     end
   end
@@ -178,6 +185,7 @@ function M.spec(range, lines)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
+  keys()
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.schedule(function() vim.cmd.startinsert({ bang = true }) end) -- after keys already typed (see sepal.resume)

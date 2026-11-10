@@ -154,6 +154,8 @@ require("sepal").setup({
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-k>` | discard the spec                                                       |
 
+When a spec opens, a notification lists these keys, the way petal does for the commit buffer.
+
 `:'<,'>Sepal spec` puts the selected lines in the spec as a `Selection: path:10-20` code block and
 lists the file. With a draft open, the selection is added to it. Closing the window keeps the
 draft, and `:Sepal spec` brings it back.

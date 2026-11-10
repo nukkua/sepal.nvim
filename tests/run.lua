@@ -65,7 +65,9 @@ end
 -- notifications while fn runs: { msg, level }
 local function notified(fn)
   local got, notify = {}, vim.notify
-  vim.notify = function(msg, lvl) got[#got + 1] = { msg, lvl or vim.log.levels.INFO } end
+  vim.notify = function(msg, lvl)
+    if not msg:match("^spec: <c%-c><c%-c> sends it") then got[#got + 1] = { msg, lvl or vim.log.levels.INFO } end -- the keys hint
+  end
   local ok, err = pcall(fn)
   vim.notify = notify
   if not ok then error(err, 0) end
@@ -387,6 +389,19 @@ test("notify: the builtin vim.notify gets a colored echo", function()
   vim.cmd.messages("clear")
   sepal.notify("the agent is the only window", vim.log.levels.WARN)
   eq(vim.trim(vim.fn.execute("messages")), "▲ sepal the agent is the only window")
+end)
+
+test("a spec shows its keys when it opens", function()
+  local got, notify = {}, vim.notify
+  vim.notify = function(msg) got[#got + 1] = msg end
+  sepal.spec()
+  sepal.config().spec_suggest = suggest
+  sepal.spec() -- the draft again
+  sepal.config().spec_suggest = nil
+  vim.notify = notify
+  vim.api.nvim_buf_delete(spec_buf(), { force = true })
+  eq(got, { "spec: <c-c><c-c> sends it, <c-c><c-f> adds a file, <c-c><c-k> discards",
+    "spec: <c-c><c-c> sends it, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-k> discards" })
 end)
 
 test("spec opens the template above, <c-c><c-f> adds files with fff", function()

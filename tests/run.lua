@@ -3,32 +3,35 @@ vim.opt.rtp:prepend(vim.fn.getcwd())
 vim.cmd.runtime("plugin/sepal.lua")
 
 local sepal = require("sepal")
-local review = require("sepal.review")
-local S = sepal._t.state()
+local agent = require("sepal.agent")
+local inbox = require("sepal.inbox")
 
--- everything runs in a fresh git repo, with an empty Claude Code config dir
+-- everything runs in a fresh git repo; worktrees and the inbox go to a temp dir too
 local T = vim.fn.tempname()
 local work = vim.fs.joinpath(T, "work")
 vim.fn.mkdir(work, "p")
 vim.fn.chdir(work)
-vim.system({ "git", "init", "-q" }):wait()
-vim.env.CLAUDE_CONFIG_DIR = vim.fs.joinpath(T, "claude")
+local function sh(cmd) return vim.system({ "sh", "-c", cmd }, { cwd = work, text = true }):wait() end
+sh("git init -q && printf 'one\\ntwo\\nthree\\n' > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm init")
 vim.env.SEPAL_T = T
 
--- a headless agent: logs its arguments and stdin, runs $SEPAL_EDIT (its "edits"), prints stream-json.
+-- a headless agent: logs where it runs, its arguments and stdin, runs $SEPAL_EDIT ($SEPAL_FIX when it
+-- continues a chat), prints stream-json ending in a reply with assumptions.
 -- $SEPAL_FAIL=start: dies before starting; =result: ends with an error; $SEPAL_DENY: permission_denials
-local agent = [[
+local fake = [[
 prompt=$(cat)
+pwd >> "$SEPAL_T/cwd"
 printf '%s\n' "$*" >> "$SEPAL_T/args"
 printf '%s\n--\n' "$prompt" >> "$SEPAL_T/prompts"
-if [ "$SEPAL_FAIL" = start ]; then echo "No conversation found with session ID: x" >&2; exit 1; fi
+case "$*" in *--resume*) resumed=1;; esac
+if [ "$SEPAL_FAIL" = start ]; then echo "boom" >&2; exit 1; fi
 printf '{"type":"system","subtype":"init","session_id":"s1"}\n'
-printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"a.txt"}}]}}\n'
+printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/a.txt"}}]}}\n' "$PWD"
 if [ -n "$SEPAL_SLEEP" ]; then sleep "$SEPAL_SLEEP"; fi
-if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
+if [ -n "$resumed" ] && [ -n "$SEPAL_FIX" ]; then sh -c "$SEPAL_FIX"; elif [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
 if [ "$SEPAL_FAIL" = result ]; then printf '{"type":"result","is_error":true,"result":"API error: overloaded","session_id":"s1"}\n'; exit 1; fi
-printf '{"type":"result","subtype":"success","is_error":false,"result":"\\nShutdown drains the queue now.\\nDetails.","session_id":"s1","permission_denials":%s}' "${SEPAL_DENY:-[]}"]]
-sepal.setup({ cmd = { "sh", "-c", agent, "sh" } })
+printf '{"type":"result","subtype":"success","is_error":false,"result":"Did it.\\n\\nAssumptions:\\n- kept the old API\\n- no new deps","session_id":"s1","permission_denials":%s}' "${SEPAL_DENY:-[]}"]]
+sepal.setup({ cmd = { "sh", "-c", fake, "sh" }, worktrees = vim.fs.joinpath(T, "state") })
 
 local fails, n = 0, 0
 local function test(name, fn)
@@ -51,10 +54,13 @@ local function read(p)
 end
 local function args() return vim.split(vim.trim(read(T .. "/args") or ""), "\n") end
 local function prompts() return read(T .. "/prompts") or "" end
-local function reset() os.remove(T .. "/args"); os.remove(T .. "/prompts") end
+local function reset()
+  for _, f in ipairs({ "args", "prompts", "cwd" }) do os.remove(T .. "/" .. f) end
+  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_DENY" }) do vim.env[k] = nil end
+end
 local function idle()
-  assert(vim.wait(8000, function() return S.run == nil and #S.queue == 0 end, 10), "the spec never finished")
-  vim.wait(50)
+  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil end, 10), "the spec never finished")
+  vim.wait(30)
 end
 -- notifications while fn runs: { msg, level }
 local function notified(fn)
@@ -75,255 +81,220 @@ local function send(lines)
   vim.api.nvim_buf_set_lines(spec_buf(), 0, -1, false, lines)
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
 end
-local function write(p, lines) vim.fn.writefile(lines, vim.fs.joinpath(work, p)) end
-local function path(p) return vim.fs.joinpath(work, p) end
-
-test("a spec runs the agent in the background with the spec on stdin, without empty bullets", function()
-  reset()
-  local got = notified(function()
-    send({ "Scope: ThreadPool::shutdown()", "Goal: ", "", "Constraints:", "- ", "", "Files:", "- @src/pool.cpp" })
-    eq(spec_buf(), nil, "the spec buffer stayed")
-    eq(#vim.api.nvim_tabpage_list_wins(0), 1, "a window opened")
-    idle()
-  end)
-  eq(args(), { "-p --output-format stream-json --verbose --permission-mode acceptEdits" })
-  eq(prompts(), "Scope: ThreadPool::shutdown()\nGoal: \n\nConstraints:\n\nFiles:\n- @src/pool.cpp\n--\n")
-  eq(msgs(got), { "done: Shutdown drains the queue now." })
-end)
-
-test("the next spec continues the chat the first one went to", function()
-  reset()
-  notified(function() send({ "Scope: more" }); idle() end)
-  eq(args(), { "-p --output-format stream-json --verbose --permission-mode acceptEdits --resume s1" })
-end)
-
-test(":Sepal new: the next spec starts a new chat, and the one after continues it", function()
-  reset()
-  notified(function()
-    vim.cmd("Sepal new")
-    send({ "Scope: fresh" }); idle()
-    send({ "Scope: again" }); idle()
-  end)
-  eq(args(), { "-p --output-format stream-json --verbose --permission-mode acceptEdits",
-    "-p --output-format stream-json --verbose --permission-mode acceptEdits --resume s1" })
-end)
-
--- a Claude Code config dir with two chats of `cwd` and a `claude -p` run, ccc written last
-local function claude_dir(cwd)
-  local root = vim.fn.tempname()
-  local d = vim.fs.joinpath(root, "projects", (cwd:gsub("[^%w]", "-")))
-  vim.fn.mkdir(d, "p")
-  local function rec(t) return vim.json.encode(t) end
-  local function user(text, ts, extra)
-    return rec(vim.tbl_extend("force", { type = "user", timestamp = ts, entrypoint = "cli", message = { role = "user", content = text } }, extra or {}))
-  end
-  vim.fn.writefile({
-    user("<system-reminder>\nnot typed", "2026-11-01T10:00:00Z", { isMeta = true }),
-    user("add graceful shutdown\nto the pool", "2026-11-01T10:00:01Z"),
-    rec({ type = "ai-title", aiTitle = "ThreadPool shutdown", sessionId = "aaa" }),
-    user("<pasted_content id=\"x\">\nScope: drain the queue\n</pasted_content id=\"x\">", "2026-11-01T11:00:00Z"),
-  }, vim.fs.joinpath(d, "aaa.jsonl"))
-  vim.fn.writefile({ user("fix the flaky test", "2026-11-02T09:00:00Z") }, vim.fs.joinpath(d, "bbb.jsonl"))
-  vim.fn.writefile({ user("write a commit message", "2026-11-03T09:00:00Z", { entrypoint = "sdk-cli" }) }, vim.fs.joinpath(d, "ccc.jsonl"))
-  for i, id in ipairs({ "aaa", "bbb", "ccc" }) do vim.uv.fs_utime(vim.fs.joinpath(d, id .. ".jsonl"), 1000 + i, 1000 + i) end
-  return root
+-- send a spec and wait for it; the notifications it made
+local function run(lines) return msgs(notified(function() send(lines); idle() end)) end
+local function file(p) return read(vim.fs.joinpath(work, p)) end
+local function put(p, s) local f = assert(io.open(vim.fs.joinpath(work, p), "w")); f:write(s); f:close() end
+local function newest() return inbox.list(work)[1] end
+local function clean() -- back to the first commit, nothing in the inbox
+  sh("git checkout -q -- . && git clean -qfd")
+  for _, e in ipairs(vim.list_slice(inbox.list(work), 1)) do agent.drop(e) end
 end
 
-test("the first spec continues this directory's last chat; with continue = false a new one", function()
-  local cfg = vim.env.CLAUDE_CONFIG_DIR
-  vim.env.CLAUDE_CONFIG_DIR = claude_dir(vim.fn.getcwd())
+test("a spec runs in a worktree and lands as unstaged changes, with what the agent assumed", function()
   reset()
-  S.session = nil
-  notified(function() send({ "Scope: x" }); idle() end)
-  S.session = nil
-  sepal.setup({ continue = false })
-  notified(function() send({ "Scope: y" }); idle() end)
-  sepal.setup({ continue = true })
-  vim.env.CLAUDE_CONFIG_DIR = cfg
-  eq(vim.tbl_map(function(a) return a:match("%-%-resume (%S+)") or "new" end, args()), { "ccc", "new" })
+  vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\n' > a.txt; printf 'new\n' > b.txt]]
+  local got = run({ "Scope: a.txt", "Goal: shout two", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.txt" })
+  eq(got, { "working on it: shout two", "landed: shout two · 2 files +2 −1\n· kept the old API\n· no new deps" })
+  eq(file("a.txt"), "one\nTWO\nthree\n")
+  eq(file("b.txt"), "new\n")
+  eq(sh("git diff --cached --name-only").stdout, "", "something was staged")
+  local cwd = vim.trim(read(T .. "/cwd"))
+  assert(cwd ~= work and vim.startswith(cwd, vim.fs.joinpath(T, "state")), "the agent ran in " .. cwd)
+  eq(vim.uv.fs_stat(cwd), nil, "the worktree was left behind")
+  eq(args(), { "-p --output-format stream-json --verbose --permission-mode acceptEdits" })
+  local p = prompts()
+  assert(p:find("Scope: a.txt\nGoal: shout two\n\nConstraints:\n\n\nFiles:\n- @a.txt\n\n---\n", 1, true), p) -- no empty bullet or Done when:
+  assert(p:find("Assumptions:", 1, true), "no assumptions asked for")
+  local e = newest()
+  eq({ e.status, e.session, e.assumptions }, { "landed", "s1", { "kept the old API", "no new deps" } })
 end)
 
-test("a spec sent while one runs waits, then runs in the same chat", function()
-  reset()
-  vim.env.SEPAL_SLEEP = "0.4"
-  local got = notified(function()
-    send({ "Scope: first" })
-    send({ "Scope: second" })
+test("your edits since the spec started are kept; u takes the spec back out", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'one\ntwo\nTHREE\n' > a.txt]]
+  notified(function()
+    send({ "Goal: shout three" })
+    vim.wait(200)
+    put("a.txt", "ONE\ntwo\nthree\n") -- you, meanwhile
     idle()
   end)
-  vim.env.SEPAL_SLEEP = nil
-  eq(prompts(), "Scope: first\n--\nScope: second\n--\n")
-  eq(msgs(got), { "queued after the running spec (1 waiting)", "done: Shutdown drains the queue now.", "done: Shutdown drains the queue now." })
-  eq(vim.endswith(args()[2], "--resume s1"), true)
+  eq(file("a.txt"), "ONE\ntwo\nTHREE\n")
+  eq(msgs(notified(function() vim.cmd("Sepal undo") end)), { "took back: shout three" })
+  eq(file("a.txt"), "ONE\ntwo\nthree\n")
+  eq(newest().status, "undone")
 end)
 
-test(":Sepal stop stops the spec and brings the queued ones back", function()
-  reset()
-  vim.env.SEPAL_SLEEP = "3"
+test("sepal runs the check itself; when it fails the agent gets the output and tries again", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT, vim.env.SEPAL_FIX = [[echo broken > a.txt]], [[echo fixed > a.txt]]
+  local got = run({ "Goal: fix it", "Done when: grep -q fixed a.txt" })
+  eq(got[#got], "landed: fix it · 1 file +1 −3 · grep -q fixed a.txt ✓\n· kept the old API\n· no new deps")
+  local a = args()
+  eq(a[1], "-p --output-format stream-json --verbose --permission-mode acceptEdits --allowedTools Bash(grep -q fixed a.txt)")
+  eq(vim.endswith(a[2], "--resume s1"), true, a[2])
+  assert(prompts():find("`grep -q fixed a.txt` failed (exit 1)", 1, true), "the agent never got the failure")
+  eq(file("a.txt"), "fixed\n")
+end)
+
+test("a spec whose check keeps failing doesn't land", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo broken > a.txt]]
+  local got = notified(function() send({ "Goal: never", "Done when: echo nope; exit 1" }); idle() end)
+  eq(got[#got], { "✗ never: `echo nope; exit 1` still fails after 2 tries · :Sepal inbox", vim.log.levels.WARN })
+  eq(file("a.txt"), "one\ntwo\nthree\n")
+  local e = newest()
+  eq({ e.status, e.checked, vim.trim(e.check_out) }, { "failed", false, "nope" })
+  eq(#args(), 2)
+end)
+
+test("check: the default for specs without Done when:", function()
+  clean(); reset()
+  sepal.setup({ check = "true" })
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  local got = run({ "Goal: default check" })
+  sepal.config().check = nil
+  eq(got[1], "working on it: default check · done when `true` passes")
+  eq(newest().checked, true)
+end)
+
+test("a spec that overlaps your edits waits for you; L lands it with conflict markers", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'one\nAGENT\nthree\n' > a.txt]]
   local got = notified(function()
-    send({ "Scope: long" })
-    send({ "Scope: waiting" })
+    send({ "Goal: overlap" })
+    vim.wait(200)
+    put("a.txt", "one\nMINE\nthree\n")
+    idle()
+  end)
+  eq(got[#got][2], vim.log.levels.WARN)
+  assert(got[#got][1]:find("it overlaps your edits in a.txt", 1, true), got[#got][1])
+  eq(file("a.txt"), "one\nMINE\nthree\n")
+  eq(newest().status, "needs")
+  notified(function() vim.cmd("Sepal land") end)
+  assert(file("a.txt"):find("<<<<<<< yours\nMINE\n=======\nAGENT\n>>>>>>> sepal", 1, true), file("a.txt"))
+  eq(newest().conflicts, { "a.txt" })
+end)
+
+test("a file with unsaved changes in a buffer isn't landed on", function()
+  clean(); reset()
+  vim.cmd.edit("a.txt")
+  vim.api.nvim_buf_set_lines(0, 0, 1, false, { "unsaved" })
+  vim.env.SEPAL_EDIT = [[echo agent > a.txt]]
+  local got = run({ "Goal: unsaved" })
+  assert(got[#got]:find("unsaved changes in a.txt", 1, true), got[#got])
+  eq(file("a.txt"), "one\ntwo\nthree\n")
+  vim.cmd("silent edit!")
+  notified(function() vim.cmd("Sepal land") end)
+  eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "agent" }, "the buffer wasn't reloaded")
+  vim.cmd("bwipeout!")
+end)
+
+test("land = manual: a spec waits in the inbox until :Sepal land", function()
+  clean(); reset()
+  sepal.setup({ land = "manual" })
+  vim.env.SEPAL_EDIT = [[echo manual > a.txt]]
+  local got = run({ "Goal: by hand" })
+  sepal.setup({ land = "auto" })
+  eq(got[#got], "● ready to land: by hand · 1 file +1 −3 · :Sepal inbox\n· kept the old API\n· no new deps")
+  eq(file("a.txt"), "one\ntwo\nthree\n")
+  notified(function() vim.cmd("Sepal land") end)
+  eq(file("a.txt"), "manual\n")
+end)
+
+test("a reply continues the spec's chat from what it did, and lands only what's new", function()
+  local e = newest()
+  reset()
+  vim.env.SEPAL_FIX = [[printf 'manual\nmore\n' > a.txt]]
+  put("a.txt", "manual\n")
+  local got = notified(function() agent.continue(e, "add a line"); idle() end)
+  eq(vim.endswith(args()[1], "--resume s1"), true)
+  assert(vim.startswith(prompts(), "add a line\n"), prompts())
+  eq(file("a.txt"), "manual\nmore\n")
+  eq(msgs(got)[1]:match("^landed"), "landed")
+end)
+
+test("no changes, a failed agent, one that never started, and tools it wasn't allowed", function()
+  clean(); reset()
+  eq(run({ "Goal: nothing" }), { "working on it: nothing", "no changes: nothing: Did it." })
+  vim.env.SEPAL_FAIL = "result"
+  local got = notified(function() send({ "Goal: fails" }); idle() end)
+  eq(got[2], { "✗ fails: the agent failed: API error: overloaded · :Sepal inbox", vim.log.levels.ERROR })
+  vim.env.SEPAL_FAIL = "start"
+  got = notified(function() send({ "Goal: no start" }); idle() end)
+  eq(got[2], { "✗ no start: the agent didn't start: boom · :Sepal inbox", vim.log.levels.ERROR })
+  vim.env.SEPAL_FAIL = nil
+  vim.env.SEPAL_DENY = '[{"tool_name":"Bash","tool_input":{"command":"make test"}},{"tool_name":"Bash","tool_input":{"command":"make test"}}]'
+  got = notified(function() send({ "Goal: denied" }); idle() end)
+  eq(got[#got], { "the agent was not allowed: Bash(make test)\nallow tools with --allowedTools in args, see :h sepal-args", vim.log.levels.WARN })
+end)
+
+test("outside a git repo the spec comes back in its buffer", function()
+  local other = vim.fs.joinpath(T, "plain")
+  vim.fn.mkdir(other, "p")
+  vim.fn.chdir(other)
+  local got = notified(function() send({ "Goal: no repo" }) end)
+  vim.fn.chdir(work)
+  eq(got, { { "not in a git repository: a spec runs in a git worktree\nthe spec is back in its buffer", vim.log.levels.ERROR } })
+  eq(vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false), { "Goal: no repo" })
+  vim.api.nvim_buf_delete(spec_buf(), { force = true })
+end)
+
+test(":Sepal stop stops a running spec", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "3", [[echo late > a.txt]]
+  local got = notified(function()
+    send({ "Goal: long" })
+    vim.wait(300)
     vim.cmd("Sepal stop")
     idle()
   end)
-  vim.env.SEPAL_SLEEP = nil
-  eq(msgs(got), { "queued after the running spec (1 waiting)", "1 queued spec back in the spec buffer", "stopped" })
-  eq(vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false), { "Scope: waiting" })
-  vim.api.nvim_buf_delete(spec_buf(), { force = true })
+  eq(msgs(got), { "working on it: long", "stopped: long" })
+  eq(newest().status, "stopped")
+  eq(file("a.txt"), "one\ntwo\nthree\n")
 end)
 
-test("a spec the agent never started on comes back in its buffer", function()
-  vim.env.SEPAL_FAIL = "start"
-  local got = notified(function() send({ "Scope: keep me" }); idle() end)
-  vim.env.SEPAL_FAIL = nil
-  eq(got, { { "the agent didn't start: No conversation found with session ID: x\nthe spec is back in its buffer", vim.log.levels.ERROR } })
-  eq(vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false), { "Scope: keep me" })
-  eq(vim.fn.bufwinid(spec_buf()) ~= -1, true, "spec not shown")
-  vim.api.nvim_buf_delete(spec_buf(), { force = true })
-end)
-
-test("an agent that can't be run gives the spec back", function()
-  local cmd = sepal.config().cmd
-  sepal.setup({ cmd = { "sepal-no-such-agent" } })
-  local got = notified(function() send({ "Scope: keep me too" }) end)
-  sepal.setup({ cmd = cmd })
-  eq(got[1][2], vim.log.levels.ERROR)
-  eq(vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false), { "Scope: keep me too" })
-  vim.api.nvim_buf_delete(spec_buf(), { force = true })
-end)
-
-test("a failed run says why", function()
-  vim.env.SEPAL_FAIL = "result"
-  local got = notified(function() send({ "Scope: x" }); idle() end)
-  vim.env.SEPAL_FAIL = nil
-  eq(got, { { "the spec failed: API error: overloaded", vim.log.levels.ERROR } })
-end)
-
-test("tool calls the agent wasn't allowed to make are named", function()
-  vim.env.SEPAL_DENY = '[{"tool_name":"Bash","tool_input":{"command":"make test"}},{"tool_name":"Bash","tool_input":{"command":"make test"}}]'
-  local got = notified(function() send({ "Scope: x" }); idle() end)
-  vim.env.SEPAL_DENY = nil
-  eq(got[2], { "the agent was not allowed: Bash(make test)\nallow tools with --allowedTools in args, see :h sepal-args", vim.log.levels.WARN })
-end)
-
-test("done stays in fidget until you look at the changes", function()
-  local got, removed = {}, {}
-  package.loaded.fidget = {
-    notify = function(msg, _, o) got[#got + 1] = { msg, o.key, o.ttl } end,
-    notification = { remove = function(g, k) removed[#removed + 1] = { g, k } end },
-  }
-  send({ "Scope: x" }); idle()
-  review.jump(1)
-  package.loaded.fidget = nil
-  eq(got[1], { "✓ done: Shutdown drains the queue now.", "sepal-done", math.huge })
-  eq(removed, { { "default", "sepal-done" } })
-end)
-
--- review --------------------------------------------------------------------------------------
-
-local function marks(b) return vim.api.nvim_buf_get_extmarks(b, review._t.NS, 0, -1, { details = true }) end
-local function hunks(p) return #review._t.hunks(path(p)) end
-
-test("what the agent changed is in the review: changes, new files and deleted ones", function()
-  write("a.txt", { "one", "two", "three" })
-  write("c.txt", { "gone" })
-  vim.cmd.edit("a.txt")
-  vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\nfour\n' > a.txt; printf 'new\n' > b.txt; rm c.txt]]
-  local got = notified(function() send({ "Scope: edit" }); idle() end)
-  vim.env.SEPAL_EDIT = nil
-  eq(msgs(got), { "done · 4 changes in 3 files to review: Shutdown drains the queue now." })
-  eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "one", "TWO", "three", "four" }, "buffer not reloaded")
-  local b = vim.api.nvim_get_current_buf()
-  local hl = {}
-  for _, m in ipairs(marks(b)) do
-    if m[4].line_hl_group then hl[#hl + 1] = { m[2], m[4].line_hl_group } end
-    if m[4].virt_lines then eq(vim.trim(m[4].virt_lines[1][1][1]), "two"); eq(m[4].virt_lines_above, true) end
-  end
-  eq(hl, { { 1, "SepalChange" }, { 3, "SepalAdd" } })
-  eq(vim.b[b].sepal_review, true)
-end)
-
-test("<c-c><c-y> accepts the change under the cursor, <c-c><c-n> rejects it and writes the file", function()
-  vim.api.nvim_win_set_cursor(0, { 2, 0 })
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-y>"), "tx", false)
-  eq(hunks("a.txt"), 1)
-  eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "one", "TWO", "three", "four" })
+test("the inbox lists the specs and survives a restart", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  run({ "Goal: listed" })
+  vim.cmd("Sepal inbox")
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  assert(lines[3]:match("^✓ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
+  eq(vim.list_slice(lines, 4), { "    · kept the old API", "    · no new deps" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-n>"), "tx", false)
-  eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "one", "TWO", "three" })
-  eq(read(path("a.txt")), "one\nTWO\nthree\n")
-  eq(review._t.files()[path("a.txt")], nil, "a.txt still under review")
-  eq(#marks(0), 0)
-  eq(vim.b.sepal_review, nil)
-  eq(vim.fn.maparg("<c-c><c-y>", "n"), "", "map left behind")
+  eq(inbox.current().title, "listed")
+  vim.cmd("close")
+  newest().status = "running" -- as if nvim quit while it ran
+  inbox.changed(newest())
+  inbox._t.reset()
+  eq(newest().status, "interrupted")
+  eq(newest().title, "listed")
 end)
 
-test(":Sepal review lists the changes and goes to the first; rejecting a new file deletes it", function()
-  vim.cmd("Sepal review")
-  eq(vim.tbl_map(function(i) return { vim.fn.bufname(i.bufnr), i.lnum } end, vim.fn.getqflist()), { { "b.txt", 1 }, { "c.txt", 1 } })
-  eq(vim.fn.expand("%"), "b.txt")
-  vim.cmd("Sepal reject")
-  eq(vim.uv.fs_stat(path("b.txt")), nil, "b.txt still there")
-end)
-
-test("]r goes to the next file's change; rejecting a deletion brings the file back", function()
-  vim.cmd.edit("a.txt")
-  write("a.txt", { "one", "TWO", "three" })
-  review.jump(1)
-  eq(vim.fn.expand("%"), "c.txt")
-  eq(vim.trim(marks(0)[1][4].virt_lines[1][1][1]), "gone")
-  vim.cmd("Sepal reject")
-  eq(read(path("c.txt")), "gone\n")
-  eq(notified(function() vim.cmd("Sepal review") end), { { "nothing to review", vim.log.levels.INFO } })
-end)
-
-test(":Sepal accept all keeps everything, :Sepal reject all puts everything back", function()
-  vim.env.SEPAL_EDIT = [[printf 'x\n' > a.txt; printf 'y\n' > d.txt]]
-  notified(function() send({ "Scope: x" }); idle() end)
-  eq(review.count(), 2)
-  notified(function() vim.cmd("Sepal accept all") end)
-  eq(review.count(), 0)
-  eq(read(path("a.txt")), "x\n")
-  write("a.txt", { "one" })
-  vim.fn.delete(path("d.txt"))
-  notified(function() send({ "Scope: x" }); idle() end)
-  eq(review.count(), 2)
-  eq(msgs(notified(function() vim.cmd("Sepal reject all") end)), { "put 2 files back as before" })
-  vim.env.SEPAL_EDIT = nil
-  eq(read(path("a.txt")), "one\n")
-  eq(vim.uv.fs_stat(path("d.txt")), nil)
-end)
-
-test("a file you save during the run is yours, not the agent's", function()
-  vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'agent\n' > e.txt]]
-  notified(function()
-    send({ "Scope: x" })
-    vim.cmd.edit("mine.txt")
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "mine" })
-    vim.cmd.write()
-    idle()
-  end)
-  vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = nil, nil
-  eq(vim.tbl_map(function(p) return vim.fs.basename(p) end, vim.tbl_keys(review._t.files())), { "e.txt" })
-  notified(function() review.accept_all() end)
-end)
-
-test(":Sepal open opens the specs' chat with cmd --resume", function()
+test(":Sepal open opens the newest spec's chat", function()
   local got
   sepal.setup({ open = function(argv, cwd) got = { argv[#argv - 1], argv[#argv], cwd } end })
-  sepal.open()
-  eq(got, { "--resume", "s1", vim.fn.getcwd() })
+  vim.cmd("Sepal open")
   sepal.config().open = nil
-  local tmux = vim.env.TMUX
-  vim.env.TMUX = nil
-  local m = msgs(notified(function() sepal.open() end))[1]
-  vim.env.TMUX = tmux
-  eq(vim.endswith(m, "'--resume' 's1'"), true, m)
+  eq(got, { "--resume", "s1", work })
 end)
 
-test(":Sepal completes subcommands and accept/reject all", function()
-  eq(vim.fn.getcompletion("Sepal re", "cmdline"), { "review", "reject", "resume" })
-  eq(vim.fn.getcompletion("Sepal reject ", "cmdline"), { "all" })
+test(":Sepal clean drops the specs that are over", function()
+  notified(function() vim.cmd("Sepal clean") end)
+  eq(inbox.list(work), {})
+  eq(sh("git for-each-ref refs/sepal").stdout, "")
+end)
+
+test("assumptions are read from the end of a reply", function()
+  eq(agent.assumptions("ok\n\n**Assumptions:**\n- a\n* b\n\nthe end"), { "a", "b" })
+  eq(agent.assumptions("ok\nAssumptions: none"), {})
+  eq(agent.assumptions("ok\nAssumptions: the cache is per user"), { "the cache is per user" })
+  eq(agent.assumptions("no list"), {})
+end)
+
+test(":Sepal completes subcommands", function()
+  eq(vim.fn.getcompletion("Sepal s", "cmdline"), { "spec", "stop" })
 end)
 
 test("checkhealth runs", function() require("sepal.health").check() end)
@@ -441,14 +412,14 @@ test(":'<,'>Sepal spec puts the selected lines in the spec and lists the file", 
   vim.cmd("2,3Sepal spec")
   local b = spec_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: ", "Goal: ", "", "Constraints:", "- ", "",
-    "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
+    "Done when: ", "", "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("a selection joins the open draft, its file listed once", function()
   vim.cmd.wincmd("j")
   vim.cmd("4Sepal spec")
   local lines = vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false)
-  eq(vim.list_slice(lines, 13), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
+  eq(vim.list_slice(lines, 15), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("code in a selection is sent as it is, even a line that is just -", function()
@@ -459,55 +430,6 @@ test("code in a selection is sent as it is, even a line that is just -", functio
   eq(vim.tbl_contains(got, "-"), true, "the - code line was dropped")
   eq(vim.tbl_contains(got, "- "), false, "the empty bullet was sent")
   vim.cmd("bwipeout! tests/pool.lua")
-end)
-
-test("resume lists what you typed per conversation, newest first, claude -p runs too", function()
-  vim.env.CLAUDE_CONFIG_DIR = claude_dir("/work/pool")
-  local rows = require("sepal.resume").items("/work/pool")
-  eq(vim.tbl_map(function(r) return { r.id, r.text } end, rows), {
-    { "ccc", "write a commit message │ write a commit message" },
-    { "bbb", "fix the flaky test │ fix the flaky test" },
-    { "aaa", "ThreadPool shutdown │ Scope: drain the queue" },
-    { "aaa", "ThreadPool shutdown │ add graceful shutdown to the pool" },
-  })
-  eq(require("sepal.resume").latest("/work/pool"), "ccc")
-end)
-
-test("the picker narrows by fuzzy match and <CR> picks the selected row", function()
-  local rows = require("sepal.resume").items("/work/pool")
-  local picked
-  require("sepal.resume").pick(rows, "resume", function(r) picked = r end)
-  local b = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "shtdwn" })
-  vim.api.nvim_exec_autocmds("TextChangedI", { buffer = b })
-  eq(#vim.api.nvim_buf_get_lines(b, 1, -1, false), 2, "not narrowed to the 2 shutdown rows")
-  local line = vim.api.nvim_buf_get_lines(b, 2, 3, false)[1] -- the second row on screen
-  local second = vim.iter(rows):find(function(r) return vim.endswith(line, r.msg) end)
-  -- the picker lives in insert mode, which feedkeys can't drive headless (x leaves it, x! waits for keys)
-  local function press(lhs)
-    for _, m in ipairs(vim.api.nvim_buf_get_keymap(b, "i")) do if m.lhs == lhs then return m.callback() end end
-    error("no insert map " .. lhs)
-  end
-  press("<C-N>")
-  press("<CR>")
-  assert(vim.wait(1000, function() return picked ~= nil end, 10), "nothing picked")
-  eq(picked, second)
-  eq(vim.api.nvim_buf_is_valid(b), false, "picker still open")
-end)
-
-
-test(":Sepal resume picks the chat the next spec continues", function()
-  local r = require("sepal.resume")
-  local choose = r.choose
-  local cwd = vim.fn.getcwd()
-  vim.env.CLAUDE_CONFIG_DIR = claude_dir(cwd)
-  r.choose = function(rows, _, on_choice) on_choice(vim.iter(rows):find(function(x) return x.id == "aaa" end)) end
-  local got = notified(function() sepal.resume() end)
-  r.choose = choose
-  eq(msgs(got), { "the next spec continues ThreadPool shutdown" })
-  reset()
-  notified(function() send({ "Scope: x" }); idle() end)
-  eq(vim.endswith(args()[1], "--resume aaa"), true, args()[1])
 end)
 
 print(("%d/%d passed"):format(n - fails, n))

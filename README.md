@@ -1,18 +1,18 @@
 # sepal.nvim
 
-Write a spec next to your code and Claude Code works on it in the background, without a terminal
-or chat window in Neovim. When it's done you get a notification, and its changes show up as hunks
-in your buffers. Accept or reject each one where the code is. To see what the agent did and why,
-`:Sepal open` opens its chat in a tmux window.
+Delegate, verify, land. You write a spec next to your code and Claude Code works on it in a git
+worktree, so your files never change while it works. sepal then runs the spec's check itself, and
+if it passes, the result lands in your work tree as unstaged changes. You review them with the git
+tools you already use. You only hear from sepal when a spec has landed or when something needs you.
+You don't watch the agent work.
 
 ## Requirements
 
 - Neovim 0.12+
 - [Claude Code](https://claude.com/claude-code)
-- git, to review the changes (outside a git repo the agent still works, you just don't get the review)
-- optional: [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) to pick files for a spec (without it you get a path prompt)
-- optional: [fidget.nvim](https://github.com/j-hui/fidget.nvim) for a spinner while the agent works and a "done"
-  notification that stays (without it you get plain notifications; warnings and errors always go to `vim.notify`)
+- git (specs run in git worktrees, so your project has to be a git repo)
+- optional: [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) to pick files for a spec
+- optional: [fidget.nvim](https://github.com/j-hui/fidget.nvim) for a spinner showing what the agent is doing
 
 ## Install
 
@@ -24,6 +24,79 @@ vim.pack.add({ "https://github.com/nukkua/sepal.nvim" })
 { "nukkua/sepal.nvim", opts = {} }
 ```
 
+## Tutorial
+
+Five minutes, in any git repo of yours.
+
+**1. Add two keys.**
+
+```lua
+vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal spec<cr>", { desc = "Agent: new spec" })
+vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox" })
+```
+
+**2. Write a spec.** Select the code you mean (or don't) and press `<leader>as`. A buffer opens
+above your code:
+
+```
+Scope: ThreadPool::shutdown()
+Goal: Finish queued tasks before stopping, refuse new ones.
+
+Constraints:
+- don't change the public API
+
+Done when: make test
+
+Selection: src/pool.cpp:40-52
+...
+
+Files:
+- @src/pool.cpp
+```
+
+`Done when:` is the check: a shell command that has to pass. The agent is allowed to run it, and
+it keeps working until the check passes. Then sepal runs the check again itself before landing
+anything. Leave it empty and the spec isn't checked. `<c-c><c-f>` adds more files.
+
+**3. Send it.** `<c-c><c-c>`. The buffer closes and you get `working on it: Finish queued tasks…`.
+Keep coding. You can send more specs, and they run in parallel, each in its own worktree.
+
+**4. It lands.** When the check passes:
+
+```
+✓ landed: Finish queued tasks… · 2 files +31 −4 · make test ✓
+· shutdown() blocks until the queue is empty
+· tasks submitted after shutdown() throw std::runtime_error
+```
+
+The changes are now in your files, unstaged. The lines starting with `·` are the decisions the
+agent made on its own. Nobody was there to answer its questions, so it lists them for you. They're
+the part worth reading.
+
+**5. Review it like a teammate's change.** `git diff`, gitsigns, fugitive: whatever you use. Don't
+like it? `:Sepal undo` takes it back out. Your own edits since the spec started stay in both
+cases.
+
+**6. When something needs you,** you get a warning instead. Open `<leader>ai`:
+
+```
+<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  q close
+
+✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
+    · shutdown() blocks until the queue is empty
+✗ check failed 5m   flaky test             make test ✗
+    │ FAIL test_timeout (expected 100ms, got 140ms)
+▲ needs you    9m   rename Config          4 files +40 −40
+    it overlaps your edits in src/config.rs: L lands it with conflict markers
+```
+
+- `r` replies to a spec ("the timeout is 200ms on CI"). The agent continues from where it was, in the
+  same chat, and the spec is checked and lands again.
+- `o` opens the spec's chat in a tmux window, so you can read what the agent did and why.
+- `<CR>` shows everything the spec changed as a diff.
+
+That's all of it: write, send, keep working, read the `·` lines.
+
 ## Setup
 
 `setup()` is optional. These are the defaults:
@@ -31,154 +104,114 @@ vim.pack.add({ "https://github.com/nukkua/sepal.nvim" })
 ```lua
 require("sepal").setup({
   cmd = { "claude" },                            -- the agent
-  args = { "--permission-mode", "acceptEdits" }, -- added to each spec run (see Permissions)
-  continue = true,     -- the first spec continues this directory's last chat; false: a new one
+  args = { "--permission-mode", "acceptEdits" }, -- added to each run (see Permissions)
+  check = nil,         -- the check for specs without a `Done when:` line, e.g. "make test"
+  retries = 1,         -- when the check fails, the agent gets its output and this many more tries
+  land = "auto",       -- "auto": a spec that passes lands by itself; "manual": it waits for L in the inbox
+  prepare = nil,       -- shell command run in each new worktree first ($SEPAL_ROOT is your repo)
+  worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   spec_suggest = nil,  -- argv: rough spec on stdin -> finished spec on stdout (see Specs)
   open = nil,          -- function(argv, cwd) for :Sepal open (default: a new tmux window)
-  keys = { next = "]r", prev = "[r", accept = "<c-c><c-y>", reject = "<c-c><c-n>" }, -- in buffers under review
 })
-
-vim.keymap.set("n", "<leader>ai", "<cmd>Sepal spec<cr>", { desc = "Agent: write a spec" })
-vim.keymap.set("x", "<leader>ai", ":Sepal spec<cr>", { desc = "Agent: write a spec with the selection" })
-vim.keymap.set("n", "<leader>ar", "<cmd>Sepal review<cr>", { desc = "Agent: review its changes" })
-vim.keymap.set("n", "<leader>ao", "<cmd>Sepal open<cr>", { desc = "Agent: open its chat" })
-vim.keymap.set("n", "<leader>al", "<cmd>Sepal resume<cr>", { desc = "Agent: pick the chat specs continue" })
 ```
+
+## Commands
+
+| Command              | Does                                                                     |
+| -------------------- | ------------------------------------------------------------------------ |
+| `:[range]Sepal spec` | write a spec (with a range: those lines go in as a `Selection:`)         |
+| `:Sepal inbox`       | every spec of this repo and where it stands                              |
+| `:Sepal land`        | land the newest spec that's waiting (with conflict markers if it overlaps your edits) |
+| `:Sepal undo`        | take the newest landed spec back out                                     |
+| `:Sepal open`        | the newest spec's chat in Claude Code                                    |
+| `:Sepal stop`        | stop every running spec                                                  |
+| `:Sepal clean`       | drop the specs that are over (landed, no changes, undone, stopped)       |
 
 ## How it works
 
-1. `:Sepal spec` and you write what you want. `<c-c><c-c>` runs it.
-2. The spec runs as `claude -p` in the background, with a fidget spinner showing what it's doing
-   (`Edit src/pool.cpp`, `Bash make test`). You keep working. Sending another spec while one runs
-   puts it in a queue.
-3. `✓ done · 3 changes in 2 files to review: <first line of the reply>`. With fidget it stays until
-   you start reviewing.
-4. The changed lines are highlighted in your buffers, and removed lines are shown where they used
-   to be. `:Sepal review` puts every change in the quickfix list and takes you to the first.
-
-Every spec continues one chat: at first this directory's last one, then the one the specs started.
-It's a normal Claude Code chat, so the agent remembers your earlier specs and `claude -c` sees all
-of it.
+1. **Start**: your work tree (uncommitted and untracked files too) is saved as a commit, through a
+   temporary index. Your own index and branches aren't touched. The agent gets a worktree of that
+   commit, so it starts from exactly what you see.
+2. **Work**: `claude -p` runs there with the spec, plus a few rules from sepal: it's alone, it
+   shouldn't commit, it should run the check until it passes, and it should end with its
+   assumptions.
+3. **Check**: sepal runs `Done when:` in the worktree itself. If it fails, the agent gets the output
+   and `retries` more tries.
+4. **Land**: the change is applied to your work tree as unstaged changes, a three-way merge per file
+   (`git merge-file`), so what you edited meanwhile is kept. With `land = "auto"` this happens on
+   its own, but only when it's clean. If it overlaps your edits, or a buffer of a file it touches
+   has unsaved changes, it waits as "needs you".
+5. The worktree is removed and the result stays as a commit (`refs/sepal/<id>/*`) until you drop
+   the spec. The inbox is saved per repo, so it survives a restart. A spec that was running when
+   Neovim quit shows as "interrupted", and `r` continues it.
 
 ## Specs
 
-`:Sepal spec` opens a buffer above your code with a spec to fill in:
-
-```
-Scope: ThreadPool::shutdown()
-Goal: Implement graceful shutdown.
-
-Constraints:
-- Finish queued tasks
-- Don't accept new tasks
-
-Files:
-- @src/thread_pool.cpp
-```
-
 | Key          | Action                                                                 |
 | ------------ | ---------------------------------------------------------------------- |
+| `<c-c><c-c>` | send the spec and close the buffer                                     |
 | `<c-c><c-s>` | have `spec_suggest` write the spec from what's there (`u` undoes it)  |
-| `<c-c><c-f>` | add a file under `Files:` (picked with [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) if installed, else a prompt) |
-| `<c-c><c-c>` | run the spec in the background and close the buffer                    |
-| `<c-c><c-k>` | discard the spec                                                        |
+| `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
+| `<c-c><c-k>` | discard the spec                                                       |
 
-`:'<,'>Sepal spec` (the `x` mapping above) puts the selected lines in the spec as a
-`Selection: path:10-20` code block above `Files:` and lists the file. With a draft open, the
-selection is added to it. Selections are whole lines.
-
-Files go in as `@path`, which Claude Code reads as file references. If the agent can't start (say,
-the chat it should continue is gone), the spec comes back in its buffer. Closing the window keeps
-the draft, and `:Sepal spec` brings it back.
+`:'<,'>Sepal spec` puts the selected lines in the spec as a `Selection: path:10-20` code block and
+lists the file. With a draft open, the selection is added to it. Closing the window keeps the
+draft, and `:Sepal spec` brings it back.
 
 ### Writing the spec for you
 
 Set `spec_suggest` and the spec buffer starts as just your idea and `Files:`. `<c-c><c-s>` pipes
-it to the command, which answers with the spec (a spinner shows while it thinks), then
-`<c-c><c-c>` runs it. If you edit while it's writing, your text is kept. For example, Opus at
-medium effort, reading the files but not editing them:
+it to the command, which answers with the spec:
 
 ```lua
 require("sepal").setup({
   spec_suggest = { "claude", "-p", "--model", "opus", "--effort", "medium",
     "--no-session-persistence", "--tools=Read,Grep,Glob",
-    "Turn the rough idea on stdin into a short spec: Scope, Goal, Constraints, Files (as @path). "
+    "Turn the rough idea on stdin into a short spec: Scope, Goal, Constraints, Done when "
+    .. "(one shell command that proves it works, e.g. the test to run), Files (as @path). "
     .. "Read the files so it matches the code. Output only the spec, no code fences, no filler." },
 })
 ```
 
-Keep `--no-session-persistence`: without it, this one-off run would be saved as a chat, and
-your next spec might continue it instead of your real chat.
+## Worktrees need your dependencies
 
-## Review
+A new worktree has your tracked and untracked files, but not ignored ones like `node_modules`,
+`target` or `.env`. Use `prepare` to bring them in. Whatever it creates isn't counted as the
+agent's work:
 
-Before a spec runs, sepal saves the work tree as a git tree object. Untracked files are included,
-and your index and branches stay as they are. After the run, every file that differs is under
-review, except files you saved yourself while it ran. In those buffers:
+```lua
+require("sepal").setup({ prepare = 'ln -s "$SEPAL_ROOT/node_modules" node_modules' })
+require("sepal").setup({ prepare = "cp $SEPAL_ROOT/.env . && cargo fetch" })
+```
 
-| Key          | Action                                                                  |
-| ------------ | ----------------------------------------------------------------------- |
-| `]r` / `[r`  | next / previous change; past the last one, the next file's first        |
-| `<c-c><c-y>` | accept the change under the cursor                                      |
-| `<c-c><c-n>` | reject it: the old text comes back and the file is written              |
+## Permissions
 
-- `:Sepal review` puts every change in the quickfix list and takes you to the first.
-- `:Sepal accept` / `:Sepal reject` act on the change under the cursor. With `all`, they act on
-  every change in every file.
-- Rejecting a file the agent created deletes it. Rejecting a deletion brings the file back.
+Specs run with `--permission-mode acceptEdits`, plus the spec's check: the agent can read files,
+edit them, and run `Done when:`. Nobody is there to answer a permission prompt, so any other tool
+call that needs one is refused, and sepal names it:
+`▲ the agent was not allowed: Bash(npm run lint)`. Allow what you trust in `args`:
 
-A file is done when you've accepted or rejected each of its changes. If more specs change it before
-then, the review keeps the text from before the first one. Highlights: `SepalAdd`, `SepalChange`,
-`SepalDelete` (removed lines) and `SepalAddSign`, `SepalChangeSign`, `SepalDeleteSign`.
+```lua
+require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowedTools", "Bash(npm run lint),Bash(git diff:*)" } })
+```
 
-What's under review is kept in memory, so restarting Neovim clears it. Edits you make yourself to a
-file under review show up as changes too.
+Other flags go there too, e.g. `"--model", "opus"`.
 
-## Seeing what the agent did
+## The chat
 
-`:Sepal open` opens the chat the specs went to with `claude --resume <id>` in a new tmux window.
-There you can read every tool call and the agent's reasoning, or keep talking to it. Outside tmux
-it copies the command for you to run. Set `open` for a different terminal:
+Each spec has its own Claude Code chat. `o` in the inbox, or `:Sepal open`, opens it with
+`claude --resume <id>` in a new tmux window. There you can read every tool call and the agent's
+reasoning, or keep talking to it. Outside tmux it copies the command for you to run. For another
+terminal:
 
 ```lua
 require("sepal").setup({ open = function(argv, cwd) vim.system({ "wezterm", "cli", "spawn", "--cwd", cwd, "--", unpack(argv) }) end })
 ```
 
-Running `claude -c` in that directory works too: the specs' chat is the newest one there.
-Close that window before your next spec. Otherwise the open Claude doesn't see what the spec did,
-and anything you type there starts a separate branch of the chat.
+Close that window before you reply to the spec. The open Claude doesn't see what the reply did, and
+anything you type there branches the chat.
 
-## Chats
-
-- `:Sepal new`: the next spec starts a new chat.
-- `:Sepal resume` picks the chat the next specs continue, by what you wrote in it. Each row is one
-  message you typed, with its chat's title and age, newest first:
-
-  ```
-  2h  ThreadPool shutdown │ add graceful shutdown to the pool
-  1d  Flaky test │ fix the flaky test in tests/pool.lua
-  ```
-
-  Type to fuzzy-filter, `<C-n>`/`<C-p>` to move, `<CR>` to pick, `<Esc>` to close. The header reads
-  "continue with <title of the selected chat>". Its colors: `SepalPickHeader`, `SepalPickTitle`,
-  `SepalPickAge`, `SepalPickPrompt`, `SepalPickMatch`, `SepalPickSelected`. If a picker plugin
-  replaces `vim.ui.select` (snacks, fzf-lua, telescope, …), sepal uses it instead.
-- `:Sepal stop` stops the running spec. Specs still in the queue come back to the spec buffer.
-
-## Permissions
-
-Specs run with `--permission-mode acceptEdits`: the agent can read and edit files, but nothing
-else unless your Claude Code settings allow it. Nobody is there to answer a prompt, so a tool call
-that would need one is refused. sepal tells you which ones:
-`▲ the agent was not allowed: Bash(make test)`. Allow what you trust in `args`:
-
-```lua
-require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowedTools", "Bash(make test),Bash(git diff:*)" } })
-```
-
-Other flags go in `args` too, e.g. `"--model", "opus"`.
-
-`:checkhealth sepal` checks `cmd`, `args`, git, `open`, `spec_suggest`, fidget and fff.
+`:checkhealth sepal` checks the setup.
 
 ## Tests
 

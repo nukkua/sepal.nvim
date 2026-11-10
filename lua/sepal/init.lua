@@ -1,33 +1,31 @@
--- sepal — a CLI agent in a terminal split next to your code
--- :Sepal toggles it, :Sepal new starts a fresh chat. The first toggle continues the last chat in
--- this directory (cmd + resume, e.g. `claude -c`); the agent keeps its chat on disk, so it comes
--- back after nvim or tmux goes away. Hiding the split keeps the agent running.
--- ponytail: "nothing to continue" is detected as a resume that fails within 3s; an agent that
--- shows an error and waits instead stays on screen, use :Sepal new there
+-- sepal — write a spec in Neovim, the agent works on it in the background, you review what it
+-- changed in your buffers. There is no terminal: each spec is a `claude -p` run that continues one
+-- chat (at first this directory's last one), so `claude -c` or :Sepal open shows what happened.
+-- Specs sent while one runs wait in a queue and run one after another, in the same chat.
 
 local M = {}
 
--- Claude Code runs this after every reply: it saves the hook's JSON (which has the reply) to a temp
--- file and calls back into this nvim with it ($NVIM, set for terminal jobs)
-local STOP_HOOK = [[f=$(mktemp) && cat >"$f" && ]] .. vim.fn.shellescape(vim.v.progpath)
-  .. [[ --server "$NVIM" --remote-expr "v:lua.require'sepal'.stopped('$f')" >/dev/null 2>&1]]
-
+local KEYS = { next = "]r", prev = "[r", accept = "<c-c><c-y>", reject = "<c-c><c-n>" }
 local C = {
-  -- agent argv. tui=default keeps Claude Code off the alt screen, so its output stays in the buffer's
-  -- scrollback; the Stop hook is what notifies "the agent is done"
-  cmd = { "claude", "--settings", vim.json.encode({ tui = "default", hooks = { Stop = { { hooks = { { type = "command", command = STOP_HOOK } } } } } }) },
-  resume = { "-c" },  -- appended to cmd to continue this directory's last chat; {} to always start fresh
-  side = "right",     -- "right" | "left"
-  width = 40,         -- split width, percent of the editor (1-99)
-  focus = true,       -- move to the agent when it opens
-  spec_suggest = nil, -- argv: rough spec on stdin -> finished spec on stdout; <c-c><c-s> in a spec runs it
-  resume_pick = nil,  -- args for the agent's own conversation picker (codex: { "resume" }); :Sepal resume
-                      -- uses them for agents other than Claude Code, whose conversations sepal searches itself
+  cmd = { "claude" },  -- the agent. A spec runs: cmd -p --output-format stream-json --verbose <args> [--resume <chat>]
+  args = { "--permission-mode", "acceptEdits" }, -- added to each spec run: --model, --allowedTools…
+  continue = true,     -- the first spec continues this directory's last chat; false: starts a new one
+  spec_suggest = nil,  -- argv: rough spec on stdin -> finished spec on stdout; <c-c><c-s> in a spec runs it
+  open = nil,          -- function(argv, cwd) for :Sepal open; default: a new tmux window, outside tmux the command is copied
+  keys = KEYS,         -- in buffers with changes to review; a key set to false is not mapped, keys = false maps none
 }
-function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}) end
+function M.setup(opts)
+  opts = opts or {}
+  local keys = opts.keys
+  C = vim.tbl_extend("force", C, opts)
+  if type(keys) == "table" then C.keys = vim.tbl_extend("force", KEYS, keys) elseif keys == false then C.keys = {} end
+  require("sepal.review").keys = C.keys
+end
 function M.config() return C end
 
-local S = { buf = nil } -- the agent's terminal buffer
+-- session: nil = not chosen yet (continue: this directory's last chat), false = the next spec starts a
+-- new chat, else the chat's id. run: the spec running now ({ job, stopped… }); queue: specs waiting
+local S = { session = nil, run = nil, queue = {} }
 
 -- every message is "what happened", shown under "sepal".
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
@@ -45,139 +43,214 @@ function M.notify(msg, lvl, o)
   vim.api.nvim_echo({ { icon[1] .. " ", icon[2] }, { "sepal ", "Title" }, { msg } }, true, { err = lvl >= vim.log.levels.ERROR })
 end
 
--- fidget spinner while waiting; returns done(msg), which ends it showing msg, or cancels it without
--- msg (a failure, which gets its own warning). Without fidget: no spinner, done(msg) is a plain notification
+-- fidget spinner while waiting; returns done(msg), update(msg). done(msg) ends it showing msg,
+-- done(true) ends it quietly (another notification follows), done() cancels it (a failure, which
+-- gets its own warning). Without fidget: no spinner, done(msg) is a plain notification
 local function progress(msg)
   local ok, fp = pcall(require, "fidget.progress")
-  if not ok then return function(final) if final then M.notify(final) end end end
+  if not ok then return function(final) if type(final) == "string" then M.notify(final) end end, function() end end
   local h = fp.handle.create({ title = "sepal", message = msg, lsp_client = { name = "sepal" } })
   return function(final)
     if not final then return h:cancel() end
-    h.message = final; h:finish()
-  end
+    if type(final) == "string" then h.message = final end
+    h:finish()
+  end, function(m) h:report({ message = m }) end
 end
 
-local function alive() return S.buf ~= nil and vim.api.nvim_buf_is_valid(S.buf) end
-
-local function enter(win)
-  if C.focus then vim.api.nvim_set_current_win(win); vim.cmd.startinsert() end
+-- the "done" notification can go: you're looking at what the agent did
+function M.seen()
+  local ok, fidget = pcall(require, "fidget")
+  if ok then pcall(fidget.notification.remove, "default", "sepal-done") end
 end
 
-local function split(buf)
-  return vim.api.nvim_open_win(buf, false, { split = C.side, win = -1, width = math.floor(vim.o.columns * C.width / 100) })
+-- the first non-empty line of s, cut to n characters
+local function first(s, n)
+  local l = type(s) == "string" and vim.iter(vim.split(s, "\n")):map(vim.trim):find(function(x) return x ~= "" end) or nil
+  if l and vim.fn.strchars(l) > n then l = vim.fn.strcharpart(l, 0, n - 1) .. "…" end
+  return l
 end
 
--- start the agent in a new terminal buffer, in place of the old one (which is killed).
--- hidden: start it in a split sized like the agent's and hide it, so the pty gets the right width.
--- args: appended to cmd instead of resume (e.g. { "-r", id })
-local function start(resume, hidden, args)
-  local old, buf = S.buf, vim.api.nvim_create_buf(false, true)
-  S.buf = buf
-  local win = old and vim.api.nvim_buf_is_valid(old) and vim.fn.bufwinid(old) or -1
-  if win ~= -1 then vim.api.nvim_win_set_buf(win, buf) else win = split(buf) end
-  if old and vim.api.nvim_buf_is_valid(old) then vim.api.nvim_buf_delete(old, { force = true }) end
+local function plural(n, word) return ("%d %s%s"):format(n, word, n == 1 and "" or "s") end
 
-  local argv = vim.list_extend(vim.list_extend({}, C.cmd), resume and C.resume or args or {})
-  local t = vim.uv.now()
-  local ok, job = pcall(vim.api.nvim_win_call, win, function()
-    return vim.fn.jobstart(argv, { term = true, on_exit = vim.schedule_wrap(function(_, code)
-      if S.buf ~= buf then return end -- replaced by :Sepal new
-      -- nothing to continue in this directory: start a fresh chat instead
-      if resume and #C.resume > 0 and code ~= 0 and vim.uv.now() - t < 3000 then
-        return start(false, vim.fn.bufwinid(buf) == -1) -- stays hidden if it was
-      end
-      S.buf = nil
-      if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
-    end) })
-  end)
-  if not ok or job <= 0 then
-    S.buf = nil
-    vim.api.nvim_buf_delete(buf, { force = true })
-    return M.notify("could not start " .. argv[1] .. (ok and "" or "\n" .. (tostring(job):match("E%d+:[^\n]*") or tostring(job):match("[^\n]*"))), vim.log.levels.ERROR)
-  end
-  -- you've seen it: the "done" notification can go
-  vim.api.nvim_create_autocmd("BufEnter", { buffer = buf, callback = function()
-    local fok, fidget = pcall(require, "fidget")
-    if fok then pcall(fidget.notification.remove, "default", "sepal-done") end
-  end })
-  if hidden then vim.api.nvim_win_hide(win) else enter(win) end
-end
-
--- the agent finished a reply (Claude Code's Stop hook, path: its JSON); not shown while you're in the agent.
--- "✓ the agent is done: <first line of the reply>", kept in fidget until you enter the agent
-function M.stopped(path)
-  local reply
-  if path and path ~= "" then
-    local f = io.open(path)
-    if f then
-      local ok, hook = pcall(vim.json.decode, f:read("a"))
-      f:close()
-      reply = ok and type(hook) == "table" and hook.last_assistant_message or nil
+-- a spec that didn't run goes back to the spec buffer (below the open draft, if there is one)
+local function giveback(text)
+  local lines = vim.split(text, "\n")
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.b[b].sepal_spec then
+      vim.api.nvim_buf_set_lines(b, -1, -1, false, vim.list_extend({ "" }, lines))
+      return M.spec()
     end
-    os.remove(path)
   end
-  vim.schedule(function()
-    if alive() and vim.api.nvim_get_current_buf() == S.buf then return end
-    local first = type(reply) == "string" and vim.iter(vim.split(reply, "\n")):map(vim.trim):find(function(l) return l ~= "" end)
-    if first and vim.fn.strchars(first) > 80 then first = vim.fn.strcharpart(first, 0, 79) .. "…" end
-    M.notify("the agent is done" .. (first and ": " .. first or ""), vim.log.levels.INFO,
-      { icon = { "✓", "DiagnosticOk" }, key = "sepal-done", ttl = math.huge })
-  end)
-  return ""
+  M.spec(nil, lines)
 end
 
-function M.toggle()
-  local win = alive() and vim.fn.bufwinid(S.buf) or -1
-  if win ~= -1 then
-    -- floats don't count: hiding the last normal window fails with E444 even if a float is open
-    local normal = vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative == "" end, vim.api.nvim_tabpage_list_wins(0))
-    if #normal == 1 then return M.notify("the agent is the only window", vim.log.levels.WARN) end
-    return vim.api.nvim_win_hide(win)
-  end
-  if alive() then return enter(split(S.buf)) end
-  start(true)
+local EDITS = { Edit = true, MultiEdit = true, Write = true, NotebookEdit = true }
+
+-- what a tool call is about, for the spinner: "Edit src/pool.cpp", "Bash make test"
+local function about(tool)
+  local i = type(tool.input) == "table" and tool.input or {}
+  local arg = (type(i.file_path) == "string" and vim.fn.fnamemodify(i.file_path, ":."))
+    or (type(i.path) == "string" and vim.fn.fnamemodify(i.path, ":."))
+    or vim.iter({ i.command, i.pattern, i.url, i.description }):find(function(v) return type(v) == "string" end)
+  return tostring(tool.name) .. (arg and " " .. first(arg, 50) or "")
 end
 
-function M.new() start(false) end
+-- "Bash(make test)" for each tool call the agent was not allowed to make
+local function denied(res)
+  local names, seen = {}, {}
+  for _, d in ipairs(type(res) == "table" and type(res.permission_denials) == "table" and res.permission_denials or {}) do
+    local i = type(d.tool_input) == "table" and d.tool_input or {}
+    local arg = i.command or i.file_path or i.url
+    local name = tostring(d.tool_name) .. (type(arg) == "string" and "(" .. first(arg, 40) .. ")" or "")
+    if not seen[name] then seen[name] = true; names[#names + 1] = name end
+  end
+  return names
+end
 
--- :Sepal resume: pick a conversation of this directory by what you wrote in it and continue it.
--- Claude Code: sepal's fuzzy picker over its saved chats; other agents: their own picker (resume_pick)
+-- run a spec: the agent gets it on stdin, in this directory's chat; queued if one is running
+local function run(text)
+  if S.run then
+    S.queue[#S.queue + 1] = text
+    return M.notify(("queued after the running spec (%d waiting)"):format(#S.queue))
+  end
+  local cwd, review = vim.fn.getcwd(), require("sepal.review")
+  if S.session == nil then S.session = C.continue and require("sepal.resume").latest(cwd) or false end
+  local argv = vim.list_extend(vim.list_extend({}, C.cmd), { "-p", "--output-format", "stream-json", "--verbose" })
+  vim.list_extend(argv, C.args or {})
+  if S.session then vim.list_extend(argv, { "--resume", S.session }) end
+
+  local snap = review.begin(cwd) -- before the agent touches anything
+  local done, update = progress("working: " .. (first(text, 60) or "the spec"))
+  local r = { started = false, edited = {} }
+  S.run = r
+  local partial = ""
+  local function event(line)
+    local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
+    if not ok or type(ev) ~= "table" then return end
+    if type(ev.session_id) == "string" and (S.run == r or S.run == nil) then S.session = ev.session_id end
+    if ev.type == "system" and ev.subtype == "init" then r.started = true end
+    if ev.type == "result" then r.started, r.result = true, ev end
+    if ev.type == "assistant" and type(ev.message) == "table" and type(ev.message.content) == "table" then
+      for _, c in ipairs(ev.message.content) do
+        if type(c) == "table" and c.type == "tool_use" then
+          update(about(c))
+          if EDITS[c.name] and type(c.input) == "table" and type(c.input.file_path) == "string" then r.edited[c.input.file_path] = true end
+        end
+      end
+    end
+  end
+
+  local function exited(out)
+    if partial ~= "" then event(partial); partial = "" end
+    S.run = nil
+    review.finish(snap)
+    local n, files = review.count()
+    local res = r.result
+    local tail = n > 0 and " · " .. plural(n, "change") .. " in " .. plural(files, "file") .. " to review" or ""
+    if r.stopped then
+      done(true)
+      M.notify("stopped" .. tail)
+    elseif not r.started then
+      done()
+      local err = first(out.stderr, 200) or ("exit " .. tostring(out.code))
+      M.notify("the agent didn't start: " .. err .. "\nthe spec is back in its buffer", vim.log.levels.ERROR)
+      giveback(text)
+    elseif not res or res.is_error then
+      done()
+      M.notify("the spec failed: " .. (first(res and res.result, 200) or first(out.stderr, 200) or ("exit " .. tostring(out.code))) .. tail,
+        vim.log.levels.ERROR)
+    else
+      done(true)
+      if not snap and next(r.edited) then tail = " · edited " .. plural(vim.tbl_count(r.edited), "file") .. " (not a git repo: no review)" end
+      local reply = first(res.result, 80)
+      M.notify("done" .. tail .. (reply and ": " .. reply or ""), vim.log.levels.INFO,
+        { icon = { "✓", "DiagnosticOk" }, key = "sepal-done", ttl = math.huge })
+    end
+    local no = denied(res)
+    if #no > 0 then
+      M.notify("the agent was not allowed: " .. table.concat(no, ", ") .. "\nallow tools with --allowedTools in args, see :h sepal-args",
+        vim.log.levels.WARN)
+    end
+    if #S.queue > 0 then run(table.remove(S.queue, 1)) end
+  end
+
+  local ok, job = pcall(vim.system, argv, { cwd = cwd, stdin = text, text = true, stdout = function(_, data)
+    if not data then return end
+    partial = partial .. data
+    local lines = {}
+    for l in partial:gmatch("([^\n]*)\n") do lines[#lines + 1] = l end
+    partial = partial:match("[^\n]*$")
+    if #lines > 0 then vim.schedule(function() for _, l in ipairs(lines) do event(l) end end) end
+  end }, vim.schedule_wrap(exited))
+  if not ok then
+    S.run = nil
+    review.finish(snap)
+    done()
+    M.notify("could not run " .. tostring(argv[1]) .. "\n" .. tostring(job):match("[^\n]*") .. "\nthe spec is back in its buffer", vim.log.levels.ERROR)
+    return giveback(text)
+  end
+  r.job = job
+end
+
+-- :Sepal stop: stop the running spec; the queued ones come back to the spec buffer
+function M.stop()
+  if not S.run then return M.notify("no spec is running") end
+  S.run.stopped = true
+  pcall(S.run.job.kill, S.run.job, 15)
+  if #S.queue > 0 then
+    local q = S.queue
+    S.queue = {}
+    giveback(table.concat(q, "\n\n"))
+    M.notify(plural(#q, "queued spec") .. " back in the spec buffer")
+  end
+end
+
+vim.api.nvim_create_autocmd("VimLeavePre", { group = vim.api.nvim_create_augroup("sepal", {}), callback = function()
+  if S.run and S.run.job then pcall(S.run.job.kill, S.run.job, 15) end -- don't leave it editing after you quit
+end })
+
+-- :Sepal new: the next spec starts a new chat
+function M.new()
+  S.session = false
+  M.notify("the next spec starts a new chat")
+end
+
+-- :Sepal resume: pick the chat the next specs continue, by what you wrote in it
 function M.resume()
-  if vim.fs.basename(C.cmd[1]) ~= "claude" then
-    if not C.resume_pick then return M.notify("set resume_pick to the agent's resume arguments, e.g. { \"resume\" } for codex", vim.log.levels.WARN) end
-    return start(false, false, C.resume_pick)
-  end
   local r = require("sepal.resume")
   local rows = r.items(vim.fn.getcwd())
   if #rows == 0 then return M.notify("no conversations in this directory yet") end
-  r.choose(rows, "continue with", function(row) start(false, false, { "-r", row.id }) end)
+  r.choose(rows, "continue with", function(row)
+    S.session = row.id
+    M.notify("the next spec continues " .. row.title)
+  end)
 end
 
--- paste text into the agent and press Enter, without opening its split; starts it (hidden) if it isn't running.
--- failed(): the text never reached the agent
-local function send(text, failed)
-  local function go()
-    local ch = vim.bo[S.buf].channel
-    vim.fn.chansend(ch, "\27[200~" .. text .. "\27[201~") -- bracketed paste: newlines stay in the prompt
-    vim.defer_fn(function() pcall(vim.fn.chansend, ch, "\r") end, 100) -- Enter in the same write lands inside the paste; pcall: the agent may have exited
+-- :Sepal open: the chat the specs went to, in Claude Code itself (a new tmux window by default),
+-- to read what the agent did and why, or to keep talking to it
+function M.open()
+  local cwd = vim.fn.getcwd()
+  local id = S.session
+  if id == nil then id = require("sepal.resume").latest(cwd) end
+  if not id then return M.notify("no chat yet: send a spec first") end
+  if S.run then return M.notify("a spec is running; open the chat once it's done, or :Sepal stop", vim.log.levels.WARN) end
+  local argv = vim.list_extend(vim.list_extend({}, C.cmd), { "--resume", id })
+  if C.open then return C.open(argv, cwd) end
+  local line = table.concat(vim.tbl_map(vim.fn.shellescape, argv), " ")
+  if vim.env.TMUX then
+    local r = vim.system({ "tmux", "new-window", "-c", cwd, "-n", "sepal", line }):wait()
+    if r.code ~= 0 then M.notify("tmux new-window failed: " .. (first(r.stderr, 200) or r.code), vim.log.levels.ERROR) end
+    return
   end
-  if alive() then go(); return M.notify("spec sent") end
-  start(true, true)
-  if not alive() then return failed() end -- start already said why
-  local done = progress("starting the agent")
-  -- ponytail: a fresh agent is "ready" once its buffer has stayed the same for 3s (past the resume
-  -- fallback) and shows output; an agent that boots slower than 15s gets the text before its prompt
-  local buf, since, tries = S.buf, vim.uv.now(), 0
-  local function poll()
-    if not alive() then done(); return failed() end
-    if S.buf ~= buf then buf, since = S.buf, vim.uv.now() end
-    tries = tries + 1
-    local shown = vim.iter(vim.api.nvim_buf_get_lines(buf, 0, -1, false)):any(function(l) return l ~= "" end)
-    if (vim.uv.now() - since >= 3000 and shown) or tries >= 75 then go(); return done("spec sent") end
-    vim.defer_fn(poll, 200)
-  end
-  vim.defer_fn(poll, 200)
+  pcall(vim.fn.setreg, "+", line)
+  M.notify("run this in a terminal (copied): " .. line)
 end
+
+-- :Sepal review: every change to review in the quickfix list, the cursor on the first.
+-- :Sepal accept / reject: the change under the cursor; with "all": every change in every file
+function M.review() require("sepal.review").open() end
+function M.accept(all) local r = require("sepal.review"); if all then r.accept_all() else r.accept() end end
+function M.reject(all) local r = require("sepal.review"); if all then r.reject_all() else r.reject() end end
 
 local TEMPLATE = { "Scope: ", "Goal: ", "", "Constraints:", "- ", "", "Files:" }
 local IDEA = { "", "", "Files:" } -- with spec_suggest: the idea goes on top, <c-c><c-s> writes the spec
@@ -218,8 +291,8 @@ local function add_selection(buf, block, path)
   add_file(buf, path)
 end
 
--- :Sepal spec: write a spec in a buffer above the code, then send it to the agent.
--- <c-c><c-c> sends, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
+-- :Sepal spec: write a spec in a buffer above the code, then run it in the background.
+-- <c-c><c-c> runs it, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
 -- <c-c><c-s> has spec_suggest turn what's there (an idea + files) into the spec.
 -- range: { first, last } lines of the current buffer to put in the spec (:'<,'>Sepal spec)
 -- lines: the text to start from (a spec that could not be sent comes back with it)
@@ -235,7 +308,6 @@ function M.spec(range, lines)
       return vim.api.nvim_set_current_win(w)
     end
   end
-  if alive() and vim.api.nvim_get_current_buf() == S.buf then vim.cmd.wincmd("p") end -- not over the agent
   local buf = vim.api.nvim_create_buf(false, true)
   vim.b[buf].sepal_spec = true
   vim.bo[buf].filetype = "markdown"
@@ -271,11 +343,8 @@ function M.spec(range, lines)
     if #lines == 0 then return M.notify("the spec is empty", vim.log.levels.WARN) end
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
-    send(table.concat(lines, "\n"), function()
-      M.notify("the spec was not sent, it is back in its buffer", vim.log.levels.WARN)
-      M.spec(nil, lines)
-    end)
-  end, vim.tbl_extend("force", o, { desc = "Send the spec to the agent" }))
+    run(table.concat(lines, "\n"))
+  end, vim.tbl_extend("force", o, { desc = "Run the spec in the background" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -305,7 +374,7 @@ function M.spec(range, lines)
         return M.notify("the spec changed while it was being written, <c-c><c-s> again", vim.log.levels.WARN)
       end
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(out, "\n"))
-      done("spec ready: <c-c><c-c> sends it, u undoes")
+      done("spec ready: <c-c><c-c> runs it, u undoes")
     end))
     if not ok then
       done()
@@ -321,6 +390,6 @@ function M.spec(range, lines)
   end, vim.tbl_extend("force", o, { desc = "Add a file to the spec" }))
 end
 
-M._t = { state = function() return S end, start = function(...) start(...) end }
+M._t = { state = function() return S end }
 
 return M

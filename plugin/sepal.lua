@@ -1,14 +1,20 @@
 if vim.g.loaded_sepal then return end
 vim.g.loaded_sepal = true
 
--- :Sepal toggles the agent split, :Sepal new starts a fresh chat, :Sepal spec writes a spec for it
--- (:'<,'>Sepal spec puts those lines in it), :Sepal resume picks a conversation to continue
-local SUB = { toggle = "toggle", new = "new", spec = "spec", resume = "resume" }
+-- :[range]Sepal [spec] writes a spec and runs it in the background; :Sepal review / accept / reject
+-- go through what it changed; :Sepal open shows the chat; new, resume pick the chat; stop stops it
+local SUB = { "spec", "review", "accept", "reject", "open", "new", "resume", "stop" }
 vim.api.nvim_create_user_command("Sepal", function(o)
-  local f = SUB[o.args == "" and "toggle" or o.args]
-  if not f then return require("sepal").notify("unknown subcommand " .. o.args, vim.log.levels.ERROR) end
-  if f == "spec" then return require("sepal").spec(o.range > 0 and { o.line1, o.line2 } or nil) end
-  require("sepal")[f]()
-end, { nargs = "?", range = true, complete = function(lead)
-  return vim.tbl_filter(function(k) return vim.startswith(k, lead) end, vim.tbl_keys(SUB))
-end, desc = "Sepal agent split" })
+  local sub, arg = o.fargs[1] or "spec", o.fargs[2]
+  local sepal = require("sepal")
+  if not vim.tbl_contains(SUB, sub) then return sepal.notify("unknown subcommand " .. sub, vim.log.levels.ERROR) end
+  if sub == "spec" then return sepal.spec(o.range > 0 and { o.line1, o.line2 } or nil) end
+  if sub == "accept" or sub == "reject" then return sepal[sub](arg == "all") end
+  sepal[sub]()
+end, { nargs = "*", range = true, complete = function(lead, line)
+  local words = vim.split(vim.trim(line:gsub("^%S*", "")), "%s+")
+  if (words[1] == "accept" or words[1] == "reject") and (#words > 1 or line:match("%s$")) then
+    return vim.startswith("all", lead) and { "all" } or {}
+  end
+  return vim.tbl_filter(function(k) return vim.startswith(k, lead) end, SUB)
+end, desc = "Sepal: specs for the agent and its changes" })

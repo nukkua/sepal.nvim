@@ -1,15 +1,19 @@
-*sepal.txt*  A CLI agent in a terminal split
+*sepal.txt*  Specs for Claude Code, run in the background, reviewed in place
 
 ==============================================================================
 1. INTRODUCTION                                                        *sepal*
 
-sepal runs a CLI agent (Claude Code by default) in a terminal split next to
-your code. The first toggle continues the last chat in this directory
-(`claude -c`), so the chat comes back after Neovim or tmux goes away.
+Write a spec in Neovim and Claude Code works on it in the background
+(`claude -p`), without a terminal or chat window. When it's done you get a
+notification, and its changes show up as hunks in your buffers, to accept or
+reject. |:Sepal-open| shows the chat, to see what it did and why.
 
-Requirements: Neovim 0.12+. Optional: fff.nvim to pick files for a spec,
-fidget.nvim for notifications and a spinner while the agent starts (warnings
-and errors always go to |vim.notify()|).
+Every spec continues one chat: at first this directory's last one, then the
+one the specs started. Specs sent while one runs wait in a queue.
+
+Requirements: Neovim 0.12+, Claude Code, git for the review. Optional:
+fff.nvim to pick files for a spec, fidget.nvim for a spinner and a "done"
+notification that stays (warnings and errors always go to |vim.notify()|).
 
 ==============================================================================
 2. SETUP                                                         *sepal-setup*
@@ -17,90 +21,109 @@ and errors always go to |vim.notify()|).
 `setup()` is optional. These are the defaults:
 >lua
   require("sepal").setup({
-    cmd = { "claude", "--settings", "<tui=default + a Stop hook>" },
-    resume = { "-c" },
-    side = "right",
-    width = 40,
-    focus = true,
+    cmd = { "claude" },
+    args = { "--permission-mode", "acceptEdits" },
+    continue = true,
     spec_suggest = nil,
+    open = nil,
+    keys = { next = "]r", prev = "[r", accept = "<c-c><c-y>", reject = "<c-c><c-n>" },
   })
 <
-`cmd`        argv of the agent. The default passes Claude Code two
-             settings: tui = "default" keeps it off its fullscreen
-             (alternate screen) renderer, which leaves nothing in the
-             buffer to scroll back through, and a Stop hook tells this
-             Neovim when a reply is done ("✓ the agent is done: <first
-             line of the reply>", not shown while you're in the agent;
-             with fidget it stays until you enter the agent). To add flags, extend it:
-             `vim.list_extend(vim.deepcopy(require("sepal").config().cmd), {...})`
-`resume`     arguments appended to `cmd` to continue this directory's last
-             chat, e.g. { "resume", "--last" } for codex. {} always starts
-             a fresh chat.
-`side`       "right" or "left".
-`width`      split width, percent of the editor (1-99).
-`focus`      move to the agent when it opens.
-`resume_pick` arguments for the agent's own conversation picker, used by
-             :Sepal resume for agents other than Claude Code, e.g.
-             { "resume" } for codex.
+`cmd`        the agent. A spec runs `cmd -p --output-format stream-json
+             --verbose <args> [--resume <chat>]` with the spec on stdin.
+                                                                *sepal-args*
+`args`       added to each spec run. Nobody answers permission prompts in
+             the background, so a tool call that needs one is refused and
+             sepal names it ("the agent was not allowed: Bash(make
+             test)"). Allow what you trust:
+             `{ "--permission-mode", "acceptEdits", "--allowedTools",
+             "Bash(make test)" }`. Other flags too: `"--model", "opus"`.
+`continue`   the first spec continues this directory's last chat; false
+             starts a new one.
+`open`       function(argv, cwd) that shows the chat for |:Sepal-open|.
+             Default: a new tmux window; outside tmux the command is
+             copied to the + register.
+`keys`       maps in buffers with changes to review (|sepal-review|). A key
+             set to false is not mapped; `keys = false` maps none.
                                                        *sepal-spec_suggest*
 `spec_suggest` argv that gets the spec buffer on stdin (your idea and
              Files:) and prints the finished spec. <c-c><c-s> in a spec
              runs it; with it set, a new spec starts as just the idea and
              Files:. For Claude Code, pass -p and --no-session-persistence
-             (otherwise `claude -c` continues this run, not your chat).
+             (otherwise the next spec may continue this run, not your chat).
 
 ==============================================================================
 3. COMMANDS                                                    *sepal-commands*
 
                                                                       *:Sepal*
-:Sepal [toggle]   Show or hide the agent. The first time, it continues the
-                  last chat here, or starts a fresh one if there is none
-                  (the resumed agent exits with an error within 3 seconds).
-:Sepal new        Kill the agent and start a fresh chat.
-                                                              *:Sepal-resume*
-:Sepal resume     Find a Claude Code conversation of this directory by what
-                  you wrote in it and restart the agent on it. One row per
-                  message you typed ("2h  title │ message"), newest first.
-                  Type to fuzzy-filter, <C-n>/<C-p> move, <CR> resumes,
-                  <Esc> closes. `claude -p` runs are left out. Highlights:
-                  SepalPickHeader, SepalPickTitle, SepalPickAge,
-                  SepalPickPrompt, SepalPickMatch, SepalPickSelected. The
-                  header reads "continue with <selected title>". A picker plugin's |vim.ui.select()|
-                  (snacks, fzf-lua, telescope…) is used instead when there
-                  is one. Other agents: their own picker via `resume_pick`.
-:[range]Sepal spec
-                  Write a spec for the agent in a buffer above the code:
-                  Scope, Goal, Constraints and Files. In it:
+:[range]Sepal [spec]
+                  Write a spec in a buffer above the code: Scope, Goal,
+                  Constraints and Files. In it:
                     <c-c><c-s>  have |sepal-spec_suggest| write the spec
                                 from what's there (u undoes it)
                     <c-c><c-f>  add a file under Files: as @path (fff.nvim
                                 if installed, else a prompt)
-                    <c-c><c-c>  send the spec to the agent (starting it if
-                                needed) and close the buffer
+                    <c-c><c-c>  run the spec in the background and close
+                                the buffer
                     <c-c><c-k>  discard the spec
-                  Sending doesn't open the agent; if it isn't running it
-                  starts in the background. A spec the agent never got (it
-                  could not start) comes back in its buffer. Closing the window keeps the draft;
-                  :Sepal spec reopens it. With a [range] (a visual
-                  selection), those lines go in as a "Selection: path:10-20"
-                  code block above Files: and the file is listed; an open
-                  draft gets them added.
+                  A spec the agent never started on comes back in its
+                  buffer. Closing the window keeps the draft; :Sepal spec
+                  reopens it. With a [range] (a visual selection), those
+                  lines go in as a "Selection: path:10-20" code block above
+                  Files: and the file is listed; an open draft gets them
+                  added.
+:Sepal review     Every change to review in the quickfix list, the cursor on
+                  the first. See |sepal-review|.
+:Sepal accept [all]
+:Sepal reject [all]
+                  Accept or reject the change under the cursor; with "all",
+                  every change in every file.
+                                                                *:Sepal-open*
+:Sepal open       Open the specs' chat in Claude Code (`claude --resume
+                  <id>`), in a new tmux window by default (see `open`), to
+                  read what the agent did or keep talking to it. Close it
+                  before the next spec: that Claude doesn't see what the spec
+                  did, and what you type there branches the chat.
+:Sepal new        The next spec starts a new chat.
+                                                              *:Sepal-resume*
+:Sepal resume     Pick the chat the next specs continue, by what you wrote in
+                  it. One row per message you typed ("2h  title │
+                  message"), newest first. Type to fuzzy-filter, <C-n>/<C-p>
+                  move, <CR> picks, <Esc> closes. Highlights:
+                  SepalPickHeader, SepalPickTitle, SepalPickAge,
+                  SepalPickPrompt, SepalPickMatch, SepalPickSelected. A
+                  picker plugin's |vim.ui.select()| is used instead when
+                  there is one.
+:Sepal stop       Stop the running spec; queued specs come back to the spec
+                  buffer.
 
-Lua: `require("sepal").toggle()`, `.new()`, `.spec()`, `.resume()`. There are no default keys.
-Example:
->lua
-  vim.keymap.set("n", "<leader>aa", "<cmd>Sepal<cr>")
-  vim.keymap.set("n", "<leader>an", "<cmd>Sepal new<cr>")
-  vim.keymap.set("t", "<C-q>", "<cmd>Sepal<cr>")
-<
-Hiding the split keeps the agent running. If the agent exits, its split
-closes. Keys typed in the agent's terminal go to the agent: press
-CTRL-\ CTRL-N for normal mode, or map a key in terminal mode as above.
+Lua: `require("sepal").spec()`, `.review()`, `.accept(all)`, `.reject(all)`,
+`.open()`, `.new()`, `.resume()`, `.stop()`. There are no global default keys.
 
 ==============================================================================
-4. HEALTH                                                       *sepal-health*
+4. REVIEW                                                       *sepal-review*
 
-`:checkhealth sepal` checks `cmd`, `resume`, `spec_suggest`, `side`, `width`,
+Before a spec runs, the work tree is saved as a git tree object (untracked
+files too; your index and branches are left alone). After it, every file that
+differs is under review, except files you wrote yourself meanwhile. Changed
+lines are highlighted (SepalAdd, SepalChange, with signs SepalAddSign,
+SepalChangeSign) and removed lines are shown as virtual lines (SepalDelete,
+SepalDeleteSign). In those buffers:
+
+  ]r / [r       next / previous change; past the last, the next file's
+  <c-c><c-y>    accept the change under the cursor
+  <c-c><c-n>    reject it: the old text comes back and the file is written
+
+Rejecting a file the agent created deletes it; rejecting a deletion brings
+the file back. A file stays under review until each change is accepted or
+rejected; later specs that change it keep the text from before the first.
+The review lives in memory: a restarted Neovim has nothing to review. Your
+own edits to a file under review show as changes too.
+
+==============================================================================
+5. HEALTH                                                       *sepal-health*
+
+`:checkhealth sepal` checks `cmd`, `args`, git, `open`, `spec_suggest`,
 fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

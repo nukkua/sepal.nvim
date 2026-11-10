@@ -29,8 +29,20 @@ end
 -- <pasted_content> wrapper is stripped before this)
 local NOT_TYPED = { "^<[%w_-]+[ >]", "^Caveat:" }
 
+-- the newest conversation of cwd (by when it was last written), or nil
+function M.latest(cwd)
+  local best, at
+  for name, kind in vim.fs.dir(dir(cwd)) do
+    local id = kind == "file" and name:match("^(.+)%.jsonl$")
+    local st = id and vim.uv.fs_stat(vim.fs.joinpath(dir(cwd), name))
+    local t = st and st.mtime.sec + st.mtime.nsec / 1e9
+    if t and (not at or t > at) then best, at = id, t end
+  end
+  return best
+end
+
 -- one row per message you typed, newest first: { id = session id, time, age = "2h", title, msg,
--- text = "title │ message" (what a search matches) }
+-- text = "title │ message" (what a search matches) }. `claude -p` runs are in: sepal's specs are -p runs
 function M.items(cwd)
   local rows, now = {}, os.time(os.date("!*t"))
   for name, kind in vim.fs.dir(dir(cwd)) do
@@ -39,7 +51,7 @@ function M.items(cwd)
     if f then
       local data = f:read("a")
       f:close()
-      local title, msgs, printed = nil, {}, false
+      local title, msgs = nil, {}
       for line in data:gmatch("[^\n]+") do
         -- decode only the few records we need: a session file is mostly tool output
         if line:find('"aiTitle"', 1, true) or line:find('"customTitle"', 1, true) then
@@ -48,7 +60,6 @@ function M.items(cwd)
         elseif line:find('"role":"user"', 1, true) then
           local ok, r = pcall(vim.json.decode, line)
           if ok and r.type == "user" and not r.isMeta and type(r.message.content) == "string" then
-            printed = printed or r.entrypoint == "sdk-cli" -- claude -p: a one-off run, not a chat
             local text = vim.trim((r.message.content:gsub("</?pasted_content[^>]*>", ""))) -- a paste's wrapper
             local typed = text ~= ""
             for _, p in ipairs(NOT_TYPED) do typed = typed and not text:match(p) end
@@ -56,7 +67,7 @@ function M.items(cwd)
           end
         end
       end
-      if not printed then
+      do
         title = title or (msgs[1] and msgs[1].text:match("[^\n]*") or id)
         for _, m in ipairs(msgs) do
           local text = m.text:gsub("%s+", " ")

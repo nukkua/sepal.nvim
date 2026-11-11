@@ -7,7 +7,7 @@
 local M = {}
 
 local C = {
-  cmd = { "claude" },  -- the agent. A spec runs: cmd -p --output-format stream-json --verbose <args>, in its worktree
+  cmd = { "claude" },  -- the agent. A spec runs Claude Code (cmd <args> <spec>) in a hidden terminal in its worktree
   args = { "--permission-mode", "acceptEdits" }, -- added to each run: --model, --allowedTools…
   check = nil,         -- the check for specs without a `Done when:` line, e.g. "make test"; nil: no check
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
@@ -15,7 +15,7 @@ local C = {
   prepare = nil,       -- shell command run in each new worktree before the agent, $SEPAL_ROOT is your repo
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   spec_suggest = nil,  -- argv: rough spec on stdin -> finished spec on stdout; <c-c><c-s> in a spec runs it
-  open = nil,          -- function(argv, cwd) for :Sepal open; default: a new tmux window, outside tmux the command is copied
+  max_running = 2,     -- specs running at once, the rest wait in a queue; nil: no limit
 }
 function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}) end
 function M.config() return C end
@@ -94,8 +94,8 @@ function M.undo()
   if e then require("sepal.agent").undo(e) end
 end
 function M.open()
-  local list = entries()
-  for _, e in ipairs(list or {}) do if e.session then return require("sepal.agent").open(e) end end
+  local agent, list = require("sepal.agent"), entries()
+  for _, e in ipairs(list or {}) do if agent.running(e) or e.session then return agent.open(e) end end
   if list then M.notify("no spec has a chat yet") end
 end
 function M.stop()
@@ -219,7 +219,8 @@ function M.spec(range, lines)
       M.notify(why .. "\nthe spec is back in its buffer", vim.log.levels.ERROR)
       return giveback(text)
     end
-    M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or ""))
+    if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running spec is done") end
+    M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
   end, vim.tbl_extend("force", o, { desc = "Run the spec in the background" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
     vim.cmd.stopinsert()

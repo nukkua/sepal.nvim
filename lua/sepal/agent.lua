@@ -1,7 +1,8 @@
 -- sepal.agent — a spec's life: a worktree of what you see, the agent working there alone
--- (claude -p), sepal running the spec's check itself (`Done when:`), one more try for the agent
--- if the check fails, then landing the result in your work tree as unstaged changes (on its own
--- with land = "auto"). You're pulled in only when something needs you.
+-- (Claude Code in a hidden terminal: :Sepal open shows it), sepal running the spec's check itself
+-- (`Done when:`), one more try for the agent if the check fails, then landing the result in your
+-- work tree as unstaged changes (on its own with land = "auto"). You're pulled in only when
+-- something needs you. At most max_running specs run at once, the rest wait in a queue.
 
 local M = {}
 local git = require("sepal.git")
@@ -12,8 +13,9 @@ local function C() return require("sepal").config() end
 local function notify(...) return sepal().notify(...) end
 local WARN, ERROR = vim.log.levels.WARN, vim.log.levels.ERROR
 
--- running work per entry id: { job (the agent, check or prepare), stopped, done, update, exclude }
+-- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update, exclude }
 local jobs = {}
+local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
 
 -- the first non-empty line of s, cut to n characters
 local function first(s, n)
@@ -45,7 +47,7 @@ end
 -- what sepal tells the agent besides the spec
 local function notes(e)
   local n = { "", "---", "How to work on this (from sepal, not part of the spec):",
-    "- You're in a git worktree of the project, on your own: nobody is watching or can answer questions."
+    "- You're in a git worktree of the project. Work on your own: decide instead of asking questions."
       .. " Edit the files here. Don't commit, push or switch branches." }
   if e.check then n[#n + 1] = ("- Done when `%s` passes: run exactly that command (nothing added to it, it is the only one allowed), and keep fixing until it passes."):format(e.check) end
   n[#n + 1] = "- Decide what the spec leaves open. End your reply with the decisions a reviewer should know:"
@@ -76,18 +78,6 @@ local function about(tool, wt)
   if p and vim.startswith(p, wt .. "/") then p = p:sub(#wt + 2) end
   local arg = p or vim.iter({ i.command, i.pattern, i.url, i.description }):find(function(v) return type(v) == "string" end)
   return tostring(tool.name) .. (arg and " " .. first(arg, 50) or "")
-end
-
--- "Bash(make test)" for each tool call the agent was not allowed to make
-local function denied(res)
-  local names, seen = {}, {}
-  for _, d in ipairs(type(res) == "table" and type(res.permission_denials) == "table" and res.permission_denials or {}) do
-    local i = type(d.tool_input) == "table" and d.tool_input or {}
-    local arg = i.command or i.file_path or i.url
-    local name = tostring(d.tool_name) .. (type(arg) == "string" and "(" .. first(arg, 40) .. ")" or "")
-    if not seen[name] then seen[name] = true; names[#names + 1] = name end
-  end
-  return names
 end
 
 local function bufof(path)
@@ -130,9 +120,7 @@ local function finish(e, wt, status, extra)
     notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   end
-  if e.denied and status ~= "stopped" then
-    notify("the agent was not allowed: " .. table.concat(e.denied, ", ") .. "\nallow tools with --allowedTools in args, see :h sepal-args", WARN)
-  end
+  vim.schedule(M._next)
 end
 
 local agent -- below
@@ -165,67 +153,138 @@ local function check(e, wt)
   jobs[e.id].job = job
 end
 
+-- Claude Code reports back through hooks: each one appends its input (a JSON line) to $SEPAL_EVENTS
+local HOOK = { { hooks = { { type = "command", command = [[{ tr -d '\n'; echo; } >> "$SEPAL_EVENTS"]] } } } }
+local SETTINGS = vim.json.encode({ hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
+  Notification = HOOK, Stop = HOOK } })
+
+-- the agent's last reply: from the Stop hook, else the end of its transcript
+local function reply_of(ev)
+  if type(ev.last_assistant_message) == "string" then return ev.last_assistant_message end
+  local f = type(ev.transcript_path) == "string" and io.open(ev.transcript_path)
+  if not f then return nil end
+  local last
+  for l in f:lines() do
+    local ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } })
+    local c = ok and type(t) == "table" and t.type == "assistant" and type(t.message) == "table" and t.message.content
+    local text = {}
+    for _, b in ipairs(type(c) == "table" and c or {}) do
+      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then text[#text + 1] = b.text end
+    end
+    if #text > 0 then last = table.concat(text, "\n") end
+  end
+  f:close()
+  return last
+end
+
+-- the agent: Claude Code itself, in a hidden terminal buffer (:Sepal open shows it). Its turn is over
+-- at the Stop hook; then it's closed, and sepal checks and lands what it did
 agent = function(e, prompt, wt)
-  local argv = vim.list_extend(vim.list_extend({}, C().cmd), { "-p", "--output-format", "stream-json", "--verbose" })
-  vim.list_extend(argv, C().args or {})
+  local j = jobs[e.id]
+  local events = wt .. ".events"
+  os.remove(events)
+  local argv = vim.list_extend(vim.list_extend({}, C().cmd), C().args or {})
   if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
   if e.session then vim.list_extend(argv, { "--resume", e.session }) end
-  local r, partial = { started = false }, ""
-  local function event(line)
-    local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
-    if not ok or type(ev) ~= "table" then return end
-    if type(ev.session_id) == "string" then e.session = ev.session_id end
-    if ev.type == "system" and ev.subtype == "init" then r.started = true end
-    if ev.type == "result" then r.started, r.result = true, ev end
-    if ev.type == "assistant" and type(ev.message) == "table" and type(ev.message.content) == "table" then
-      for _, c in ipairs(ev.message.content) do
-        if type(c) == "table" and c.type == "tool_use" and jobs[e.id] then
-          e.activity = about(c, wt)
-          jobs[e.id].update(e.title .. ": " .. e.activity)
-          inbox.render()
-        end
-      end
+  vim.list_extend(argv, { "--settings", SETTINGS, prompt })
+  local b = vim.api.nvim_create_buf(false, true)
+  local started, over, timer = false, false, vim.uv.new_timer()
+  local function close()
+    over = true
+    timer:stop(); timer:close()
+    os.remove(events)
+    for _, w in ipairs(vim.fn.win_findbuf(b)) do pcall(vim.api.nvim_win_close, w, true) end
+    if vim.api.nvim_buf_is_valid(b) then
+      local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
+      pcall(vim.api.nvim_buf_delete, b, { force = true }) -- ends claude too
+      return lines[#lines]
     end
   end
-  local function exited(out)
-    if partial ~= "" then event(partial); partial = "" end
-    local j = jobs[e.id]
-    if not j or j.stopped then return finish(e, wt, "stopped") end
-    if not r.started then
-      return finish(e, wt, "error", { error = "the agent didn't start: " .. (first(out.stderr, 200) or ("exit " .. tostring(out.code))) })
-    end
-    -- what it did is kept even when it failed: you can still look at it, land it or reply
-    local res = r.result
+  local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
+    close()
     e.result = git.result(e.root, wt, e.base, ref(e, "result"), j.exclude) or e.result
     e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
-    local no = denied(res)
-    e.denied = #no > 0 and no or nil
-    if not res or res.is_error then
-      return finish(e, wt, "error", { error = "the agent failed: " .. (first(res and res.result, 200) or first(out.stderr, 200) or ("exit " .. tostring(out.code))) })
-    end
-    e.reply, e.summary = res.result, first(res.result, 100)
+    local reply = reply_of(ev)
+    e.reply, e.summary = reply, first(reply, 100)
     local seen = {}
     for _, a in ipairs(e.assumptions or {}) do seen[a] = true end
-    for _, a in ipairs(M.assumptions(res.result)) do -- a retry adds to them
+    for _, a in ipairs(M.assumptions(reply)) do -- a retry adds to them
       if not seen[a] then e.assumptions = e.assumptions or {}; e.assumptions[#e.assumptions + 1] = a end
     end
     if e.check then return check(e, wt) end
     done(e, wt)
   end
-  local ok, job = pcall(vim.system, argv, { cwd = wt, stdin = prompt, text = true, stdout = function(_, data)
-    if not data then return end
-    partial = partial .. data
-    local lines = {}
-    for l in partial:gmatch("([^\n]*)\n") do lines[#lines + 1] = l end
-    partial = partial:match("[^\n]*$")
-    if #lines > 0 then vim.schedule(function() for _, l in ipairs(lines) do event(l) end end) end
-  end }, vim.schedule_wrap(exited))
-  if not ok then return finish(e, wt, "error", { error = "could not run " .. tostring(argv[1]) .. ": " .. tostring(job):match("[^\n]*") }) end
-  jobs[e.id].job = job
+  local function event(line)
+    local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
+    if over or not ok or type(ev) ~= "table" then return end
+    started = true
+    if type(ev.session_id) == "string" then e.session = ev.session_id end
+    local name = ev.hook_event_name
+    if name == "PreToolUse" then
+      e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)
+      j.update(e.title .. ": " .. e.activity)
+      inbox.render()
+    elseif name == "Notification" then
+      e.activity = "needs you"
+      inbox.render()
+      notify("▲ " .. e.title .. ": " .. tostring(ev.message or "it needs you") .. " · :Sepal open", WARN)
+    elseif name == "Stop" then
+      stopped(ev)
+    end
+  end
+  local off = 0
+  local function poll()
+    local f = io.open(events)
+    if not f then return end
+    f:seek("set", off)
+    local s = f:read("a")
+    f:close()
+    local cut = s:match(".*\n()")
+    if not cut then return end
+    off = off + cut - 1
+    for l in s:sub(1, cut - 1):gmatch("[^\n]+") do event(l) end
+  end
+  local function exited(_, code)
+    if over then return end
+    poll()
+    if over then return end
+    local last = close()
+    if j.stopped then return finish(e, wt, "stopped") end
+    finish(e, wt, "error", { error = started and "the agent quit before it was done (exit " .. code .. ")"
+      or "the agent didn't start: " .. (first(last, 200) or ("exit " .. code)) })
+  end
+  local ok, chan = pcall(vim.api.nvim_buf_call, b, function()
+    return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events }, on_exit = vim.schedule_wrap(exited) })
+  end)
+  if not ok or chan <= 0 then
+    close()
+    return finish(e, wt, "error", { error = "could not run " .. tostring(argv[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")) })
+  end
+  vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 2000
+  pcall(vim.api.nvim_buf_set_name, b, "sepal://" .. e.id)
+  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = b, desc = "Hide the agent (it keeps working)" })
+  j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
+  local asked -- Claude Code asks to trust each new folder before it starts (no hook runs before that)
+  timer:start(100, 100, vim.schedule_wrap(function()
+    if over then return end
+    poll()
+    if started or asked or not vim.api.nvim_buf_is_valid(b) then return end
+    if table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), " "):find("Quick safety check", 1, true) then
+      asked, e.activity = true, "needs you"
+      inbox.render()
+      notify("▲ " .. e.title .. ": Claude Code asks to trust the worktree · :Sepal open", WARN)
+    end
+  end))
 end
 
--- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt
+-- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
+-- with max_running specs already running it waits in the queue
 local function launch(e, prompt, from)
+  if C().max_running and vim.tbl_count(jobs) >= C().max_running then
+    e.status = "queued"
+    queue[#queue + 1] = { e, prompt, from }
+    return inbox.changed(e)
+  end
   local wt = wtdir(e)
   if vim.uv.fs_stat(wt) then git.remove_worktree(e.root, wt) end
   local ok, err = git.add_worktree(e.root, wt, from)
@@ -253,6 +312,16 @@ local function launch(e, prompt, from)
   jobs[e.id].job = job
 end
 
+-- a slot is free: the oldest queued spec starts
+function M._next()
+  if C().max_running and vim.tbl_count(jobs) >= C().max_running then return end
+  local q = table.remove(queue, 1)
+  if q then launch(q[1], q[2], q[3]) end
+end
+local function queued(e)
+  for i, q in ipairs(queue) do if q[1].id == e.id then return i end end
+end
+
 -- run a new spec from cwd; nil, why when it can't
 function M.start(text, cwd)
   local root = git.root(cwd)
@@ -270,7 +339,7 @@ end
 
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
 function M.continue(e, text)
-  if jobs[e.id] then return notify("it's still running") end
+  if M.running(e) then return notify("it's still running") end
   e.attempts, e.checked, e.why, e.error, e.check_out = 0, nil, nil, nil, nil
   e.time = os.time()
   launch(e, text .. "\n" .. notes(e), e.result or e.base)
@@ -279,7 +348,7 @@ end
 -- land e in your work tree as unstaged changes: a three-way merge per file, so what you changed
 -- since the spec started stays. auto: only when it's clean (no conflicts, no unsaved buffers)
 function M.land(e, auto)
-  if jobs[e.id] then return notify("it's still running") end
+  if M.running(e) then return notify("it's still running") end
   if e.status == "landed" then return notify("already landed: u takes it back") end
   if not e.result then return notify("nothing to land") end
   local changes = git.plan(e.root, e.base, e.result)
@@ -329,17 +398,24 @@ function M.undo(e)
 end
 
 function M.stop(e)
+  local i = queued(e)
+  if i then
+    table.remove(queue, i)
+    e.status = "stopped"
+    inbox.changed(e)
+    return notify("stopped: " .. e.title)
+  end
   local j = jobs[e.id]
   if not j then return notify("it isn't running") end
   j.stopped = true
   if j.job then pcall(j.job.kill, j.job, 15) end
 end
 
-function M.running(e) return jobs[e.id] ~= nil end
+function M.running(e) return jobs[e.id] ~= nil or queued(e) ~= nil end
 
 -- forget e: its commits and its line in the inbox
 function M.drop(e)
-  if jobs[e.id] then return notify("it's running: x stops it first") end
+  if M.running(e) then return notify("it's running: x stops it first") end
   if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
   git.delete_refs(e.root, "refs/sepal/" .. e.id)
   inbox.remove(e)
@@ -357,25 +433,28 @@ function M.show(e)
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, desc = "Close the diff" })
 end
 
--- the spec's chat in Claude Code itself: what the agent did and why, or to keep talking to it
+-- the spec in Claude Code itself, in a new tab: while it runs, the agent at work (type to it if you
+-- like; q in normal mode hides it, it keeps going), after that its chat (claude --resume)
 function M.open(e)
-  if not e.session then return notify("this spec has no chat yet") end
-  if jobs[e.id] then return notify("it's running; open the chat once it's done, or x stops it", WARN) end
-  local argv = vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session })
-  if C().open then return C().open(argv, e.root) end
-  local line = table.concat(vim.tbl_map(vim.fn.shellescape, argv), " ")
-  if vim.env.TMUX then
-    local r = vim.system({ "tmux", "new-window", "-c", e.root, "-n", "sepal", line }):wait()
-    if r.code ~= 0 then notify("tmux new-window failed: " .. (first(r.stderr, 200) or r.code), ERROR) end
-    return
+  local j = jobs[e.id]
+  if j and j.buf then
+    local w = vim.fn.bufwinid(j.buf)
+    if w ~= -1 then vim.api.nvim_set_current_win(w) else vim.cmd("tab sbuffer " .. j.buf) end
+    return vim.cmd.startinsert()
   end
-  pcall(vim.fn.setreg, "+", line)
-  notify("run this in a terminal (copied): " .. line)
+  if j or queued(e) then return notify(e.status == "queued" and "it's queued, it starts when a running spec is done" or "the agent is done, sepal is " .. e.status) end
+  if not e.session then return notify("this spec has no chat yet") end
+  vim.cmd.tabnew()
+  local b = vim.api.nvim_get_current_buf()
+  vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root })
+  vim.bo[b].bufhidden = "wipe"
+  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = b, desc = "Close the chat" })
+  vim.cmd.startinsert()
 end
 
 -- a small buffer to write the reply in: <c-c><c-c> sends it, <c-c><c-k> discards it
 function M.reply(e)
-  if jobs[e.id] then return notify("it's still running") end
+  if M.running(e) then return notify("it's still running") end
   if not e.session then return notify("this spec has no chat to continue") end
   local b = vim.api.nvim_create_buf(false, true)
   vim.bo[b].filetype, vim.bo[b].bufhidden = "markdown", "wipe"
@@ -408,6 +487,6 @@ vim.api.nvim_create_autocmd("VimLeavePre", { group = vim.api.nvim_create_augroup
   for _, j in pairs(jobs) do if j.job then pcall(j.job.kill, j.job, 15) end end
 end })
 
-M._t = { jobs = jobs }
+M._t = { jobs = jobs, queue = queue }
 
 return M

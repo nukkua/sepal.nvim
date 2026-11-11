@@ -20,7 +20,7 @@ function M.list(root)
   end
   for _, e in ipairs(list) do
     -- nvim quit while it ran: the agent was stopped with it
-    if e.status == "running" or e.status == "checking" then e.status = "interrupted" end
+    if e.status == "running" or e.status == "checking" or e.status == "queued" then e.status = "interrupted" end
   end
   cache[root] = list
   return list
@@ -61,6 +61,7 @@ end
 -- the inbox buffer ---------------------------------------------------------------------------
 
 local STATUS = {
+  queued = { "…", "queued", "Comment" },
   running = { "⋯", "running", "DiagnosticInfo" },
   checking = { "⋯", "checking", "DiagnosticInfo" },
   landed = { "✓", "landed", "DiagnosticOk" },
@@ -75,7 +76,7 @@ local STATUS = {
 }
 M.STATUS = STATUS
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  q close"
+local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  q close"
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -165,7 +166,7 @@ function M.open(root)
     vim.keymap.set("n", "L", on(agent.land), o("Land it in your work tree"))
     vim.keymap.set("n", "u", on(agent.undo), o("Take a landed spec back out"))
     vim.keymap.set("n", "r", on(agent.reply), o("Reply: the agent continues this spec"))
-    vim.keymap.set("n", "o", on(agent.open), o("Open the spec's chat"))
+    vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the spec's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))
     vim.keymap.set("n", "q", "<cmd>close<cr>", o("Close the inbox"))

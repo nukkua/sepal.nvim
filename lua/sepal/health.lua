@@ -26,10 +26,10 @@ function M.check()
   else h.ok("land: " .. C.land) end
   if C.prepare ~= nil and type(C.prepare) ~= "string" then h.error("prepare must be a shell command") end
   h.info("worktrees and the inbox: " .. tostring(C.worktrees))
-  if C.open ~= nil and type(C.open) ~= "function" then h.error("open must be a function(argv, cwd)")
-  elseif C.open then h.ok(":Sepal open uses your open function")
-  elseif vim.env.TMUX then h.ok(":Sepal open opens the chat in a new tmux window")
-  else h.info("not in tmux: :Sepal open copies the command to run") end
+  if C.max_running == nil then h.info("max_running not set: every spec runs at once")
+  elseif type(C.max_running) ~= "number" or C.max_running < 1 then h.error("max_running must be a number, 1 or more")
+  else h.ok("max_running: " .. C.max_running .. " at once, the rest wait") end
+  h.info("Claude Code may ask to trust a spec's new worktree: sepal warns, answer it in :Sepal open")
   if pcall(require, "fidget") then h.ok("fidget.nvim found: progress spinners") else h.info("fidget.nvim not found: plain notifications") end
   if pcall(require, "fff") then h.ok("fff.nvim found: <c-c><c-f> in a spec picks files with it") else h.info("fff.nvim not found: <c-c><c-f> in a spec prompts for a path") end
   local ss = C.spec_suggest

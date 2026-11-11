@@ -15,22 +15,36 @@ local function sh(cmd) return vim.system({ "sh", "-c", cmd }, { cwd = work, text
 sh("git init -q && printf 'one\\ntwo\\nthree\\n' > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm init")
 vim.env.SEPAL_T = T
 
--- a headless agent: logs where it runs, its arguments and stdin, runs $SEPAL_EDIT ($SEPAL_FIX when it
--- continues a chat), prints stream-json ending in a reply with assumptions.
--- $SEPAL_FAIL=start: dies before starting; =result: ends with an error; $SEPAL_DENY: permission_denials
+-- a fake Claude Code: logs where it runs, its arguments (without --settings and the prompt) and the
+-- prompt (its last argument), reports through the hooks ($SEPAL_EVENTS), runs $SEPAL_EDIT ($SEPAL_FIX
+-- when it continues a chat), ends its turn with a reply with assumptions, and stays open like claude.
+-- $SEPAL_FAIL=start: dies before starting; =quit: quits mid-turn. $SEPAL_ASK: asks for permission
 local fake = [[
-prompt=$(cat)
+n=$#; i=0; logged=; skip=
+for a; do
+  i=$((i+1))
+  if [ $i -eq $n ]; then prompt=$a
+  elif [ -n "$skip" ]; then skip=
+  elif [ "$a" = --settings ]; then skip=1
+  else logged="$logged${logged:+ }$a"; fi
+done
 pwd >> "$SEPAL_T/cwd"
-printf '%s\n' "$*" >> "$SEPAL_T/args"
+printf '%s\n' "$logged" >> "$SEPAL_T/args"
 printf '%s\n--\n' "$prompt" >> "$SEPAL_T/prompts"
-case "$*" in *--resume*) resumed=1;; esac
-if [ "$SEPAL_FAIL" = start ]; then echo "boom" >&2; exit 1; fi
-printf '{"type":"system","subtype":"init","session_id":"s1"}\n'
-printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/a.txt"}}]}}\n' "$PWD"
+case "$logged" in *--resume*) resumed=1;; esac
+if [ "$SEPAL_FAIL" = start ]; then echo boom; exit 1; fi
+if [ -n "$SEPAL_TRUST" ]; then echo "Quick safety check: Is this a project you trust?"; read _; fi
+ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
+ev '{"hook_event_name":"SessionStart","session_id":"s1"}'
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/a.txt\"}}"
 if [ -n "$SEPAL_SLEEP" ]; then sleep "$SEPAL_SLEEP"; fi
 if [ -n "$resumed" ] && [ -n "$SEPAL_FIX" ]; then sh -c "$SEPAL_FIX"; elif [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
-if [ "$SEPAL_FAIL" = result ]; then printf '{"type":"result","is_error":true,"result":"API error: overloaded","session_id":"s1"}\n'; exit 1; fi
-printf '{"type":"result","subtype":"success","is_error":false,"result":"Did it.\\n\\nAssumptions:\\n- kept the old API\\n- no new deps","session_id":"s1","permission_denials":%s}' "${SEPAL_DENY:-[]}"]]
+if [ "$SEPAL_FAIL" = quit ]; then exit 1; fi
+if [ -n "$SEPAL_ASK" ]; then ev '{"hook_event_name":"Notification","session_id":"s1","message":"Claude needs your permission to use Bash"}'; fi
+t="$SEPAL_EVENTS.jsonl"
+printf '%s\n' '{"type":"user","message":{"content":"go"}}' '{"type":"assistant","message":{"content":[{"type":"text","text":"Did it.\n\nAssumptions:\n- kept the old API\n- no new deps"}]}}' > "$t"
+ev "{\"hook_event_name\":\"Stop\",\"session_id\":\"s1\",\"transcript_path\":\"$t\"}"
+while :; do sleep 1; done]]
 sepal.setup({ cmd = { "sh", "-c", fake, "sh" }, worktrees = vim.fs.joinpath(T, "state") })
 
 local fails, n = 0, 0
@@ -56,10 +70,10 @@ local function args() return vim.split(vim.trim(read(T .. "/args") or ""), "\n")
 local function prompts() return read(T .. "/prompts") or "" end
 local function reset()
   for _, f in ipairs({ "args", "prompts", "cwd" }) do os.remove(T .. "/" .. f) end
-  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_DENY" }) do vim.env[k] = nil end
+  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST" }) do vim.env[k] = nil end
 end
 local function idle()
-  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil end, 10), "the spec never finished")
+  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the spec never finished")
   vim.wait(30)
 end
 -- notifications while fn runs: { msg, level }
@@ -97,14 +111,14 @@ test("a spec runs in a worktree and lands as unstaged changes, with what the age
   reset()
   vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\n' > a.txt; printf 'new\n' > b.txt]]
   local got = run({ "Scope: a.txt", "Goal: shout two", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.txt" })
-  eq(got, { "working on it: shout two", "landed: shout two · 2 files +2 −1\n· kept the old API\n· no new deps" })
+  eq(got, { "working on it: shout two · :Sepal open watches", "landed: shout two · 2 files +2 −1\n· kept the old API\n· no new deps" })
   eq(file("a.txt"), "one\nTWO\nthree\n")
   eq(file("b.txt"), "new\n")
   eq(sh("git diff --cached --name-only").stdout, "", "something was staged")
   local cwd = vim.trim(read(T .. "/cwd"))
   assert(cwd ~= work and vim.startswith(cwd, vim.fs.joinpath(T, "state")), "the agent ran in " .. cwd)
   eq(vim.uv.fs_stat(cwd), nil, "the worktree was left behind")
-  eq(args(), { "-p --output-format stream-json --verbose --permission-mode acceptEdits" })
+  eq(args(), { "--permission-mode acceptEdits" })
   local p = prompts()
   assert(p:find("Scope: a.txt\nGoal: shout two\n\nConstraints:\n\n\nFiles:\n- @a.txt\n\n---\n", 1, true), p) -- no empty bullet or Done when:
   assert(p:find("Assumptions:", 1, true), "no assumptions asked for")
@@ -133,7 +147,7 @@ test("sepal runs the check itself; when it fails the agent gets the output and t
   local got = run({ "Goal: fix it", "Done when: grep -q fixed a.txt" })
   eq(got[#got], "landed: fix it · 1 file +1 −3 · grep -q fixed a.txt ✓\n· kept the old API\n· no new deps")
   local a = args()
-  eq(a[1], "-p --output-format stream-json --verbose --permission-mode acceptEdits --allowedTools Bash(grep -q fixed a.txt)")
+  eq(a[1], "--permission-mode acceptEdits --allowedTools Bash(grep -q fixed a.txt)")
   eq(vim.endswith(a[2], "--resume s1"), true, a[2])
   assert(prompts():find("`grep -q fixed a.txt` failed (exit 1)", 1, true), "the agent never got the failure")
   eq(file("a.txt"), "fixed\n")
@@ -156,7 +170,7 @@ test("check: the default for specs without Done when:", function()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
   local got = run({ "Goal: default check" })
   sepal.config().check = nil
-  eq(got[1], "working on it: default check · done when `true` passes")
+  eq(got[1], "working on it: default check · done when `true` passes · :Sepal open watches")
   eq(newest().checked, true)
 end)
 
@@ -216,19 +230,48 @@ test("a reply continues the spec's chat from what it did, and lands only what's 
   eq(msgs(got)[1]:match("^landed"), "landed")
 end)
 
-test("no changes, a failed agent, one that never started, and tools it wasn't allowed", function()
+test("no changes, an agent that quits, one that never started, and one that asks for something", function()
   clean(); reset()
-  eq(run({ "Goal: nothing" }), { "working on it: nothing", "no changes: nothing: Did it." })
-  vim.env.SEPAL_FAIL = "result"
-  local got = notified(function() send({ "Goal: fails" }); idle() end)
-  eq(got[2], { "✗ fails: the agent failed: API error: overloaded · :Sepal inbox", vim.log.levels.ERROR })
+  eq(run({ "Goal: nothing" }), { "working on it: nothing · :Sepal open watches", "no changes: nothing: Did it." })
+  vim.env.SEPAL_FAIL = "quit"
+  local got = notified(function() send({ "Goal: quits" }); idle() end)
+  eq(got[2], { "✗ quits: the agent quit before it was done (exit 1) · :Sepal inbox", vim.log.levels.ERROR })
   vim.env.SEPAL_FAIL = "start"
   got = notified(function() send({ "Goal: no start" }); idle() end)
   eq(got[2], { "✗ no start: the agent didn't start: boom · :Sepal inbox", vim.log.levels.ERROR })
-  vim.env.SEPAL_FAIL = nil
-  vim.env.SEPAL_DENY = '[{"tool_name":"Bash","tool_input":{"command":"make test"}},{"tool_name":"Bash","tool_input":{"command":"make test"}}]'
-  got = notified(function() send({ "Goal: denied" }); idle() end)
-  eq(got[#got], { "the agent was not allowed: Bash(make test)\nallow tools with --allowedTools in args, see :h sepal-args", vim.log.levels.WARN })
+  vim.env.SEPAL_FAIL, vim.env.SEPAL_ASK = nil, "1"
+  got = notified(function() send({ "Goal: asks" }); idle() end)
+  eq(got[2], { "▲ asks: Claude needs your permission to use Bash · :Sepal open", vim.log.levels.WARN })
+end)
+
+test("a spec waiting on Claude Code's trust prompt says so; answering it in :Sepal open lets it go on", function()
+  clean(); reset()
+  vim.env.SEPAL_TRUST = "1"
+  local got = notified(function()
+    send({ "Goal: trust" })
+    vim.wait(2000, function() return newest().activity == "needs you" end)
+    vim.cmd("Sepal open")
+    vim.api.nvim_chan_send(vim.bo.channel, "\r")
+    vim.cmd.stopinsert()
+    idle()
+  end)
+  eq(got[2], { "▲ trust: Claude Code asks to trust the worktree · :Sepal open", vim.log.levels.WARN })
+  eq(newest().status, "nochange")
+end)
+
+test("max_running: the specs past it wait in a queue and start when one is done", function()
+  clean(); reset()
+  sepal.setup({ max_running = 1 })
+  vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.3", [[echo x > "$(basename "$PWD").txt"]]
+  local got = msgs(notified(function()
+    send({ "Goal: first" })
+    send({ "Goal: second" })
+    eq(newest().status, "queued")
+    idle()
+  end))
+  sepal.setup({ max_running = 2 })
+  eq(vim.list_slice(got, 1, 2), { "working on it: first · :Sepal open watches", "queued: second · it starts when a running spec is done" })
+  eq({ inbox.list(work)[1].status, inbox.list(work)[2].status }, { "landed", "landed" })
 end)
 
 test("outside a git repo the spec comes back in its buffer", function()
@@ -251,7 +294,7 @@ test(":Sepal stop stops a running spec", function()
     vim.cmd("Sepal stop")
     idle()
   end)
-  eq(msgs(got), { "working on it: long", "stopped: long" })
+  eq(msgs(got), { "working on it: long · :Sepal open watches", "stopped: long" })
   eq(newest().status, "stopped")
   eq(file("a.txt"), "one\ntwo\nthree\n")
 end)
@@ -274,12 +317,23 @@ test("the inbox lists the specs and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
-test(":Sepal open opens the newest spec's chat", function()
-  local got
-  sepal.setup({ open = function(argv, cwd) got = { argv[#argv - 1], argv[#argv], cwd } end })
+test(":Sepal open shows the agent at work, and the chat once it's done", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP = "0.5"
+  notified(function()
+    send({ "Goal: watched" })
+    vim.wait(200)
+    vim.cmd("Sepal open")
+    eq({ vim.bo.buftype, vim.api.nvim_buf_get_name(0) }, { "terminal", "sepal://" .. newest().id })
+    vim.cmd.stopinsert()
+    idle()
+  end)
+  eq(#vim.api.nvim_list_tabpages(), 1, "the agent's tab stayed open")
   vim.cmd("Sepal open")
-  sepal.config().open = nil
-  eq(got, { "--resume", "s1", work })
+  vim.wait(1000, function() return #args() == 2 end)
+  eq({ vim.bo.buftype, args()[2], vim.split(vim.trim(read(T .. "/cwd")), "\n")[2] }, { "terminal", "--resume", work })
+  vim.cmd.stopinsert()
+  vim.cmd("bwipeout!")
 end)
 
 test(":Sepal clean drops the specs that are over", function()

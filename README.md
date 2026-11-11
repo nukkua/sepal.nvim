@@ -92,7 +92,7 @@ cases.
 
 - `r` replies to a spec ("the timeout is 200ms on CI"). The agent continues from where it was, in the
   same chat, and the spec is checked and lands again.
-- `o` opens the spec's chat in a tmux window, so you can read what the agent did and why.
+- `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
 - `<CR>` shows everything the spec changed as a diff.
 
 That's all of it: write, send, keep working, read the `·` lines.
@@ -111,7 +111,7 @@ require("sepal").setup({
   prepare = nil,       -- shell command run in each new worktree first ($SEPAL_ROOT is your repo)
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   spec_suggest = nil,  -- argv: rough spec on stdin -> finished spec on stdout (see Specs)
-  open = nil,          -- function(argv, cwd) for :Sepal open (default: a new tmux window)
+  max_running = 2,     -- specs running at once, the rest wait as "queued"; nil: no limit
 })
 ```
 
@@ -123,7 +123,7 @@ require("sepal").setup({
 | `:Sepal inbox`       | every spec of this repo and where it stands                              |
 | `:Sepal land`        | land the newest spec that's waiting (with conflict markers if it overlaps your edits) |
 | `:Sepal undo`        | take the newest landed spec back out                                     |
-| `:Sepal open`        | the newest spec's chat in Claude Code                                    |
+| `:Sepal open`        | watch the newest spec in Claude Code (its chat once it's done)           |
 | `:Sepal stop`        | stop every running spec                                                  |
 | `:Sepal clean`       | drop the specs that are over (landed, no changes, undone, stopped)       |
 
@@ -189,9 +189,9 @@ require("sepal").setup({ prepare = "cp $SEPAL_ROOT/.env . && cargo fetch" })
 ## Permissions
 
 Specs run with `--permission-mode acceptEdits`, plus the spec's check: the agent can read files,
-edit them, and run `Done when:`. Nobody is there to answer a permission prompt, so any other tool
-call that needs one is refused, and sepal names it:
-`▲ the agent was not allowed: Bash(npm run lint)`. Allow what you trust in `args`:
+edit them, and run `Done when:`. When it asks for permission for anything else it waits for you,
+and sepal tells you: `▲ …: Claude needs your permission to use Bash · :Sepal open`. Allow what you
+trust upfront in `args`:
 
 ```lua
 require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowedTools", "Bash(npm run lint),Bash(git diff:*)" } })
@@ -199,19 +199,21 @@ require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowed
 
 Other flags go there too, e.g. `"--model", "opus"`.
 
-## The chat
+## Watching
 
-Each spec has its own Claude Code chat. `o` in the inbox, or `:Sepal open`, opens it with
-`claude --resume <id>` in a new tmux window. There you can read every tool call and the agent's
-reasoning, or keep talking to it. Outside tmux it copies the command for you to run. For another
-terminal:
+Each spec runs the real Claude Code in a hidden terminal inside Neovim, so it works in any terminal
+emulator, no tmux needed. `o` in the inbox, or `:Sepal open`, shows it in a new tab: you see the
+agent at work and can type to it. `q` in normal mode hides it again and it keeps going. Once the
+spec is done, the same key opens its chat with `claude --resume <id>`.
 
-```lua
-require("sepal").setup({ open = function(argv, cwd) vim.system({ "wezterm", "cli", "spawn", "--cwd", cwd, "--", unpack(argv) }) end })
-```
+sepal follows the agent through Claude Code hooks (passed with `--settings`, your own hooks still
+run): what tool it's on, when it asks for something, and when its turn is over. Then it closes it
+and runs the check.
 
-Close that window before you reply to the spec. The open Claude doesn't see what the reply did, and
-anything you type there branches the chat.
+At most `max_running` specs (2 by default) run at once, the rest wait as `queued`.
+
+Claude Code may ask to trust a spec's new worktree before it starts. sepal warns
+(`▲ …: Claude Code asks to trust the worktree · :Sepal open`), and you answer it there.
 
 `:checkhealth sepal` checks the setup.
 

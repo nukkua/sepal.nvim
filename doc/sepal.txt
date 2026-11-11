@@ -28,6 +28,7 @@ files, fidget.nvim for a spinner.
 5. Review with `git diff`, gitsigns, fugitive. |:Sepal-undo| takes it back.
 6. A warning means it needs you: <leader>ai shows why; `r` replies to the
    agent, `L` lands anyway, `o` opens its chat.
+7. To watch the agent while it works: |:Sepal-open| (or `o` in the inbox).
 
 ==============================================================================
 3. SETUP                                                         *sepal-setup*
@@ -43,16 +44,17 @@ files, fidget.nvim for a spinner.
     prepare = nil,
     worktrees = vim.fn.stdpath("state") .. "/sepal",
     spec_suggest = nil,
-    open = nil,
+    max_running = 2,
   })
 <
-`cmd`        the agent. A spec runs `cmd -p --output-format stream-json
-             --verbose <args>` in its worktree, with the spec on stdin.
+`cmd`        the agent: Claude Code. A spec runs `cmd <args> <spec>` in a
+             hidden terminal in its worktree; hooks passed with --settings
+             tell sepal what it does and when its turn is over.
                                                                 *sepal-args*
-`args`       added to each run. The spec's check is always allowed. Nobody
-             answers permission prompts, so other tool calls that need one
-             are refused and sepal names them ("the agent was not allowed:
-             Bash(npm run lint)"). Allow what you trust:
+`args`       added to each run. The spec's check is always allowed. When the
+             agent asks for permission it waits for you: sepal warns
+             ("▲ …: Claude needs your permission to use Bash · :Sepal open")
+             and you answer in |:Sepal-open|. Allow what you trust upfront:
              `{ "--permission-mode", "acceptEdits", "--allowedTools",
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
 `check`      the check for specs without a "Done when:" line, e.g.
@@ -66,8 +68,10 @@ files, fidget.nvim for a spinner.
              node_modules`. $SEPAL_ROOT is your repo. What it makes isn't
              counted as the agent's work.
 `worktrees`  where the worktrees and each repo's inbox (JSON) live.
-`open`       function(argv, cwd) that shows a spec's chat. Default: a new
-             tmux window; outside tmux the command is copied.
+                                                        *sepal-max_running*
+`max_running` specs running at once; the rest wait in the inbox as
+             "queued" and start when one is done. nil: no limit. Each
+             running spec is a Claude Code process.
                                                        *sepal-spec_suggest*
 `spec_suggest` argv that gets the spec buffer on stdin (your idea and
              Files:) and prints the finished spec. <c-c><c-s> runs it. For
@@ -98,7 +102,7 @@ files, fidget.nvim for a spinner.
                     r     reply: the agent continues in the same chat from
                           what it did; it's checked and lands again (only
                           what's new)
-                    o     open its chat (see `open`)
+                    o     watch it (running) or open its chat (done)
                     x     stop it
                     D     drop it
                     q     close the inbox
@@ -106,7 +110,11 @@ files, fidget.nvim for a spinner.
                                                                 *:Sepal-undo*
 :Sepal undo       Take the newest landed spec back out (a merge too: your
                   edits since stay).
-:Sepal open       The newest spec's chat in Claude Code (`claude --resume`).
+                                                                *:Sepal-open*
+:Sepal open       The newest spec in Claude Code, in a new tab. While it
+                  runs: the agent at work, live; type to it if you like.
+                  `q` (normal mode) hides it, it keeps going. Once it's done:
+                  its chat (`claude --resume`).
 :Sepal stop       Stop every running spec.
 :Sepal clean      Drop the specs that are over: landed, no changes, undone,
                   stopped, interrupted.
@@ -127,10 +135,14 @@ the spec waits as "needs you". Results are kept as refs/sepal/<id>/* until
 the spec is dropped. A spec running when Neovim quits shows as "interrupted";
 `r` continues it.
 
+Claude Code may ask to trust a spec's new worktree before it starts. sepal
+warns ("▲ …: Claude Code asks to trust the worktree · :Sepal open"); answer
+it there.
+
 ==============================================================================
 6. HEALTH                                                       *sepal-health*
 
 `:checkhealth sepal` checks git, `cmd`, `args`, `check`, `retries`, `land`,
-`prepare`, `open`, `spec_suggest`, fidget and fff.
+`prepare`, `max_running`, `spec_suggest`, fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

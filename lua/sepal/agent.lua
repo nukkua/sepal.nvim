@@ -253,14 +253,19 @@ agent = function(e, prompt, wt)
     finish(e, wt, "error", { error = started and "the agent quit before it was done (exit " .. code .. ")"
       or "the agent didn't start: " .. (first(last, 200) or ("exit " .. code)) })
   end
-  local ok, chan = pcall(vim.api.nvim_buf_call, b, function()
+  -- started in a hidden window the size of a tab, so Claude Code draws for the screen it's shown
+  -- on (nvim_buf_call's window is a few lines tall: its output would scroll away and redraw on open)
+  local win = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, hide = true, focusable = false,
+    width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight - 2, 1) })
+  local ok, chan = pcall(vim.api.nvim_win_call, win, function()
     return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events }, on_exit = vim.schedule_wrap(exited) })
   end)
+  pcall(vim.api.nvim_win_close, win, true)
   if not ok or chan <= 0 then
     close()
     return finish(e, wt, "error", { error = "could not run " .. tostring(argv[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")) })
   end
-  vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 2000
+  vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 10000
   pcall(vim.api.nvim_buf_set_name, b, "sepal://" .. e.id)
   vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = b, desc = "Hide the agent (it keeps working)" })
   j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
@@ -440,6 +445,8 @@ function M.open(e)
   if j and j.buf then
     local w = vim.fn.bufwinid(j.buf)
     if w ~= -1 then vim.api.nvim_set_current_win(w) else vim.cmd("tab sbuffer " .. j.buf) end
+    -- a terminal window follows the output only with the cursor on its last line; a new one starts at the top
+    vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(j.buf), 0 })
     return vim.cmd.startinsert()
   end
   if j or queued(e) then return notify(e.status == "queued" and "it's queued, it starts when a running spec is done" or "the agent is done, sepal is " .. e.status) end

@@ -303,12 +303,24 @@ local function launch(e, prompt, from)
   end
   local wt = wtdir(e)
   if vim.uv.fs_stat(wt) then git.remove_worktree(e.root, wt) end
-  local ok, err = git.add_worktree(e.root, wt, from)
-  if not ok then return finish(e, nil, "error", { error = "could not make a worktree: " .. tostring(err) }) end
   local done_, update = sepal().progress(e.title .. ": working")
-  jobs[e.id] = { done = done_, update = update }
+  jobs[e.id] = { done = done_, update = update } -- from here it counts as running: x stops it, max_running counts it
   e.status = "running"
   inbox.changed(e)
+  local ok, job = pcall(git.add_worktree, e.root, wt, from, function(made, err)
+    local j = jobs[e.id]
+    -- stopped mid-checkout or failed: finish removes whatever half of it is there
+    if not j or j.stopped then return finish(e, wt, "stopped") end
+    if not made then return finish(e, wt, "error", { error = "could not make a worktree: " .. err }) end
+    M._prepare(e, prompt, wt)
+  end)
+  if not ok then return finish(e, nil, "error", { error = "could not make a worktree: " .. tostring(job):match("[^\n]*") }) end
+  jobs[e.id].job = job
+end
+
+-- C.prepare in the new worktree (if set), then the agent
+function M._prepare(e, prompt, wt)
+  local update = jobs[e.id].update
   local prepare = C().prepare
   if not prepare then return agent(e, prompt, wt) end
   update(e.title .. ": preparing")
@@ -463,7 +475,7 @@ end
 -- like; q in normal mode hides it, it keeps going), after that its chat (claude --resume)
 function M.open(e)
   local j = jobs[e.id]
-  if j and j.buf then
+  if j and j.buf and vim.api.nvim_buf_is_valid(j.buf) then -- its terminal is gone once its turn is over (sepal checks)
     local w = vim.fn.bufwinid(j.buf)
     if w ~= -1 then vim.api.nvim_set_current_win(w) else
       -- as wide as the minimal window it started in, set before it shows: a resize makes Claude Code
@@ -477,7 +489,8 @@ function M.open(e)
     vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(j.buf), 0 })
     return vim.cmd.startinsert()
   end
-  if j or queued(e) then return notify(e.status == "queued" and "it's queued, it starts when a running task is done" or "the agent is done, sepal is " .. e.status) end
+  if queued(e) then return notify("it's queued, it starts when a running task is done") end
+  if j then return notify(j.buf and "the agent is done, sepal is " .. e.status or "it's starting: making its worktree") end
   if not e.session then return notify("this task has no chat yet") end
   tab()
   local b = vim.api.nvim_get_current_buf()

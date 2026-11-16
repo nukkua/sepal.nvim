@@ -122,7 +122,8 @@ local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) a
 
 render = function()
   local b = buf()
-  if not b or not vim.api.nvim_buf_is_valid(b) then return end
+  -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
+  if not b or #vim.fn.win_findbuf(b) == 0 then return end
   local root = vim.b[b].sepal_inbox
   local lines, rows, marks = { HELP, "" }, {}, {}
   local list = M.list(root)

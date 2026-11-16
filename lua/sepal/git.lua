@@ -26,11 +26,15 @@ end
 
 -- the repo's top directory, as buffer names spell it (git resolves symlinks, a cwd reached
 -- through one doesn't), or nil outside a repo
+local roots = {} -- cwd -> its root: every :Sepal command asks; only found ones are kept (a `git init` later counts)
 function M.root(cwd)
+  local known = roots[cwd]
+  if known and vim.uv.fs_stat(vim.fs.joinpath(known, ".git")) then return known end
   local root = out(cwd, { "rev-parse", "--show-toplevel" })
-  if not root or root == "" then return nil end
+  if not root or root == "" then roots[cwd] = nil; return nil end
   local real = vim.uv.fs_realpath(cwd)
-  if real and vim.startswith(real, root) and vim.endswith(cwd, real:sub(#root + 1)) then return cwd:sub(1, #cwd - (#real - #root)) end
+  if real and vim.startswith(real, root) and vim.endswith(cwd, real:sub(#root + 1)) then root = cwd:sub(1, #cwd - (#real - #root)) end
+  roots[cwd] = root
   return root
 end
 
@@ -38,7 +42,10 @@ end
 -- the index; ref: where to keep it
 function M.snapshot(root, ref)
   local idx = vim.fn.tempname()
-  local real = out(root, { "rev-parse", "--git-path", "index" })
+  -- the index's path and HEAD in one call; a fresh repo has no HEAD (git fails, but prints the path first)
+  local rp = M.run(root, { "rev-parse", "--git-path", "index", "--verify", "-q", "HEAD" })
+  local lines = vim.split(vim.trim(rp.stdout or ""), "\n")
+  local real, head = lines[1], rp.code == 0 and lines[2] or nil
   if real and real ~= "" then
     if not real:match("^/") then real = vim.fs.joinpath(root, real) end
     vim.uv.fs_copyfile(real, idx) -- no index yet (fresh repo): start empty
@@ -47,7 +54,7 @@ function M.snapshot(root, ref)
   local tree = M.run(root, { "add", "-A" }, { env = env }).code == 0 and out(root, { "write-tree" }, { env = env })
   os.remove(idx)
   if not tree then return nil end
-  return M.commit(root, tree, out(root, { "rev-parse", "--verify", "-q", "HEAD" }), ref)
+  return M.commit(root, tree, head, ref)
 end
 
 -- a commit of tree (with parent, if any) kept at ref
@@ -59,16 +66,17 @@ function M.commit(root, tree, parent, ref)
   return c
 end
 
--- a worktree of commit at dir; nil, err when it can't be made
-function M.add_worktree(root, dir, commit)
+-- a worktree of commit at dir, made in the background (checking out a big repo takes a while):
+-- on_done(ok, err) runs on the main loop. Returns the git process, to stop it
+function M.add_worktree(root, dir, commit, on_done)
   vim.fn.mkdir(vim.fs.dirname(dir), "p")
-  local r = M.run(root, { "worktree", "add", "--detach", "-f", dir, commit })
-  if r.code ~= 0 then return nil, vim.trim(r.stderr) end
-  return dir
+  return vim.system({ "git", "-C", root, "worktree", "add", "--detach", "-f", dir, commit }, { text = true },
+    vim.schedule_wrap(function(r) on_done(r.code == 0, vim.trim(r.stderr or "")) end))
 end
 
 function M.remove_worktree(root, dir)
-  M.run(root, { "worktree", "remove", "--force", dir })
+  if M.run(root, { "worktree", "remove", "--force", dir }).code == 0 then return end
+  -- git couldn't (a half-made or already deleted worktree): delete it by hand, then drop git's record of it
   if vim.uv.fs_stat(dir) then vim.fn.delete(dir, "rf") end
   M.run(root, { "worktree", "prune" })
 end
@@ -95,9 +103,8 @@ end
 function M.diff(root, a, b) return out(root, { "diff", "--no-renames", a, b }) or "" end
 
 function M.delete_refs(root, prefix)
-  for ref in (out(root, { "for-each-ref", "--format=%(refname)", prefix }) or ""):gmatch("[^\n]+") do
-    M.run(root, { "update-ref", "-d", ref })
-  end
+  local refs = out(root, { "for-each-ref", "--format=delete %(refname)", prefix }) or ""
+  if refs ~= "" then M.run(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }) end -- all of them in one go
 end
 
 local function readb(path)
@@ -113,9 +120,24 @@ local function writeb(path, s)
   f:write(s)
   f:close()
 end
-local function blob(root, commit, rel)
-  local r = M.run(root, { "cat-file", "-p", commit .. ":" .. rel }, { binary = true })
-  return r.code == 0 and r.stdout or nil
+-- the contents of many blobs with one git process: { [oid] = content }; an object that isn't a blob
+-- (a submodule's commit) or isn't there is left out
+local function blobs(root, oids)
+  if #oids == 0 then return {} end
+  local r = M.run(root, { "cat-file", "--batch" }, { binary = true, stdin = table.concat(oids, "\n") .. "\n" })
+  local got, s, pos = {}, r.code == 0 and r.stdout or "", 1
+  while pos <= #s do
+    local eol = s:find("\n", pos, true)
+    if not eol then break end
+    local oid, kind, size = s:sub(pos, eol - 1):match("^(%x+) (%S+) (%d+)$")
+    if not oid then pos = eol + 1 -- "<oid> missing"
+    else
+      size = tonumber(size)
+      if kind == "blob" then got[oid] = s:sub(eol + 1, eol + size) end
+      pos = eol + size + 2 -- the content, then its "\n"
+    end
+  end
+  return got
 end
 local function merge3(root, cur, base, theirs)
   local t = { vim.fn.tempname(), vim.fn.tempname(), vim.fn.tempname() }
@@ -127,12 +149,23 @@ end
 
 -- what applying a -> b to the work tree would do: { { rel, path, content (nil: delete), conflict } }
 function M.plan(root, a, b)
-  local changes = {}
-  local names = vim.split(out(root, { "diff", "--name-status", "--no-renames", "-z", a, b }) or "", "\0", { plain = true })
-  for i = 1, #names - 1, 2 do
-    local status, rel = names[i], names[i + 1]
+  local changes, files, oids = {}, {}, {}
+  -- ":<mode> <mode> <old oid> <new oid> <status>\0<path>\0" per file; the blobs come in one batch below
+  local r = M.run(root, { "diff", "--raw", "-z", "--no-renames", "--no-abbrev", a, b })
+  local raw = vim.split(r.code == 0 and r.stdout or "", "\0", { plain = true })
+  for i = 1, #raw - 1, 2 do
+    local old, new, status = raw[i]:match("^:%d+ %d+ (%x+) (%x+) (%a)")
+    if old then
+      files[#files + 1] = { status = status, rel = raw[i + 1], old = old, new = new }
+      if status ~= "A" then oids[#oids + 1] = old end
+      if status ~= "D" then oids[#oids + 1] = new end
+    end
+  end
+  local blob = blobs(root, oids)
+  for _, f in ipairs(files) do
+    local status, rel = f.status, f.rel
     local path = vim.fs.joinpath(root, rel)
-    local cur, old, new = readb(path), status ~= "A" and blob(root, a, rel) or nil, status ~= "D" and blob(root, b, rel) or nil
+    local cur, old, new = readb(path), status ~= "A" and blob[f.old] or nil, status ~= "D" and blob[f.new] or nil
     local c = { rel = rel, path = path }
     if cur == new then c.skip = true -- already like that
     elseif cur == old then c.content = new -- you didn't touch it: take theirs (or delete)

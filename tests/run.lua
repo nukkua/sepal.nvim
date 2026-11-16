@@ -394,6 +394,23 @@ test(":Sepal open toggles the agent and its chat when it's the only window of a 
   eq(#leaked, 0, "renamed agent terminals left their old names behind")
 end)
 
+test("while its worktree is being made, :Sepal open says so and :Sepal stop stops it cleanly", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo late > a.txt]]
+  local got = notified(function()
+    send({ "Goal: early" }) -- the worktree is made in the background: nothing has run yet
+    eq(newest().status, "running")
+    vim.cmd("Sepal open")
+    vim.cmd("Sepal stop")
+    idle()
+  end)
+  eq(msgs(got), { "working on it: early · :Sepal open watches", "it's starting: making its worktree", "stopped: early" })
+  eq(newest().status, "stopped")
+  eq(file("a.txt"), "one\ntwo\nthree\n")
+  eq(vim.fn.glob(vim.fs.joinpath(T, "state", inbox.key(work), newest().id)), "", "its worktree was left behind")
+  eq(read(T .. "/prompts"), nil, "the agent ran")
+end)
+
 test(":Sepal open shows the agent at work, and the chat once it's done", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP = "0.5"

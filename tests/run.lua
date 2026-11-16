@@ -345,6 +345,11 @@ test("q in the agent's last window shows another buffer instead of E444, and the
     vim.api.nvim_feedkeys("q", "tx", false)
     eq(vim.api.nvim_get_current_buf() ~= agent_buf, true, "q left the agent shown")
     eq(newest().status, "running")
+    vim.cmd("Sepal open") -- a toggle: back in, then out again
+    eq(vim.api.nvim_get_current_buf(), agent_buf)
+    vim.cmd.stopinsert()
+    vim.cmd("Sepal open")
+    eq(vim.api.nvim_get_current_buf() ~= agent_buf, true, ":Sepal open didn't leave the agent")
     idle()
   end)
 end)

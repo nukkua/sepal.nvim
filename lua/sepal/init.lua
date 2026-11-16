@@ -101,6 +101,7 @@ function M.undo()
   if e then require("sepal.agent").undo(e) end
 end
 function M.open()
+  if vim.b.sepal_agent then return M.close() end -- a toggle: from the agent (or a chat) it leaves, like q
   local agent, list = require("sepal.agent"), entries()
   for _, e in ipairs(list or {}) do if agent.running(e) or e.session then return agent.open(e) end end
   if list then M.notify("no task has a chat yet") end

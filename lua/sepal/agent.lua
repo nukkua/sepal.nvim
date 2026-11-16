@@ -271,6 +271,7 @@ agent = function(e, prompt, wt)
     return finish(e, wt, "error", { error = "could not run " .. tostring(argv[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")) })
   end
   vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 10000
+  vim.b[b].sepal_agent = true -- :Sepal open from here leaves it
   pcall(vim.api.nvim_buf_set_name, b, "sepal://" .. e.id)
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the agent (it keeps working)" })
   j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
@@ -479,6 +480,7 @@ function M.open(e)
   vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root,
     env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   vim.bo[b].bufhidden = "wipe"
+  vim.b[b].sepal_agent = true
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the chat" })
   vim.cmd.startinsert()
 end

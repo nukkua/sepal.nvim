@@ -203,7 +203,8 @@ Other flags go there too, e.g. `"--model", "opus"`.
 
 Each task runs the real Claude Code in a hidden terminal inside Neovim, so it works in any terminal
 emulator, no tmux needed. `o` in the inbox, or `:Sepal open`, shows it in a new tab: you see the
-agent at work and can type to it. `q` in normal mode hides it again and it keeps going. Once the
+agent at work and can type to it. `q` in normal mode hides it again and it keeps going, and so
+does `:Sepal open` itself, so one key toggles it. Once the
 task is done, the same key opens its chat with `claude --resume <id>`.
 
 sepal follows the agent through Claude Code hooks (passed with `--settings`, your own hooks still

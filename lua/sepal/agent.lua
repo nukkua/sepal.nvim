@@ -1,8 +1,8 @@
--- sepal.agent — a spec's life: a worktree of what you see, the agent working there alone
--- (Claude Code in a hidden terminal: :Sepal open shows it), sepal running the spec's check itself
+-- sepal.agent — a task's life: a worktree of what you see, the agent working there alone
+-- (Claude Code in a hidden terminal: :Sepal open shows it), sepal running the task's check itself
 -- (`Done when:`), one more try for the agent if the check fails, then landing the result in your
 -- work tree as unstaged changes (on its own with land = "auto"). You're pulled in only when
--- something needs you. At most max_running specs run at once, the rest wait in a queue.
+-- something needs you. At most max_running tasks run at once, the rest wait in a queue.
 
 local M = {}
 local git = require("sepal.git")
@@ -32,7 +32,7 @@ end
 local function ref(e, what) return "refs/sepal/" .. e.id .. "/" .. what end
 local function wtdir(e) return vim.fs.joinpath(C().worktrees, inbox.key(e.root), e.id) end
 
--- the spec's check ("Done when: make test") and title (Goal, else Scope, else its first line)
+-- the task's check ("Done when: make test") and title (Goal, else Scope, else its first line)
 function M.parse(text)
   local f = {}
   for l in (text .. "\n"):gmatch("([^\n]*)\n") do
@@ -41,16 +41,16 @@ function M.parse(text)
       if v and v ~= "" and not f[k] then f[k] = v end
     end
   end
-  return f["Done when"], first(f.Goal or f.Scope or text, 40) or "spec"
+  return f["Done when"], first(f.Goal or f.Scope or text, 40) or "task"
 end
 
--- what sepal tells the agent besides the spec
+-- what sepal tells the agent besides the task
 local function notes(e)
-  local n = { "", "---", "How to work on this (from sepal, not part of the spec):",
+  local n = { "", "---", "How to work on this (from sepal, not part of the task):",
     "- You're in a git worktree of the project. Work on your own: decide instead of asking questions."
       .. " Edit the files here. Don't commit, push or switch branches." }
   if e.check then n[#n + 1] = ("- Done when `%s` passes: run exactly that command (nothing added to it, it is the only one allowed), and keep fixing until it passes."):format(e.check) end
-  n[#n + 1] = "- Decide what the spec leaves open. End your reply with the decisions a reviewer should know:"
+  n[#n + 1] = "- Decide what the task leaves open. End your reply with the decisions a reviewer should know:"
   n[#n + 1] = "Assumptions:\n- <one per line>\n(or \"Assumptions: none\")"
   return table.concat(n, "\n")
 end
@@ -218,7 +218,10 @@ agent = function(e, prompt, wt)
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
     if over or not ok or type(ev) ~= "table" then return end
     started = true
-    if type(ev.session_id) == "string" then e.session = ev.session_id end
+    if type(ev.session_id) == "string" and ev.session_id ~= e.session then
+      e.session = ev.session_id
+      inbox.save(e.root) -- now, not when it finishes: a quit mid-run keeps the chat for o and r
+    end
     local name = ev.hook_event_name
     if name == "PreToolUse" then
       e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)
@@ -283,7 +286,7 @@ agent = function(e, prompt, wt)
 end
 
 -- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
--- with max_running specs already running it waits in the queue
+-- with max_running tasks already running it waits in the queue
 local function launch(e, prompt, from)
   if C().max_running and vim.tbl_count(jobs) >= C().max_running then
     e.status = "queued"
@@ -317,7 +320,7 @@ local function launch(e, prompt, from)
   jobs[e.id].job = job
 end
 
--- a slot is free: the oldest queued spec starts
+-- a slot is free: the oldest queued task starts
 function M._next()
   if C().max_running and vim.tbl_count(jobs) >= C().max_running then return end
   local q = table.remove(queue, 1)
@@ -327,13 +330,13 @@ local function queued(e)
   for i, q in ipairs(queue) do if q[1].id == e.id then return i end end
 end
 
--- run a new spec from cwd; nil, why when it can't
+-- run a new task from cwd; nil, why when it can't
 function M.start(text, cwd)
   local root = git.root(cwd)
-  if not root then return nil, "not in a git repository: a spec runs in a git worktree" end
+  if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
-    spec = text, check = check or C().check, time = os.time(), status = "running", attempts = 0 }
+    task = text, check = check or C().check, time = os.time(), status = "running", attempts = 0 }
   e.base = git.snapshot(root, ref(e, "base"))
   if not e.base then return nil, "could not save your work tree (git add / write-tree failed)" end
   e.base0 = e.base
@@ -351,7 +354,7 @@ function M.continue(e, text)
 end
 
 -- land e in your work tree as unstaged changes: a three-way merge per file, so what you changed
--- since the spec started stays. auto: only when it's clean (no conflicts, no unsaved buffers)
+-- since the task started stays. auto: only when it's clean (no conflicts, no unsaved buffers)
 function M.land(e, auto)
   if M.running(e) then return notify("it's still running") end
   if e.status == "landed" then return notify("already landed: u takes it back") end
@@ -382,9 +385,9 @@ function M.land(e, auto)
   notify(msg, vim.log.levels.INFO, { icon = { "✓", "DiagnosticOk" } })
 end
 
--- take a landed spec back out of your work tree (again a merge: your edits since stay)
+-- take a landed task back out of your work tree (again a merge: your edits since stay)
 function M.undo(e)
-  if not e.landed then return notify("only a landed spec can be taken back") end
+  if not e.landed then return notify("only a landed task can be taken back") end
   local changes = git.plan(e.root, e.landed.to, e.landed.from)
   local unsaved, conflicts = {}, {}
   for _, c in ipairs(changes) do
@@ -426,7 +429,7 @@ function M.drop(e)
   inbox.remove(e)
 end
 
--- everything the spec changed, as a diff in a new tab
+-- everything the task changed, as a diff in a new tab
 function M.show(e)
   if not e.result then return notify("no changes yet") end
   local b = vim.api.nvim_create_buf(false, true)
@@ -438,7 +441,7 @@ function M.show(e)
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, desc = "Close the diff" })
 end
 
--- the spec in Claude Code itself, in a new tab: while it runs, the agent at work (type to it if you
+-- the task in Claude Code itself, in a new tab: while it runs, the agent at work (type to it if you
 -- like; q in normal mode hides it, it keeps going), after that its chat (claude --resume)
 function M.open(e)
   local j = jobs[e.id]
@@ -456,8 +459,8 @@ function M.open(e)
     vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(j.buf), 0 })
     return vim.cmd.startinsert()
   end
-  if j or queued(e) then return notify(e.status == "queued" and "it's queued, it starts when a running spec is done" or "the agent is done, sepal is " .. e.status) end
-  if not e.session then return notify("this spec has no chat yet") end
+  if j or queued(e) then return notify(e.status == "queued" and "it's queued, it starts when a running task is done" or "the agent is done, sepal is " .. e.status) end
+  if not e.session then return notify("this task has no chat yet") end
   vim.cmd.tabnew()
   local b = vim.api.nvim_get_current_buf()
   vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root })
@@ -469,7 +472,7 @@ end
 -- a small buffer to write the reply in: <c-c><c-c> sends it, <c-c><c-k> discards it
 function M.reply(e)
   if M.running(e) then return notify("it's still running") end
-  if not e.session then return notify("this spec has no chat to continue") end
+  if not e.session then return notify("this task has no chat to continue") end
   local b = vim.api.nvim_create_buf(false, true)
   vim.bo[b].filetype, vim.bo[b].bufhidden = "markdown", "wipe"
   vim.b[b].sepal_reply = e.id

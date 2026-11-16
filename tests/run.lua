@@ -73,14 +73,14 @@ local function reset()
   for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST" }) do vim.env[k] = nil end
 end
 local function idle()
-  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the spec never finished")
+  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the task never finished")
   vim.wait(30)
 end
 -- notifications while fn runs: { msg, level }
 local function notified(fn)
   local got, notify = {}, vim.notify
   vim.notify = function(msg, lvl)
-    if not msg:match("^spec: <c%-c><c%-c> sends it") then got[#got + 1] = { msg, lvl or vim.log.levels.INFO } end -- the keys hint
+    if not msg:match("^task: <c%-c><c%-c> sends it") then got[#got + 1] = { msg, lvl or vim.log.levels.INFO } end -- the keys hint
   end
   local ok, err = pcall(fn)
   vim.notify = notify
@@ -88,16 +88,16 @@ local function notified(fn)
   return got
 end
 local function msgs(got) return vim.tbl_map(function(g) return g[1] end, got) end
-local function spec_buf()
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_spec then return b end end
+local function task_buf()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return b end end
 end
--- write a spec and send it with <c-c><c-c>
+-- write a task and send it with <c-c><c-c>
 local function send(lines)
-  sepal.spec()
-  vim.api.nvim_buf_set_lines(spec_buf(), 0, -1, false, lines)
+  sepal.task()
+  vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, lines)
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
 end
--- send a spec and wait for it; the notifications it made
+-- send a task and wait for it; the notifications it made
 local function run(lines) return msgs(notified(function() send(lines); idle() end)) end
 local function file(p) return read(vim.fs.joinpath(work, p)) end
 local function put(p, s) local f = assert(io.open(vim.fs.joinpath(work, p), "w")); f:write(s); f:close() end
@@ -107,7 +107,7 @@ local function clean() -- back to the first commit, nothing in the inbox
   for _, e in ipairs(vim.list_slice(inbox.list(work), 1)) do agent.drop(e) end
 end
 
-test("a spec runs in a worktree and lands as unstaged changes, with what the agent assumed", function()
+test("a task runs in a worktree and lands as unstaged changes, with what the agent assumed", function()
   reset()
   vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\n' > a.txt; printf 'new\n' > b.txt]]
   local got = run({ "Scope: a.txt", "Goal: shout two", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.txt" })
@@ -126,7 +126,7 @@ test("a spec runs in a worktree and lands as unstaged changes, with what the age
   eq({ e.status, e.session, e.assumptions }, { "landed", "s1", { "kept the old API", "no new deps" } })
 end)
 
-test("your edits since the spec started are kept; u takes the spec back out", function()
+test("your edits since the task started are kept; u takes the task back out", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'one\ntwo\nTHREE\n' > a.txt]]
   notified(function()
@@ -153,7 +153,7 @@ test("sepal runs the check itself; when it fails the agent gets the output and t
   eq(file("a.txt"), "fixed\n")
 end)
 
-test("a spec whose check keeps failing doesn't land", function()
+test("a task whose check keeps failing doesn't land", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo broken > a.txt]]
   local got = notified(function() send({ "Goal: never", "Done when: echo nope; exit 1" }); idle() end)
@@ -164,7 +164,7 @@ test("a spec whose check keeps failing doesn't land", function()
   eq(#args(), 2)
 end)
 
-test("check: the default for specs without Done when:", function()
+test("check: the default for tasks without Done when:", function()
   clean(); reset()
   sepal.setup({ check = "true" })
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
@@ -174,7 +174,7 @@ test("check: the default for specs without Done when:", function()
   eq(newest().checked, true)
 end)
 
-test("a spec that overlaps your edits waits for you; L lands it with conflict markers", function()
+test("a task that overlaps your edits waits for you; L lands it with conflict markers", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'one\nAGENT\nthree\n' > a.txt]]
   local got = notified(function()
@@ -206,7 +206,7 @@ test("a file with unsaved changes in a buffer isn't landed on", function()
   vim.cmd("bwipeout!")
 end)
 
-test("land = manual: a spec waits in the inbox until :Sepal land", function()
+test("land = manual: a task waits in the inbox until :Sepal land", function()
   clean(); reset()
   sepal.setup({ land = "manual" })
   vim.env.SEPAL_EDIT = [[echo manual > a.txt]]
@@ -218,7 +218,7 @@ test("land = manual: a spec waits in the inbox until :Sepal land", function()
   eq(file("a.txt"), "manual\n")
 end)
 
-test("a reply continues the spec's chat from what it did, and lands only what's new", function()
+test("a reply continues the task's chat from what it did, and lands only what's new", function()
   local e = newest()
   reset()
   vim.env.SEPAL_FIX = [[printf 'manual\nmore\n' > a.txt]]
@@ -244,7 +244,7 @@ test("no changes, an agent that quits, one that never started, and one that asks
   eq(got[2], { "▲ asks: Claude needs your permission to use Bash · :Sepal open", vim.log.levels.WARN })
 end)
 
-test("a spec waiting on Claude Code's trust prompt says so; answering it in :Sepal open lets it go on", function()
+test("a task waiting on Claude Code's trust prompt says so; answering it in :Sepal open lets it go on", function()
   clean(); reset()
   vim.env.SEPAL_TRUST = "1"
   local got = notified(function()
@@ -259,7 +259,7 @@ test("a spec waiting on Claude Code's trust prompt says so; answering it in :Sep
   eq(newest().status, "nochange")
 end)
 
-test("max_running: the specs past it wait in a queue and start when one is done", function()
+test("max_running: the tasks past it wait in a queue and start when one is done", function()
   clean(); reset()
   sepal.setup({ max_running = 1 })
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.3", [[echo x > "$(basename "$PWD").txt"]]
@@ -270,22 +270,22 @@ test("max_running: the specs past it wait in a queue and start when one is done"
     idle()
   end))
   sepal.setup({ max_running = 2 })
-  eq(vim.list_slice(got, 1, 2), { "working on it: first · :Sepal open watches", "queued: second · it starts when a running spec is done" })
+  eq(vim.list_slice(got, 1, 2), { "working on it: first · :Sepal open watches", "queued: second · it starts when a running task is done" })
   eq({ inbox.list(work)[1].status, inbox.list(work)[2].status }, { "landed", "landed" })
 end)
 
-test("outside a git repo the spec comes back in its buffer", function()
+test("outside a git repo the task comes back in its buffer", function()
   local other = vim.fs.joinpath(T, "plain")
   vim.fn.mkdir(other, "p")
   vim.fn.chdir(other)
   local got = notified(function() send({ "Goal: no repo" }) end)
   vim.fn.chdir(work)
-  eq(got, { { "not in a git repository: a spec runs in a git worktree\nthe spec is back in its buffer", vim.log.levels.ERROR } })
-  eq(vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false), { "Goal: no repo" })
-  vim.api.nvim_buf_delete(spec_buf(), { force = true })
+  eq(got, { { "not in a git repository: a task runs in a git worktree\nthe task is back in its buffer", vim.log.levels.ERROR } })
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), { "Goal: no repo" })
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
 end)
 
-test(":Sepal stop stops a running spec", function()
+test(":Sepal stop stops a running task", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "3", [[echo late > a.txt]]
   local got = notified(function()
@@ -299,7 +299,7 @@ test(":Sepal stop stops a running spec", function()
   eq(file("a.txt"), "one\ntwo\nthree\n")
 end)
 
-test("the inbox lists the specs and survives a restart", function()
+test("the inbox lists the tasks and survives a restart", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
   run({ "Goal: listed" })
@@ -315,6 +315,20 @@ test("the inbox lists the specs and survives a restart", function()
   inbox._t.reset()
   eq(newest().status, "interrupted")
   eq(newest().title, "listed")
+end)
+
+test("a task's chat is saved as soon as it starts: o and r still work after a quit mid-run", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP = "3"
+  notified(function()
+    send({ "Goal: cut short" })
+    assert(vim.wait(2000, function() return newest().activity ~= nil end, 20), "the agent never started")
+    inbox._t.reset() -- as if nvim quit now: read back what's on disk
+    eq({ newest().status, newest().session }, { "interrupted", "s1" })
+    vim.cmd("Sepal stop")
+    idle()
+  end)
+  inbox._t.reset()
 end)
 
 test(":Sepal open shows the agent at work, and the chat once it's done", function()
@@ -336,7 +350,7 @@ test(":Sepal open shows the agent at work, and the chat once it's done", functio
   vim.cmd("bwipeout!")
 end)
 
-test(":Sepal clean drops the specs that are over", function()
+test(":Sepal clean drops the tasks that are over", function()
   notified(function() vim.cmd("Sepal clean") end)
   eq(inbox.list(work), {})
   eq(sh("git for-each-ref refs/sepal").stdout, "")
@@ -350,21 +364,21 @@ test("assumptions are read from the end of a reply", function()
 end)
 
 test(":Sepal completes subcommands", function()
-  eq(vim.fn.getcompletion("Sepal s", "cmdline"), { "spec", "stop" })
+  eq(vim.fn.getcompletion("Sepal s", "cmdline"), { "stop" })
 end)
 
 test("checkhealth runs", function() require("sepal.health").check() end)
 
 local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n'; sed 's/^/- got: /'; printf '```\n']] }
 
-test("<c-c><c-s> turns the idea into the spec with spec_suggest", function()
-  sepal.setup({ spec_suggest = suggest })
-  sepal.spec()
-  local b = spec_buf()
+test("<c-c><c-s> turns the idea into the task with task_suggest", function()
+  sepal.setup({ task_suggest = suggest })
+  sepal.task()
+  local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "graceful shutdown" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
-  assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "spec not written")
+  assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "task not written")
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: graceful shutdown", "- got: ", "- got: Files:" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
@@ -372,8 +386,8 @@ end)
 test("an empty idea line shows a hint that goes away when you type", function()
   local ns = vim.api.nvim_create_namespace("sepal.hint")
   local function marks(b) return #vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {}) end
-  sepal.spec()
-  local b = spec_buf()
+  sepal.task()
+  local b = task_buf()
   eq(marks(b), 1)
   local tick = vim.b[b].changedtick
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
@@ -386,16 +400,16 @@ test("an empty idea line shows a hint that goes away when you type", function()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false) -- still "write the idea first", nothing runs
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.config().spec_suggest = nil -- setup({ spec_suggest = nil }) is a no-op: nil keys vanish
-  sepal.spec()
-  eq(marks(spec_buf()), 0)
+  sepal.config().task_suggest = nil -- setup({ task_suggest = nil }) is a no-op: nil keys vanish
+  sepal.task()
+  eq(marks(task_buf()), 0)
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.setup({ spec_suggest = suggest })
+  sepal.setup({ task_suggest = suggest })
 end)
 
 test("<c-c><c-s> keeps what you typed while it was writing", function()
-  sepal.spec()
-  local b = spec_buf()
+  sepal.task()
+  local b = task_buf()
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea, edited" })
@@ -404,10 +418,10 @@ test("<c-c><c-s> keeps what you typed while it was writing", function()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
-test("<c-c><c-s> with a failing spec_suggest leaves the buffer as it was", function()
-  sepal.setup({ spec_suggest = { "sh", "-c", "echo boom >&2; exit 3" } })
-  sepal.spec()
-  local b = spec_buf()
+test("<c-c><c-s> with a failing task_suggest leaves the buffer as it was", function()
+  sepal.setup({ task_suggest = { "sh", "-c", "echo boom >&2; exit 3" } })
+  sepal.task()
+  local b = task_buf()
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
   local got = {}
   local notify = vim.notify
@@ -416,16 +430,16 @@ test("<c-c><c-s> with a failing spec_suggest leaves the buffer as it was", funct
   local ok = vim.wait(3000, function() return #got > 0 end, 20)
   vim.notify = notify
   assert(ok, "no error")
-  eq(got, { "spec_suggest failed (exit 3)\nboom" })
+  eq(got, { "task_suggest failed (exit 3)\nboom" })
   eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.config().spec_suggest = nil -- setup({ spec_suggest = nil }) is a no-op: nil keys vanish
+  sepal.config().task_suggest = nil -- setup({ task_suggest = nil }) is a no-op: nil keys vanish
 end)
 
-test("spec <c-c><c-k> discards it", function()
-  sepal.spec()
+test("task <c-c><c-k> discards it", function()
+  sepal.task()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  eq(spec_buf(), nil)
+  eq(task_buf(), nil)
 end)
 
 test("notify: info goes to fidget, warnings to vim.notify", function()
@@ -433,10 +447,10 @@ test("notify: info goes to fidget, warnings to vim.notify", function()
   package.loaded.fidget = { notify = function(msg, lvl, o) got[#got + 1] = { "fidget", msg, lvl, o.annote } end }
   local notify = vim.notify
   vim.notify = function(msg, lvl, o) got[#got + 1] = { "notify", msg, lvl, o.title } end -- a notifier plugin
-  sepal.notify("spec sent")
-  sepal.notify("the spec is empty", vim.log.levels.WARN)
+  sepal.notify("task sent")
+  sepal.notify("the task is empty", vim.log.levels.WARN)
   vim.notify, package.loaded.fidget = notify, nil
-  eq(got, { { "fidget", "spec sent", vim.log.levels.INFO, "sepal" }, { "notify", "the spec is empty", vim.log.levels.WARN, "sepal" } })
+  eq(got, { { "fidget", "task sent", vim.log.levels.INFO, "sepal" }, { "notify", "the task is empty", vim.log.levels.WARN, "sepal" } })
 end)
 
 test("notify: the builtin vim.notify gets a colored echo", function()
@@ -445,22 +459,22 @@ test("notify: the builtin vim.notify gets a colored echo", function()
   eq(vim.trim(vim.fn.execute("messages")), "▲ sepal the agent is the only window")
 end)
 
-test("a spec shows its keys when it opens", function()
+test("a task shows its keys when it opens", function()
   local got, notify = {}, vim.notify
   vim.notify = function(msg) got[#got + 1] = msg end
-  sepal.spec()
-  sepal.config().spec_suggest = suggest
-  sepal.spec() -- the draft again
-  sepal.config().spec_suggest = nil
+  sepal.task()
+  sepal.config().task_suggest = suggest
+  sepal.task() -- the draft again
+  sepal.config().task_suggest = nil
   vim.notify = notify
-  vim.api.nvim_buf_delete(spec_buf(), { force = true })
-  eq(got, { "spec: <c-c><c-c> sends it, <c-c><c-f> adds a file, <c-c><c-k> discards",
-    "spec: <c-c><c-c> sends it, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-k> discards" })
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
+  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-f> adds a file, <c-c><c-k> discards",
+    "task: <c-c><c-c> sends it, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-k> discards" })
 end)
 
-test("spec opens the template above, <c-c><c-f> adds files with fff", function()
-  sepal.spec()
-  local b = spec_buf()
+test("task opens the template above, <c-c><c-f> adds files with fff", function()
+  sepal.task()
+  local b = task_buf()
   eq(vim.api.nvim_get_current_buf(), b)
   eq(vim.api.nvim_buf_get_lines(b, 0, 3, false), { "Scope: ", "Goal: ", "" })
   package.loaded.fff = { find_files = function(o) o.on_submit({}, { relative_path = "src/pool.cpp" }) end }
@@ -473,32 +487,42 @@ test("spec opens the template above, <c-c><c-f> adds files with fff", function()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
-test(":'<,'>Sepal spec puts the selected lines in the spec and lists the file", function()
-  sepal.config().spec_suggest = nil
+test(":'<,'>Sepal task puts the selected lines in the task and lists the file", function()
+  sepal.config().task_suggest = nil
   vim.cmd.edit("tests/pool.lua")
   vim.bo.filetype = "lua"
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })
-  vim.cmd("2,3Sepal spec")
-  local b = spec_buf()
+  vim.cmd("2,3Sepal task")
+  local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: ", "Goal: ", "", "Constraints:", "- ", "",
     "Done when: ", "", "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("a selection joins the open draft, its file listed once", function()
   vim.cmd.wincmd("j")
-  vim.cmd("4Sepal spec")
-  local lines = vim.api.nvim_buf_get_lines(spec_buf(), 0, -1, false)
+  vim.cmd("4Sepal task")
+  local lines = vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false)
   eq(vim.list_slice(lines, 15), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("code in a selection is sent as it is, even a line that is just -", function()
   reset()
-  vim.api.nvim_set_current_win(vim.fn.bufwinid(spec_buf()))
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(task_buf()))
   notified(function() vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false); idle() end)
   local got = vim.split(prompts(), "\n")
   eq(vim.tbl_contains(got, "-"), true, "the - code line was dropped")
   eq(vim.tbl_contains(got, "- "), false, "the empty bullet was sent")
   vim.cmd("bwipeout! tests/pool.lua")
+end)
+
+test("closing the task window drops the draft: :Sepal task starts a new one", function()
+  sepal.task()
+  vim.api.nvim_buf_set_lines(task_buf(), 0, 1, false, { "Goal: old" })
+  vim.cmd.close()
+  eq(task_buf(), nil)
+  sepal.task()
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 1, false), { "Scope: " })
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
 end)
 
 print(("%d/%d passed"):format(n - fails, n))

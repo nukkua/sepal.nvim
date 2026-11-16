@@ -1,13 +1,13 @@
-*sepal.txt*  Delegate, verify, land: specs for Claude Code
+*sepal.txt*  Delegate, verify, land: tasks for Claude Code
 
 ==============================================================================
 1. INTRODUCTION                                                        *sepal*
 
-You write a spec next to your code; Claude Code works on it in a git worktree
-(your files never change under you); sepal runs the spec's check itself; if
+You write a task next to your code; Claude Code works on it in a git worktree
+(your files never change under you); sepal runs the task's check itself; if
 it passes, the result lands in your work tree as unstaged changes, to review
 with the git tools you already use. You hear about it when it's landed or
-when something needs you. |:Sepal-inbox| lists every spec.
+when something needs you. |:Sepal-inbox| lists every task.
 
 Requirements: Neovim 0.12+, Claude Code, git. Optional: fff.nvim to pick
 files, fidget.nvim for a spinner.
@@ -17,12 +17,12 @@ files, fidget.nvim for a spinner.
 
 1. Map two keys:
 >lua
-   vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal spec<cr>")
+   vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal task<cr>")
    vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>")
 <
 2. Select the code you mean (or don't) and press <leader>as. Fill in the
-   spec. "Done when:" is a shell command that has to pass, e.g. `make test`.
-3. <c-c><c-c> sends it. Keep working; more specs run in parallel.
+   task. "Done when:" is a shell command that has to pass, e.g. `make test`.
+3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
 4. "✓ landed: …" means it passed the check and is in your files, unstaged.
    The "·" lines under it are the decisions the agent made alone: read them.
 5. Review with `git diff`, gitsigns, fugitive. |:Sepal-undo| takes it back.
@@ -43,25 +43,25 @@ files, fidget.nvim for a spinner.
     land = "auto",
     prepare = nil,
     worktrees = vim.fn.stdpath("state") .. "/sepal",
-    spec_suggest = nil,
+    task_suggest = nil,
     max_running = 2,
   })
 <
-`cmd`        the agent: Claude Code. A spec runs `cmd <args> <spec>` in a
+`cmd`        the agent: Claude Code. A task runs `cmd <args> <task>` in a
              hidden terminal in its worktree; hooks passed with --settings
              tell sepal what it does and when its turn is over.
                                                                 *sepal-args*
-`args`       added to each run. The spec's check is always allowed. When the
+`args`       added to each run. The task's check is always allowed. When the
              agent asks for permission it waits for you: sepal warns
              ("▲ …: Claude needs your permission to use Bash · :Sepal open")
              and you answer in |:Sepal-open|. Allow what you trust upfront:
              `{ "--permission-mode", "acceptEdits", "--allowedTools",
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
-`check`      the check for specs without a "Done when:" line, e.g.
-             "make test". nil: those specs aren't checked.
+`check`      the check for tasks without a "Done when:" line, e.g.
+             "make test". nil: those tasks aren't checked.
 `retries`    when the check fails, the agent gets its output and this many
              more tries.
-`land`       "auto": a spec that passes lands by itself, when it lands
+`land`       "auto": a task that passes lands by itself, when it lands
              cleanly. "manual": it waits in the inbox for `L`.
 `prepare`    shell command run in each new worktree before the agent, to
              bring in what git doesn't have: `ln -s "$SEPAL_ROOT/node_modules"
@@ -69,36 +69,37 @@ files, fidget.nvim for a spinner.
              counted as the agent's work.
 `worktrees`  where the worktrees and each repo's inbox (JSON) live.
                                                         *sepal-max_running*
-`max_running` specs running at once; the rest wait in the inbox as
+`max_running` tasks running at once; the rest wait in the inbox as
              "queued" and start when one is done. nil: no limit. Each
-             running spec is a Claude Code process.
-                                                       *sepal-spec_suggest*
-`spec_suggest` argv that gets the spec buffer on stdin (your idea and
-             Files:) and prints the finished spec. <c-c><c-s> runs it. For
+             running task is a Claude Code process.
+                                                       *sepal-task_suggest*
+`task_suggest` argv that gets the task buffer on stdin (your idea and
+             Files:) and prints the finished task. <c-c><c-s> runs it. For
              Claude Code, pass -p and --no-session-persistence.
 
 ==============================================================================
 4. COMMANDS                                                    *sepal-commands*
 
                                                                       *:Sepal*
-:[range]Sepal [spec]
-                  Write a spec in a buffer above the code: Scope, Goal,
+:[range]Sepal [task]
+                  Write a task in a buffer above the code: Scope, Goal,
                   Constraints, Done when, Files. In it:
                     <c-c><c-c>  send it and close the buffer
-                    <c-c><c-s>  have |sepal-spec_suggest| write the spec
+                    <c-c><c-s>  have |sepal-task_suggest| write the task
                     <c-c><c-f>  add a file under Files: as @path
-                    <c-c><c-k>  discard the spec
+                    <c-c><c-k>  discard the task
                   With a [range], those lines go in as a "Selection:
-                  path:10-20" code block. Closing the window keeps the
-                  draft. Outside a git repo the spec stays in its buffer.
+                  path:10-20" code block. Closing the window drops the
+                  draft: :Sepal task always starts a new one. Outside a
+                  git repo the task stays in its buffer.
                                                                *:Sepal-inbox*
-:Sepal inbox      Every spec of this repo, newest first, with what to read
+:Sepal inbox      Every task of this repo, newest first, with what to read
                   under each (assumptions, why it needs you, the failing
                   check's output). In it:
-                    <CR>  everything the spec changed, as a diff (q closes)
+                    <CR>  everything the task changed, as a diff (q closes)
                     L     land it (with conflict markers if it overlaps
                           your edits)
-                    u     take a landed spec back out
+                    u     take a landed task back out
                     r     reply: the agent continues in the same chat from
                           what it did; it's checked and lands again (only
                           what's new)
@@ -106,20 +107,20 @@ files, fidget.nvim for a spinner.
                     x     stop it
                     D     drop it
                     q     close the inbox
-:Sepal land       Land the newest spec that's waiting.
+:Sepal land       Land the newest task that's waiting.
                                                                 *:Sepal-undo*
-:Sepal undo       Take the newest landed spec back out (a merge too: your
+:Sepal undo       Take the newest landed task back out (a merge too: your
                   edits since stay).
                                                                 *:Sepal-open*
-:Sepal open       The newest spec in Claude Code, in a new tab. While it
+:Sepal open       The newest task in Claude Code, in a new tab. While it
                   runs: the agent at work, live; type to it if you like.
                   `q` (normal mode) hides it, it keeps going. Once it's done:
                   its chat (`claude --resume`).
-:Sepal stop       Stop every running spec.
-:Sepal clean      Drop the specs that are over: landed, no changes, undone,
+:Sepal stop       Stop every running task.
+:Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted.
 
-Lua: `require("sepal").spec()`, `.inbox()`, `.land()`, `.undo()`, `.open()`,
+Lua: `require("sepal").task()`, `.inbox()`, `.land()`, `.undo()`, `.open()`,
 `.stop()`, `.clean()`.
 
 ==============================================================================
@@ -131,11 +132,11 @@ works in a worktree of it, then sepal runs the check there. Landing applies
 the change to your work tree with a three-way merge per file (git
 merge-file), unstaged. With land = "auto" it only lands when that's clean: no
 overlap with your edits and no unsaved buffer of a file it touches; otherwise
-the spec waits as "needs you". Results are kept as refs/sepal/<id>/* until
-the spec is dropped. A spec running when Neovim quits shows as "interrupted";
+the task waits as "needs you". Results are kept as refs/sepal/<id>/* until
+the task is dropped. A task running when Neovim quits shows as "interrupted";
 `r` continues it.
 
-Claude Code may ask to trust a spec's new worktree before it starts. sepal
+Claude Code may ask to trust a task's new worktree before it starts. sepal
 warns ("▲ …: Claude Code asks to trust the worktree · :Sepal open"); answer
 it there.
 
@@ -143,6 +144,6 @@ it there.
 6. HEALTH                                                       *sepal-health*
 
 `:checkhealth sepal` checks git, `cmd`, `args`, `check`, `retries`, `land`,
-`prepare`, `max_running`, `spec_suggest`, fidget and fff.
+`prepare`, `max_running`, `task_suggest`, fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

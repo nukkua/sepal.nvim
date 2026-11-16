@@ -1,5 +1,5 @@
--- sepal.git — the git side of a spec: its starting point, its worktree, its result, and landing it.
--- A spec starts from what you see: your work tree, uncommitted and untracked files included, saved
+-- sepal.git — the git side of a task: its starting point, its worktree, its result, and landing it.
+-- A task starts from what you see: your work tree, uncommitted and untracked files included, saved
 -- as a commit through a temporary index (yours stays as it is). The agent works in a worktree of
 -- that commit; its result is a commit too. Landing applies base -> result to your work tree as
 -- unstaged changes, a three-way merge per file (git merge-file), so your edits meanwhile are kept.

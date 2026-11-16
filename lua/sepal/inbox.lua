@@ -1,4 +1,4 @@
--- sepal.inbox — every spec of a repo and where it stands, kept in a JSON file per repo (so it
+-- sepal.inbox — every task of a repo and where it stands, kept in a JSON file per repo (so it
 -- survives a restart), and :Sepal inbox, a buffer that lists them with keys to act on each.
 
 local M = {}
@@ -36,6 +36,8 @@ local function save(root)
   local f = io.open(file(root), "w")
   if f then f:write(vim.json.encode(keep)); f:close() end
 end
+
+M.save = save
 
 local render -- below
 
@@ -125,7 +127,7 @@ render = function()
   local root = vim.b[b].sepal_inbox
   local lines, rows, marks = { HELP, "" }, {}, {}
   local list = M.list(root)
-  if #list == 0 then lines[#lines + 1] = "no specs yet: :Sepal spec" end
+  if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   for _, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
     lines[#lines + 1] = ("%s %s %s  %s  %s"):format(st[1], fit(st[2], 12), fit(ago(e.time), 3), fit(e.title or "", 34), facts(e))
@@ -162,11 +164,11 @@ function M.open(root)
     local agent = require("sepal.agent")
     local function on(f) return function() local e = M.current(); if e then f(e) end end end
     local o = function(desc) return { buffer = b, desc = desc, nowait = true } end
-    vim.keymap.set("n", "<CR>", on(agent.show), o("Show what the spec changed"))
+    vim.keymap.set("n", "<CR>", on(agent.show), o("Show what the task changed"))
     vim.keymap.set("n", "L", on(agent.land), o("Land it in your work tree"))
-    vim.keymap.set("n", "u", on(agent.undo), o("Take a landed spec back out"))
-    vim.keymap.set("n", "r", on(agent.reply), o("Reply: the agent continues this spec"))
-    vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the spec's chat"))
+    vim.keymap.set("n", "u", on(agent.undo), o("Take a landed task back out"))
+    vim.keymap.set("n", "r", on(agent.reply), o("Reply: the agent continues this task"))
+    vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))
     vim.keymap.set("n", "q", "<cmd>close<cr>", o("Close the inbox"))

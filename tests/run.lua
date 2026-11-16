@@ -354,6 +354,46 @@ test("q in the agent's last window shows another buffer instead of E444, and the
   end)
 end)
 
+test(":Sepal open toggles the agent and its chat when it's the only window of a fresh nvim", function()
+  clean(); reset()
+  local function fresh() -- one tab, one window, one empty buffer
+    vim.cmd("silent! tabonly | silent! only | enew")
+  end
+  local function toggled(what)
+    vim.cmd.stopinsert()
+    local shown = vim.api.nvim_get_current_buf()
+    eq(vim.b[shown].sepal_agent, true, what .. ": not shown")
+    local ok, err = pcall(vim.cmd, "Sepal open")
+    eq(ok, true, what .. ": leaving failed: " .. tostring(err))
+    eq(vim.b.sepal_agent == true, false, what .. ": still shown after the toggle")
+    vim.cmd("Sepal open")
+    eq(vim.b.sepal_agent, true, what .. ": not shown again")
+    vim.cmd.stopinsert()
+  end
+  vim.env.SEPAL_SLEEP = "1"
+  notified(function()
+    send({ "Goal: toggled" })
+    vim.wait(200)
+    fresh()
+    vim.cmd("Sepal open")
+    toggled("running agent")
+    idle()
+  end)
+  fresh()
+  vim.cmd("Sepal open") -- done: its chat
+  vim.wait(300)
+  local chat = vim.api.nvim_get_current_buf()
+  toggled("chat")
+  vim.wait(50)
+  eq(vim.api.nvim_buf_is_valid(chat), false, "the chat left behind still runs")
+  chat = vim.api.nvim_get_current_buf()
+  vim.cmd("enew!") -- any other way out ends it too
+  vim.wait(50)
+  eq(vim.api.nvim_buf_is_valid(chat), false, "the chat left with :enew still runs")
+  local leaked = vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^term://.*/state/") end, vim.api.nvim_list_bufs())
+  eq(#leaked, 0, "renamed agent terminals left their old names behind")
+end)
+
 test(":Sepal open shows the agent at work, and the chat once it's done", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP = "0.5"

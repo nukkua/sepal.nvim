@@ -272,7 +272,11 @@ agent = function(e, prompt, wt)
   end
   vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 10000
   vim.b[b].sepal_agent = true -- :Sepal open from here leaves it
+  local term_name = vim.api.nvim_buf_get_name(b)
   pcall(vim.api.nvim_buf_set_name, b, "sepal://" .. e.id)
+  for _, x in ipairs(vim.api.nvim_list_bufs()) do -- a rename keeps the old name as a buffer of its own: one per run
+    if x ~= b and vim.api.nvim_buf_get_name(x) == term_name then pcall(vim.api.nvim_buf_delete, x, { force = true }) end
+  end
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the agent (it keeps working)" })
   j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
   local asked -- Claude Code asks to trust each new folder before it starts (no hook runs before that)
@@ -481,6 +485,10 @@ function M.open(e)
     env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   vim.bo[b].bufhidden = "wipe"
   vim.b[b].sepal_agent = true
+  -- bufhidden=wipe doesn't wipe a terminal while claude runs in it: however you leave the chat, end it
+  vim.api.nvim_create_autocmd("BufHidden", { buffer = b, once = true, callback = function()
+    vim.schedule(function() pcall(vim.api.nvim_buf_delete, b, { force = true }) end)
+  end })
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the chat" })
   vim.cmd.startinsert()
 end

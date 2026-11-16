@@ -54,9 +54,15 @@ M.progress = progress
 
 -- q in sepal's buffers: close the window; in the last one (E444: can't close it) show another buffer there
 function M.close()
+  local cur = vim.api.nvim_get_current_buf()
   local wins = vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative == "" end, vim.api.nvim_tabpage_list_wins(0))
-  if #wins > 1 or vim.fn.tabpagenr("$") > 1 then return vim.cmd.close() end
-  if not pcall(vim.cmd.buffer, "#") then vim.cmd.enew() end
+  if #wins > 1 or vim.fn.tabpagenr("$") > 1 then
+    vim.cmd.close()
+  else -- back to the buffer before, unless that's another agent or chat: :Sepal open would bounce between them
+    local alt = vim.fn.bufnr("#")
+    local back = alt > 0 and alt ~= cur and vim.bo[alt].buflisted and not vim.b[alt].sepal_agent
+    if not (back and pcall(vim.cmd.buffer, alt)) then vim.cmd.enew() end
+  end
 end
 
 -- a task that didn't run goes back to the task buffer (below the open draft, if there is one)

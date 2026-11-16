@@ -255,7 +255,7 @@ agent = function(e, prompt, wt)
   end
   -- started in a hidden window the size of a tab, so Claude Code draws for the screen it's shown
   -- on (nvim_buf_call's window is a few lines tall: its output would scroll away and redraw on open)
-  local win = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, hide = true, focusable = false,
+  local win = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, hide = true, focusable = false, style = "minimal",
     width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight - 2, 1) })
   local ok, chan = pcall(vim.api.nvim_win_call, win, function()
     return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events }, on_exit = vim.schedule_wrap(exited) })
@@ -444,7 +444,14 @@ function M.open(e)
   local j = jobs[e.id]
   if j and j.buf then
     local w = vim.fn.bufwinid(j.buf)
-    if w ~= -1 then vim.api.nvim_set_current_win(w) else vim.cmd("tab sbuffer " .. j.buf) end
+    if w ~= -1 then vim.api.nvim_set_current_win(w) else
+      -- as wide as the minimal window it started in, set before it shows: a resize makes Claude Code
+      -- redraw, which leaves its old frames above the new one
+      vim.cmd.tabnew()
+      vim.bo.bufhidden = "wipe"
+      vim.wo.number, vim.wo.relativenumber, vim.wo.signcolumn, vim.wo.foldcolumn = false, false, "no", "0"
+      vim.api.nvim_win_set_buf(0, j.buf)
+    end
     -- a terminal window follows the output only with the cursor on its last line; a new one starts at the top
     vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(j.buf), 0 })
     return vim.cmd.startinsert()

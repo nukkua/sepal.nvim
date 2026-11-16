@@ -272,7 +272,7 @@ agent = function(e, prompt, wt)
   end
   vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 10000
   pcall(vim.api.nvim_buf_set_name, b, "sepal://" .. e.id)
-  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = b, desc = "Hide the agent (it keeps working)" })
+  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the agent (it keeps working)" })
   j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
   local asked -- Claude Code asks to trust each new folder before it starts (no hook runs before that)
   timer:start(100, 100, vim.schedule_wrap(function()
@@ -441,7 +441,7 @@ function M.show(e)
   vim.bo[b].modifiable, vim.bo[b].filetype = false, "diff"
   vim.cmd.tabnew()
   vim.api.nvim_win_set_buf(0, b)
-  vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, desc = "Close the diff" })
+  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the diff" })
 end
 
 -- a new tab, or this one when it only holds an empty, unnamed buffer (fresh nvim): no [No Name] tab left behind
@@ -479,7 +479,7 @@ function M.open(e)
   vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root,
     env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   vim.bo[b].bufhidden = "wipe"
-  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = b, desc = "Close the chat" })
+  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the chat" })
   vim.cmd.startinsert()
 end
 

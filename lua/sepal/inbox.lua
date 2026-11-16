@@ -171,7 +171,7 @@ function M.open(root)
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))
-    vim.keymap.set("n", "q", "<cmd>close<cr>", o("Close the inbox"))
+    vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
   end
   vim.b[b].sepal_inbox = root
   local w = vim.fn.bufwinid(b)

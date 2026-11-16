@@ -331,6 +331,24 @@ test("a task's chat is saved as soon as it starts: o and r still work after a qu
   inbox._t.reset()
 end)
 
+test("q in the agent's last window shows another buffer instead of E444, and the agent keeps working", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP = "1"
+  notified(function()
+    send({ "Goal: last window" })
+    vim.wait(200)
+    vim.cmd("Sepal open")
+    vim.cmd.stopinsert()
+    vim.cmd.tabonly()
+    vim.cmd.only()
+    local agent_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_feedkeys("q", "tx", false)
+    eq(vim.api.nvim_get_current_buf() ~= agent_buf, true, "q left the agent shown")
+    eq(newest().status, "running")
+    idle()
+  end)
+end)
+
 test(":Sepal open shows the agent at work, and the chat once it's done", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP = "0.5"

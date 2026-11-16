@@ -52,6 +52,13 @@ end
 
 M.progress = progress
 
+-- q in sepal's buffers: close the window; in the last one (E444: can't close it) show another buffer there
+function M.close()
+  local wins = vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative == "" end, vim.api.nvim_tabpage_list_wins(0))
+  if #wins > 1 or vim.fn.tabpagenr("$") > 1 then return vim.cmd.close() end
+  if not pcall(vim.cmd.buffer, "#") then vim.cmd.enew() end
+end
+
 -- a task that didn't run goes back to the task buffer (below the open draft, if there is one)
 local function giveback(text)
   local lines = vim.split(text, "\n")

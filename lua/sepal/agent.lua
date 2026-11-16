@@ -263,7 +263,7 @@ agent = function(e, prompt, wt)
   local win = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, hide = true, focusable = false, style = "minimal",
     width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight - 2, 1) })
   local ok, chan = pcall(vim.api.nvim_win_call, win, function()
-    return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events }, on_exit = vim.schedule_wrap(exited) })
+    return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events, CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" }, on_exit = vim.schedule_wrap(exited) })
   end)
   pcall(vim.api.nvim_win_close, win, true)
   if not ok or chan <= 0 then
@@ -444,6 +444,16 @@ function M.show(e)
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, desc = "Close the diff" })
 end
 
+-- a new tab, or this one when it only holds an empty, unnamed buffer (fresh nvim): no [No Name] tab left behind
+local function tab()
+  local b = vim.api.nvim_get_current_buf()
+  local empty = vim.fn.winnr("$") == 1 and vim.api.nvim_buf_get_name(b) == "" and not vim.bo[b].modified
+    and vim.bo[b].buftype == "" and vim.api.nvim_buf_line_count(b) == 1 and vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == ""
+  if not empty then return vim.cmd.tabnew() end
+  vim.cmd.enew()
+  if vim.api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then vim.api.nvim_buf_delete(b, {}) end
+end
+
 -- the task in Claude Code itself, in a new tab: while it runs, the agent at work (type to it if you
 -- like; q in normal mode hides it, it keeps going), after that its chat (claude --resume)
 function M.open(e)
@@ -453,7 +463,7 @@ function M.open(e)
     if w ~= -1 then vim.api.nvim_set_current_win(w) else
       -- as wide as the minimal window it started in, set before it shows: a resize makes Claude Code
       -- redraw, which leaves its old frames above the new one
-      vim.cmd.tabnew()
+      tab()
       vim.bo.bufhidden = "wipe"
       vim.wo.number, vim.wo.relativenumber, vim.wo.signcolumn, vim.wo.foldcolumn = false, false, "no", "0"
       vim.api.nvim_win_set_buf(0, j.buf)
@@ -464,9 +474,10 @@ function M.open(e)
   end
   if j or queued(e) then return notify(e.status == "queued" and "it's queued, it starts when a running task is done" or "the agent is done, sepal is " .. e.status) end
   if not e.session then return notify("this task has no chat yet") end
-  vim.cmd.tabnew()
+  tab()
   local b = vim.api.nvim_get_current_buf()
-  vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root })
+  vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root,
+    env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   vim.bo[b].bufhidden = "wipe"
   vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = b, desc = "Close the chat" })
   vim.cmd.startinsert()

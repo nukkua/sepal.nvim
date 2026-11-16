@@ -165,7 +165,9 @@ local function reply_of(ev)
   if not f then return nil end
   local last
   for l in f:lines() do
-    local ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } })
+    -- decode only the agent's lines: a transcript can be MBs of tool output
+    local ok, t = false, nil
+    if l:find('"assistant"', 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
     local c = ok and type(t) == "table" and t.type == "assistant" and type(t.message) == "table" and t.message.content
     local text = {}
     for _, b in ipairs(type(c) == "table" and c or {}) do
@@ -205,7 +207,7 @@ agent = function(e, prompt, wt)
     e.result = git.result(e.root, wt, e.base, ref(e, "result"), j.exclude) or e.result
     e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
     local reply = reply_of(ev)
-    e.reply, e.summary = reply, first(reply, 100)
+    e.summary = first(reply, 100) -- the reply itself isn't kept: only its summary and assumptions are shown
     local seen = {}
     for _, a in ipairs(e.assumptions or {}) do seen[a] = true end
     for _, a in ipairs(M.assumptions(reply)) do -- a retry adds to them
@@ -277,7 +279,8 @@ agent = function(e, prompt, wt)
     if over then return end
     poll()
     if started or asked or not vim.api.nvim_buf_is_valid(b) then return end
-    if table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), " "):find("Quick safety check", 1, true) then
+    -- the prompt is on the first screen: no need to join the scrollback
+    if table.concat(vim.api.nvim_buf_get_lines(b, 0, vim.o.lines, false), " "):find("Quick safety check", 1, true) then
       asked, e.activity = true, "needs you"
       inbox.render()
       notify("▲ " .. e.title .. ": Claude Code asks to trust the worktree · :Sepal open", WARN)

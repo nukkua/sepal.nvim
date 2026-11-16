@@ -28,9 +28,9 @@ end
 
 local function save(root)
   vim.fn.mkdir(cfg().worktrees, "p")
-  local keep = vim.tbl_map(function(e)
-    local c = vim.deepcopy(e)
-    c.activity = nil
+  local keep = vim.tbl_map(function(e) -- a shallow copy is enough: it's only encoded
+    local c = {}
+    for k, v in pairs(e) do if k ~= "activity" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
     return c
   end, M.list(root))
   local f = io.open(file(root), "w")
@@ -117,9 +117,8 @@ local function details(e)
   return d
 end
 
-local function buf()
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_inbox then return b end end
-end
+local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
+local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
 
 render = function()
   local b = buf()
@@ -158,6 +157,7 @@ function M.open(root)
   local b = buf()
   if not b then
     b = vim.api.nvim_create_buf(false, true)
+    inbox_buf = b
     vim.bo[b].bufhidden = "hide"
     vim.bo[b].filetype = "sepal-inbox"
     vim.api.nvim_buf_set_name(b, "sepal://inbox")

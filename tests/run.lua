@@ -643,8 +643,24 @@ test("a task shows its keys when it opens", function()
   sepal.config().task_suggest = nil
   vim.notify = notify
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-f> adds a file, <c-c><c-k> discards",
-    "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-k> discards" })
+  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-f> adds a file, <c-c><c-i> attaches an image, <c-c><c-k> discards",
+    "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-i> attaches an image, <c-c><c-k> discards" })
+end)
+
+test("<c-c><c-i> attaches an image from outside the repo, the agent may read just that", function()
+  clean(); reset()
+  local img = vim.fs.joinpath(T, "shot.png")
+  vim.fn.writefile({ "png" }, img)
+  sepal.task()
+  local input = vim.ui.input
+  vim.ui.input = function(_, cb) cb(img) end
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-i>"), "tx", false)
+  vim.ui.input = input
+  local lines = vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false)
+  eq(lines[#lines], "- @" .. img)
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  run({ "Goal: match the mockup", "", "Files:", "- @" .. img, "- @a.txt" })
+  eq(args()[1], "--permission-mode acceptEdits --allowedTools Read(/" .. img .. ")")
 end)
 
 test("task opens the template above, <c-c><c-f> adds files with fff", function()

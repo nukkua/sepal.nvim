@@ -227,6 +227,11 @@ agent = function(e, prompt, wt)
   os.remove(events)
   local argv = cmd(C().args or {})
   if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
+  -- files from outside the repo (<c-c><c-i>'s images): read-only access to just those ("//" is an absolute path)
+  for l in vim.gsplit(e.task, "\n") do
+    local f = l:match("^%s*%- @(/.-)%s*$")
+    if f then vim.list_extend(argv, { "--allowedTools", "Read(/" .. f .. ")" }) end
+  end
   if e.session then vim.list_extend(argv, { "--resume", e.session }) end
   vim.list_extend(argv, { "--settings", SETTINGS, prompt })
   local b = vim.api.nvim_create_buf(false, true)

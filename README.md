@@ -170,7 +170,7 @@ and the `highlights` option wins over everything.
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |
 | `<c-c><c-k>` | discard the task                                                       |
 
-When a task opens, a notification lists these keys, the way petal does for the commit buffer.
+A dim line on top of the task lists these keys, like the one on top of the inbox.
 
 `:'<,'>Sepal task` puts the selected lines in the task as a `Selection: path:10-20` code block and
 lists the file. With a draft open, the selection is added to it. Closing the window drops the

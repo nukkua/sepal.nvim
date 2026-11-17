@@ -634,17 +634,20 @@ test("notify: the builtin vim.notify gets a colored echo", function()
   eq(vim.trim(vim.fn.execute("messages")), "▲ sepal the agent is the only window")
 end)
 
-test("a task shows its keys when it opens", function()
-  local got, notify = {}, vim.notify
-  vim.notify = function(msg) got[#got + 1] = msg end
+test("a task shows its keys on top, like the inbox", function()
+  local function help()
+    local m = vim.api.nvim_buf_get_extmarks(0, -1, 0, 0, { details = true, type = "virt_lines" })[1]
+    return { m[2], m[4].virt_lines[1][1][1], vim.fn.winsaveview().topfill }
+  end
   sepal.task()
+  local a = help()
   sepal.config().task_suggest = suggest
   sepal.task() -- the draft again
+  local b = help()
   sepal.config().task_suggest = nil
-  vim.notify = notify
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-f> adds a file, <c-c><c-p> pastes an image, <c-c><c-k> discards",
-    "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-p> pastes an image, <c-c><c-k> discards" })
+  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 },
+    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> write  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
 end)
 
 test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", function()

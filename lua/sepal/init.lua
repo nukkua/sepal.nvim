@@ -252,10 +252,18 @@ local function add_selection(buf, block, path)
   add_file(buf, path)
 end
 
--- the task's keys, shown when it opens (like petal's commit buffer); one notification, replaced each time
-local function keys()
-  M.notify("task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox" .. (C.task_suggest and ", <c-c><c-s> writes it for you" or "")
-    .. ", <c-c><c-f> adds a file, <c-c><c-p> pastes an image, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-task-keys" })
+-- the task's keys, a dim line and a blank on top of it like the inbox's: virtual lines, so never sent
+local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
+local function keys(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local help = "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
+    .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
+  vim.api.nvim_buf_clear_namespace(buf, KEYS_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
+  vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = { { { help, "SepalDim" } }, { { "" } } }, virt_lines_above = true })
+  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
+    -- lines above line 1 only show with topfill
+    vim.api.nvim_win_call(w, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = 2 }) end end)
+  end
 end
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
@@ -272,7 +280,7 @@ function M.task(range, lines)
     if vim.b[b].sepal_task then
       local w = vim.fn.win_findbuf(b)[1] -- only a draft in a window exists (bufhidden=wipe)
       if block then add_selection(b, block, path) end -- a draft is open: the selection joins it
-      keys()
+      keys(b)
       return vim.api.nvim_set_current_win(w)
     end
   end
@@ -284,7 +292,8 @@ function M.task(range, lines)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
-  keys()
+  keys(buf)
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf) end })
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.schedule(function() vim.cmd.startinsert({ bang = true }) end) -- after keys already typed (see sepal.resume)

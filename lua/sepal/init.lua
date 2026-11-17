@@ -219,12 +219,13 @@ end
 
 -- the task's keys, shown when it opens (like petal's commit buffer); one notification, replaced each time
 local function keys()
-  M.notify("task: <c-c><c-c> sends it" .. (C.task_suggest and ", <c-c><c-s> writes it for you" or "")
+  M.notify("task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox" .. (C.task_suggest and ", <c-c><c-s> writes it for you" or "")
     .. ", <c-c><c-f> adds a file, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-task-keys" })
 end
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
--- <c-c><c-c> runs it, <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
+-- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
+-- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed),
 -- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
@@ -266,20 +267,25 @@ function M.task(range, lines)
   end
 
   local o = { buffer = buf }
-  vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function()
+  -- land: "auto" lands it by itself once it passes, "manual" has it wait in the inbox for L
+  local function send(land)
     local lines, err = M.tidy(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
     if not lines then return M.notify(err, vim.log.levels.WARN) end
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
     local text = table.concat(lines, "\n")
-    local e, why = require("sepal.agent").start(text, vim.fn.getcwd())
+    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land)
     if not e then
       M.notify(why .. "\nthe task is back in its buffer", vim.log.levels.ERROR)
       return giveback(text)
     end
     if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running task is done") end
     M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
-  end, vim.tbl_extend("force", o, { desc = "Run the task in the background" }))
+  end
+  vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function() send("auto") end,
+    vim.tbl_extend("force", o, { desc = "Run the task, it lands by itself" }))
+  vim.keymap.set({ "n", "i" }, "<c-c><c-w>", function() send("manual") end,
+    vim.tbl_extend("force", o, { desc = "Run the task, it waits in the inbox" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })

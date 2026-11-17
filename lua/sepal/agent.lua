@@ -160,7 +160,7 @@ local agent, show, loading -- below
 local function done(e, wt)
   if not e.stat or e.stat.files == 0 then return finish(e, wt, "nochange") end
   finish(e, wt, "ready")
-  if C().land == "auto" then return M.land(e, true) end
+  if (e.land or C().land) == "auto" then return M.land(e, true) end
   notify(with_assumptions("● ready to land: " .. e.title .. facts(e) .. " · :Sepal inbox", e))
 end
 
@@ -407,12 +407,13 @@ local function queued(e)
 end
 
 -- run a new task from cwd; nil, why when it can't
-function M.start(text, cwd)
+-- land: "auto" / "manual" for this task, nil: the land option
+function M.start(text, cwd, land)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
-    task = text, check = check or C().check, time = os.time(), status = "running", attempts = 0 }
+    task = text, check = check or C().check, time = os.time(), status = "running", attempts = 0, land = land }
   e.base = git.snapshot(root, ref(e, "base"))
   if not e.base then return nil, "could not save your work tree (git add / write-tree failed)" end
   e.base0 = e.base

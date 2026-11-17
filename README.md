@@ -108,7 +108,7 @@ require("sepal").setup({
   auto_mode = false,   -- true: every run and chat in Claude Code's auto mode (--permission-mode auto)
   check = nil,         -- the check for tasks without a `Done when:` line, e.g. "make test"
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
-  land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits for L in the inbox
+  land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits for L in the inbox (Lua API; the task keys choose for themselves)
   prepare = nil,       -- shell command run in each new worktree first ($SEPAL_ROOT is your repo)
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
@@ -150,7 +150,8 @@ require("sepal").setup({
 
 | Key          | Action                                                                 |
 | ------------ | ---------------------------------------------------------------------- |
-| `<c-c><c-c>` | send the task and close the buffer                                     |
+| `<c-c><c-c>` | send the task and close the buffer; it lands by itself once it passes  |
+| `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
 | `<c-c><c-s>` | have `task_suggest` write the task from what's there (`u` undoes it)  |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-k>` | discard the task                                                       |

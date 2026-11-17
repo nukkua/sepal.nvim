@@ -91,14 +91,14 @@ local function msgs(got) return vim.tbl_map(function(g) return g[1] end, got) en
 local function task_buf()
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return b end end
 end
--- write a task and send it with <c-c><c-c>
-local function send(lines)
+-- write a task and send it with <c-c><c-c> (or key)
+local function send(lines, key)
   sepal.task()
   vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, lines)
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  vim.api.nvim_feedkeys(vim.keycode(key or "<c-c><c-c>"), "tx", false)
 end
 -- send a task and wait for it; the notifications it made
-local function run(lines) return msgs(notified(function() send(lines); idle() end)) end
+local function run(lines, key) return msgs(notified(function() send(lines, key); idle() end)) end
 local function file(p) return read(vim.fs.joinpath(work, p)) end
 local function put(p, s) local f = assert(io.open(vim.fs.joinpath(work, p), "w")); f:write(s); f:close() end
 local function newest() return inbox.list(work)[1] end
@@ -206,11 +206,11 @@ test("a file with unsaved changes in a buffer isn't landed on", function()
   vim.cmd("bwipeout!")
 end)
 
-test("land = manual: a task waits in the inbox until :Sepal land", function()
+test("land = manual: a task started without a choice waits in the inbox until :Sepal land", function()
   clean(); reset()
   sepal.setup({ land = "manual" })
   vim.env.SEPAL_EDIT = [[echo manual > a.txt]]
-  local got = run({ "Goal: by hand" })
+  local got = msgs(notified(function() agent.start("Goal: by hand", work); idle() end))
   sepal.setup({ land = "auto" })
   eq(got[#got], "● ready to land: by hand · 1 file +1 −3 · :Sepal inbox\n· kept the old API\n· no new deps")
   eq(file("a.txt"), "one\ntwo\nthree\n")
@@ -228,6 +228,20 @@ test("a reply continues the task's chat from what it did, and lands only what's 
   assert(vim.startswith(prompts(), "add a line\n"), prompts())
   eq(file("a.txt"), "manual\nmore\n")
   eq(msgs(got)[1]:match("^landed"), "landed")
+end)
+
+test("<c-c><c-w> sends a task that waits in the inbox; <c-c><c-c> lands even with land = manual", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo waits > a.txt]]
+  local got = run({ "Goal: wait" }, "<c-c><c-w>")
+  eq(got[#got], "● ready to land: wait · 1 file +1 −3 · :Sepal inbox\n· kept the old API\n· no new deps")
+  eq(file("a.txt"), "one\ntwo\nthree\n")
+  clean(); reset()
+  sepal.setup({ land = "manual" })
+  vim.env.SEPAL_EDIT = [[echo now > a.txt]]
+  got = run({ "Goal: now" })
+  sepal.setup({ land = "auto" })
+  eq(file("a.txt"), "now\n")
 end)
 
 test("no changes, an agent that quits, one that never started, and one that asks for something", function()
@@ -629,8 +643,8 @@ test("a task shows its keys when it opens", function()
   sepal.config().task_suggest = nil
   vim.notify = notify
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-f> adds a file, <c-c><c-k> discards",
-    "task: <c-c><c-c> sends it, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-k> discards" })
+  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-f> adds a file, <c-c><c-k> discards",
+    "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-k> discards" })
 end)
 
 test("task opens the template above, <c-c><c-f> adds files with fff", function()

@@ -124,6 +124,13 @@ local function with_assumptions(msg, e)
   return msg
 end
 
+-- the float j's spinner is in, while you're still in it and it still shows that spinner
+local function watching(j)
+  local w = j.watch and j.watch.win
+  return w and vim.api.nvim_win_is_valid(w) and vim.api.nvim_get_current_win() == w
+    and vim.api.nvim_win_get_buf(w) == j.watch.buf and w or nil
+end
+
 -- the run is over: the worktree goes (its result is a commit), the entry gets its status
 local function finish(e, wt, status, extra)
   local j = jobs[e.id]
@@ -140,10 +147,15 @@ local function finish(e, wt, status, extra)
     notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   end
+  -- watched to its end: its chat in the same float (or the float goes, with nothing to show)
+  local w = j and watching(j)
+  if w then
+    if e.session then M.open(e, w) else pcall(vim.api.nvim_win_close, w, true) end
+  end
   vim.schedule(M._next)
 end
 
-local agent -- below
+local agent, show, loading -- below
 
 local function done(e, wt)
   if not e.stat or e.stat.files == 0 then return finish(e, wt, "nochange") end
@@ -204,6 +216,8 @@ local function screen()
   return { relative = "editor", row = 0, col = 0, style = "minimal", zindex = 1, -- under notifications
     width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight, 1) }
 end
+-- line numbers on an agent's window, at a fixed width: a wider column would resize its terminal
+local function termwin(w) vim.wo[w].number, vim.wo[w].numberwidth = true, 6 end
 
 -- the agent: Claude Code itself, in a hidden terminal buffer (:Sepal open shows it). Its turn is over
 -- at the Stop hook; then it's closed, and sepal checks and lands what it did
@@ -221,6 +235,11 @@ agent = function(e, prompt, wt)
     over = true
     timer:stop(); timer:close()
     os.remove(events)
+    -- watched: you stay in its float, a spinner until its chat (or its retry) is in it
+    if vim.api.nvim_get_current_buf() == b then
+      local l, w = loading(vim.api.nvim_get_current_win(), e.check and "Running the check" or "Loading agent")
+      j.watch = { buf = l, win = w }
+    end
     for _, w in ipairs(vim.fn.win_findbuf(b)) do pcall(vim.api.nvim_win_close, w, true) end
     if vim.api.nvim_buf_is_valid(b) then
       local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
@@ -287,6 +306,7 @@ agent = function(e, prompt, wt)
   -- started in a hidden window the size of the float M.open shows it in: a resize makes Claude Code
   -- redraw everything (slow, and it leaves old frames above the new one)
   local win = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
+  termwin(win)
   local ok, chan = pcall(vim.api.nvim_win_call, win, function()
     return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events, CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" }, on_exit = vim.schedule_wrap(exited) })
   end)
@@ -304,6 +324,8 @@ agent = function(e, prompt, wt)
   end
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the agent (it keeps working)" })
   j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
+  if watching(j) then show(b, j.watch.win) end -- a retry, watched
+  j.watch = nil
   local asked -- Claude Code asks to trust each new folder before it starts (no hook runs before that)
   timer:start(100, 100, vim.schedule_wrap(function()
     if over then return end
@@ -495,7 +517,7 @@ end
 
 -- b in a full-screen float, the size its terminal started at whatever tabs, splits or statusline there
 -- are: no resize, no redraw. Leaving it (<c-w>w…) hides it. w: the loading float to show it in
-local function show(b, w)
+show = function(b, w)
   if w then vim.api.nvim_set_current_win(w); vim.api.nvim_win_set_buf(w, b) else w = vim.fn.bufwinid(b) end
   if w ~= -1 then vim.api.nvim_set_current_win(w) else
     w = vim.api.nvim_open_win(b, true, screen())
@@ -506,14 +528,59 @@ local function show(b, w)
       return true
     end })
   end
+  termwin(w) -- after the buffer: a window takes a buffer's options from where it was last shown
   -- a terminal window follows the output only with the cursor on its last line; a new one starts at the top
   vim.api.nvim_win_set_cursor(w, { vim.api.nvim_buf_line_count(b), 0 })
   vim.cmd.startinsert()
 end
 
+-- a spinner in a full-screen float (w, else a new one) until something else is shown in it
+loading = function(w, label)
+  local l = vim.api.nvim_create_buf(false, true)
+  vim.bo[l].bufhidden, vim.b[l].sepal_agent = "wipe", true
+  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = l, desc = "Hide it (it keeps going)" })
+  if w then
+    vim.api.nvim_win_set_buf(w, l)
+  else
+    show(l)
+    w = vim.api.nvim_get_current_win()
+  end
+  vim.cmd.stopinsert() -- show's insert is for a terminal
+  vim.wo[w].number = false
+  local spin = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+  local ns = vim.api.nvim_create_namespace("sepal.loading")
+  -- centred: an accent spinner, a short label, a dim hint under it
+  local function frame(i)
+    local s, hint = spin[i % #spin + 1], "q to hide"
+    local function center(t) return (" "):rep(math.max(math.floor((vim.o.columns - vim.fn.strdisplaywidth(t)) / 2), 0)) end
+    local main = center(s .. "  " .. label) .. s .. "  " .. label
+    local lines = {}
+    for _ = 1, math.floor(vim.api.nvim_win_get_height(w) / 2) - 1 do lines[#lines + 1] = "" end
+    local row = #lines
+    vim.list_extend(lines, { main, "", center(hint) .. hint })
+    vim.api.nvim_buf_set_lines(l, 0, -1, false, lines)
+    vim.api.nvim_buf_clear_namespace(l, ns, 0, -1)
+    local at = #main - #label - 2 - #s
+    vim.api.nvim_buf_set_extmark(l, ns, row, at, { end_col = at + #s, hl_group = "Special" })
+    vim.api.nvim_buf_set_extmark(l, ns, row, #main - #label, { end_col = #main, hl_group = "Title" })
+    vim.api.nvim_buf_set_extmark(l, ns, row + 2, 0, { end_col = #lines[row + 3], hl_group = "Comment" })
+  end
+  frame(0)
+  local n, timer = 0, vim.uv.new_timer()
+  timer:start(100, 100, vim.schedule_wrap(function()
+    if not vim.api.nvim_buf_is_valid(l) or not vim.api.nvim_win_is_valid(w) or vim.api.nvim_win_get_buf(w) ~= l then
+      timer:stop(); timer:close()
+      return
+    end
+    n = n + 1
+    frame(n)
+  end))
+  return l, w
+end
+
 -- the task in Claude Code itself: while it runs, the agent at work (type to it if you like; q in normal
 -- mode hides it, it keeps going), after that its chat (claude --resume)
-function M.open(e)
+function M.open(e, w)
   local j = jobs[e.id]
   if j and j.buf and vim.api.nvim_buf_is_valid(j.buf) then return show(j.buf) end -- its terminal is gone once its turn is over (sepal checks)
   if queued(e) then return notify("it's queued, it starts when a running task is done") end
@@ -525,6 +592,7 @@ function M.open(e)
   -- and a terminal on screen scrolls down through every line
   local b = vim.api.nvim_create_buf(false, true)
   local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
+  termwin(hidden)
   local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
     return vim.fn.jobstart(vim.list_extend(cmd({}), { "--resume", e.session }), { term = true, cwd = e.root,
       env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
@@ -538,32 +606,15 @@ function M.open(e)
   vim.b[b].sepal_agent = true
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the chat (it keeps going)" })
   -- meanwhile a spinner in the float it'll show in; leaving that (q, :Sepal open…) leaves it loading hidden
-  local l = vim.api.nvim_create_buf(false, true)
-  vim.bo[l].bufhidden, vim.b[l].sepal_agent = "wipe", true
-  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = l, desc = "Hide the chat (it keeps going)" })
-  show(l)
-  vim.cmd.stopinsert() -- show's insert is for a terminal
-  local lw = vim.api.nvim_get_current_win()
-  local spin = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-  local function frame(i)
-    local text = spin[i % #spin + 1] .. " opening the chat of " .. e.title .. "…"
-    local pad = math.max(math.floor((vim.o.columns - vim.fn.strdisplaywidth(text)) / 2), 0)
-    local lines = {}
-    for _ = 1, math.floor(vim.api.nvim_win_get_height(lw) / 2) do lines[#lines + 1] = "" end
-    lines[#lines + 1] = (" "):rep(pad) .. text
-    vim.api.nvim_buf_set_lines(l, 0, -1, false, lines)
-  end
-  frame(0)
+  local l, lw = loading(w, "Loading agent")
   -- printed: 200ms without output once there's text (its longest pause mid-chat is ~160ms); 3s at most
-  local tick, quiet, t0, n, timer = -1, 0, vim.uv.now(), 0, vim.uv.new_timer()
+  local tick, quiet, t0, timer = -1, 0, vim.uv.now(), vim.uv.new_timer()
   timer:start(50, 50, vim.schedule_wrap(function()
     local gone = not vim.api.nvim_win_is_valid(lw) or vim.api.nvim_win_get_buf(lw) ~= l
     if gone or not vim.api.nvim_buf_is_valid(b) then
       timer:stop(); timer:close()
       return pcall(vim.api.nvim_win_close, lw, true)
     end
-    n = n + 1
-    frame(math.floor(n / 2))
     local t = vim.api.nvim_buf_get_changedtick(b)
     if t ~= tick then tick, quiet = t, 0 else quiet = quiet + 50 end
     local printed = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false)):find("%S")

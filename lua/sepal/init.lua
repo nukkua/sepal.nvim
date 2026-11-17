@@ -255,12 +255,12 @@ end
 -- the task's keys, shown when it opens (like petal's commit buffer); one notification, replaced each time
 local function keys()
   M.notify("task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox" .. (C.task_suggest and ", <c-c><c-s> writes it for you" or "")
-    .. ", <c-c><c-f> adds a file, <c-c><c-i> attaches an image, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-task-keys" })
+    .. ", <c-c><c-f> adds a file, <c-c><c-a> attaches an image, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-task-keys" })
 end
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
--- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-i> an image (any path),
+-- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-a> an image (any path),
 -- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
@@ -366,7 +366,7 @@ function M.task(range, lines)
   end, vim.tbl_extend("force", o, { desc = "Add a file to the task" }))
   -- an image (a screenshot, a mockup) from anywhere: outside the repo it's listed by its absolute path,
   -- which the agent is allowed to read (see sepal.agent)
-  vim.keymap.set({ "n", "i" }, "<c-c><c-i>", function()
+  vim.keymap.set({ "n", "i" }, "<c-c><c-a>", function()
     vim.cmd.stopinsert()
     vim.ui.input({ prompt = "Image: ", completion = "file" }, function(p)
       if not p or p == "" then return end

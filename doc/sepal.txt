@@ -115,7 +115,7 @@ files, fidget.nvim for a spinner.
                                 the inbox for L
                     <c-c><c-s>  have |sepal-task_suggest| write the task
                     <c-c><c-f>  add a file under Files: as @path
-                    <c-c><c-i>  attach an image (any path, also outside
+                    <c-c><c-a>  attach an image (any path, also outside
                                 the repo: the agent may read just that)
                     <c-c><c-k>  discard the task
                   With a [range], those lines go in as a "Selection:

@@ -167,7 +167,7 @@ and the `highlights` option wins over everything.
 | `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
 | `<c-c><c-s>` | have `task_suggest` write the task from what's there (`u` undoes it)  |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
-| `<c-c><c-i>` | attach an image (a screenshot, a mockup), also from outside the repo   |
+| `<c-c><c-a>` | attach an image (a screenshot, a mockup), also from outside the repo   |
 | `<c-c><c-k>` | discard the task                                                       |
 
 When a task opens, a notification lists these keys, the way petal does for the commit buffer.

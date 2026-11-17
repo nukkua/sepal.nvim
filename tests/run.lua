@@ -31,7 +31,7 @@ done
 pwd >> "$SEPAL_T/cwd"
 printf '%s\n' "$logged" >> "$SEPAL_T/args"
 printf '%s\n--\n' "$prompt" >> "$SEPAL_T/prompts"
-case "$logged" in *--resume*) resumed=1;; esac
+case "$logged" in *--resume*) resumed=1; echo "the chat so far";; esac
 if [ "$SEPAL_FAIL" = start ]; then echo boom; exit 1; fi
 if [ -n "$SEPAL_TRUST" ]; then echo "Quick safety check: Is this a project you trust?"; read _; fi
 ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
@@ -366,6 +366,7 @@ test(":Sepal open toggles the agent and its chat when it's the only window of a 
     eq(ok, true, what .. ": leaving failed: " .. tostring(err))
     eq(vim.b.sepal_agent == true, false, what .. ": still shown after the toggle")
     vim.cmd("Sepal open")
+    vim.wait(1000, function() return vim.b.sepal_agent == true end) -- a chat shows once it's printed
     eq(vim.b.sepal_agent, true, what .. ": not shown again")
     vim.cmd.stopinsert()
   end
@@ -380,7 +381,7 @@ test(":Sepal open toggles the agent and its chat when it's the only window of a 
   end)
   fresh()
   vim.cmd("Sepal open") -- done: its chat
-  vim.wait(300)
+  vim.wait(1000, function() return vim.b.sepal_agent == true end)
   local chat = vim.api.nvim_get_current_buf()
   toggled("chat")
   vim.wait(50)
@@ -423,7 +424,7 @@ test(":Sepal open shows the agent at work, and the chat once it's done", functio
   end)
   eq(#vim.api.nvim_list_tabpages(), 1, "the agent's tab stayed open")
   vim.cmd("Sepal open")
-  vim.wait(1000, function() return #args() == 2 end)
+  vim.wait(1000, function() return #args() == 2 and vim.bo.buftype == "terminal" end)
   eq({ vim.bo.buftype, args()[2], vim.split(vim.trim(read(T .. "/cwd")), "\n")[2] }, { "terminal", "--resume", work })
   vim.cmd.stopinsert()
   vim.cmd("bwipeout!")

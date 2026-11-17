@@ -466,50 +466,63 @@ function M.show(e)
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the diff" })
 end
 
--- a new tab, or this one when it only holds an empty, unnamed buffer (fresh nvim): no [No Name] tab left behind
-local function tab()
-  local b = vim.api.nvim_get_current_buf()
-  local empty = vim.fn.winnr("$") == 1 and vim.api.nvim_buf_get_name(b) == "" and not vim.bo[b].modified
-    and vim.bo[b].buftype == "" and vim.api.nvim_buf_line_count(b) == 1 and vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == ""
-  if not empty then return vim.cmd.tabnew() end
-  vim.cmd.enew()
-  if vim.api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then vim.api.nvim_buf_delete(b, {}) end
+-- b in a full-screen float, the size its terminal started at whatever tabs, splits or statusline there
+-- are: no resize, no redraw. Leaving it (<c-w>w…) hides it
+local function show(b)
+  local w = vim.fn.bufwinid(b)
+  if w ~= -1 then vim.api.nvim_set_current_win(w) else
+    w = vim.api.nvim_open_win(b, true, screen())
+    vim.api.nvim_create_autocmd("WinLeave", { callback = function()
+      if not vim.api.nvim_win_is_valid(w) then return true end -- closed with q: done
+      if vim.api.nvim_get_current_win() ~= w then return end
+      vim.schedule(function() pcall(vim.api.nvim_win_close, w, true) end)
+      return true
+    end })
+  end
+  -- a terminal window follows the output only with the cursor on its last line; a new one starts at the top
+  vim.api.nvim_win_set_cursor(w, { vim.api.nvim_buf_line_count(b), 0 })
+  vim.cmd.startinsert()
 end
 
--- the task in Claude Code itself: while it runs, in a full-screen float, the agent at work (type to it if you
--- like; q in normal mode hides it, it keeps going), after that its chat (claude --resume)
+-- the task in Claude Code itself: while it runs, the agent at work (type to it if you like; q in normal
+-- mode hides it, it keeps going), after that its chat (claude --resume)
 function M.open(e)
   local j = jobs[e.id]
-  if j and j.buf and vim.api.nvim_buf_is_valid(j.buf) then -- its terminal is gone once its turn is over (sepal checks)
-    local w = vim.fn.bufwinid(j.buf)
-    if w ~= -1 then vim.api.nvim_set_current_win(w) else
-      -- a float the size it started at, whatever tabs, splits or statusline there are: no resize, no redraw
-      w = vim.api.nvim_open_win(j.buf, true, screen())
-      vim.api.nvim_create_autocmd("WinLeave", { callback = function() -- left (<c-w>w…): hide it, it keeps working
-        if vim.api.nvim_get_current_win() ~= w then return end
-        vim.schedule(function() pcall(vim.api.nvim_win_close, w, true) end)
-        return true
-      end })
-    end
-    -- a terminal window follows the output only with the cursor on its last line; a new one starts at the top
-    vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(j.buf), 0 })
-    return vim.cmd.startinsert()
-  end
+  if j and j.buf and vim.api.nvim_buf_is_valid(j.buf) then return show(j.buf) end -- its terminal is gone once its turn is over (sepal checks)
   if queued(e) then return notify("it's queued, it starts when a running task is done") end
   if j then return notify(j.buf and "the agent is done, sepal is " .. e.status or "it's starting: making its worktree") end
   if not e.session then return notify("this task has no chat yet") end
-  tab()
-  local b = vim.api.nvim_get_current_buf()
-  vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root,
-    env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
-  vim.bo[b].bufhidden = "wipe"
+  -- started hidden and shown once it's printed the chat: claude --resume prints all of it at once,
+  -- and a terminal on screen scrolls down through every line
+  local b = vim.api.nvim_create_buf(false, true)
+  local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
+  local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
+    return vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root,
+      env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
+  end)
+  pcall(vim.api.nvim_win_close, hidden, true)
+  if not ok or chan <= 0 then
+    pcall(vim.api.nvim_buf_delete, b, { force = true })
+    return notify("could not run " .. tostring(C().cmd[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")), WARN)
+  end
   vim.b[b].sepal_agent = true
-  -- bufhidden=wipe doesn't wipe a terminal while claude runs in it: however you leave the chat, end it
-  vim.api.nvim_create_autocmd("BufHidden", { buffer = b, once = true, callback = function()
-    vim.schedule(function() pcall(vim.api.nvim_buf_delete, b, { force = true }) end)
-  end })
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the chat" })
-  vim.cmd.startinsert()
+  -- printed: 200ms without output once there's text (its longest pause mid-chat is ~160ms); 3s at most
+  local tick, quiet, t0, timer = -1, 0, vim.uv.now(), vim.uv.new_timer()
+  timer:start(50, 50, vim.schedule_wrap(function()
+    if not vim.api.nvim_buf_is_valid(b) then timer:stop(); return timer:close() end
+    local t = vim.api.nvim_buf_get_changedtick(b)
+    if t ~= tick then tick, quiet = t, 0 else quiet = quiet + 50 end
+    local printed = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false)):find("%S")
+    if not (printed and quiet >= 200) and vim.uv.now() - t0 < 3000 then return end
+    timer:stop(); timer:close()
+    show(b)
+    vim.bo[b].bufhidden = "wipe"
+    -- bufhidden=wipe doesn't wipe a terminal while claude runs in it: however you leave the chat, end it
+    vim.api.nvim_create_autocmd("BufHidden", { buffer = b, once = true, callback = function()
+      vim.schedule(function() pcall(vim.api.nvim_buf_delete, b, { force = true }) end)
+    end })
+  end))
 end
 
 -- a small buffer to write the reply in: <c-c><c-c> sends it, <c-c><c-k> discards it

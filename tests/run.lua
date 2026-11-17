@@ -300,6 +300,17 @@ test("outside a git repo the task comes back in its buffer", function()
   vim.api.nvim_buf_delete(task_buf(), { force = true })
 end)
 
+test("a work tree that can't be saved: the task leaves the inbox and comes back in its buffer", function()
+  local before = #inbox.list(work)
+  sh("printf x > locked.txt && chmod 000 locked.txt") -- git add -A can't read it
+  local got = notified(function() send({ "Goal: unreadable" }); idle() end)
+  sh("rm -f locked.txt")
+  eq(got[#got], { "could not save your work tree (git add / write-tree failed)\nthe task is back in its buffer", vim.log.levels.ERROR })
+  eq(#inbox.list(work), before)
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), { "Goal: unreadable" })
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
+end)
+
 test(":Sepal stop stops a running task", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "3", [[echo late > a.txt]]

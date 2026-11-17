@@ -39,8 +39,9 @@ function M.root(cwd)
 end
 
 -- the work tree (untracked files too, ignored ones not) as a commit on top of HEAD, through a copy of
--- the index; ref: where to keep it
-function M.snapshot(root, ref)
+-- the index, to on_done (nil if git failed); ref: where to keep it. add -A reads the whole work tree,
+-- so it and write-tree run in the background: sending a task answers at once
+function M.snapshot(root, ref, on_done)
   local idx = vim.fn.tempname()
   -- the index's path and HEAD in one call; a fresh repo has no HEAD (git fails, but prints the path first)
   local rp = M.run(root, { "rev-parse", "--git-path", "index", "--verify", "-q", "HEAD" })
@@ -51,10 +52,19 @@ function M.snapshot(root, ref)
     vim.uv.fs_copyfile(real, idx) -- no index yet (fresh repo): start empty
   end
   local env = vim.tbl_extend("force", ENV, { GIT_INDEX_FILE = idx })
-  local tree = M.run(root, { "add", "-A" }, { env = env }).code == 0 and out(root, { "write-tree" }, { env = env })
-  os.remove(idx)
-  if not tree then return nil end
-  return M.commit(root, tree, head, ref)
+  local function fail() os.remove(idx); on_done(nil) end
+  local function step(args, cb)
+    if not pcall(vim.system, vim.list_extend({ "git", "-C", root }, args), { text = true, env = env }, vim.schedule_wrap(cb)) then
+      vim.schedule(fail)
+    end
+  end
+  step({ "add", "-A" }, function(r)
+    if r.code ~= 0 then return fail() end
+    step({ "write-tree" }, function(w)
+      os.remove(idx)
+      on_done(w.code == 0 and M.commit(root, vim.trim(w.stdout), head, ref) or nil)
+    end)
+  end)
 end
 
 -- a commit of tree (with parent, if any) kept at ref

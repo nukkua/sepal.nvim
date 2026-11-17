@@ -318,11 +318,12 @@ function M.task(range, lines)
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
     local text = table.concat(lines, "\n")
-    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land)
-    if not e then
+    local function back(why)
       M.notify(why .. "\nthe task is back in its buffer", vim.log.levels.ERROR)
-      return giveback(text)
+      giveback(text)
     end
+    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land, back)
+    if not e then return back(why) end
     if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running task is done") end
     M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
   end

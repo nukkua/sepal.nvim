@@ -411,19 +411,37 @@ local function queued(e)
   for i, q in ipairs(queue) do if q[1].id == e.id then return i end end
 end
 
--- run a new task from cwd; nil, why when it can't
+-- run a new task from cwd; nil, why when it can't. Your work tree is saved in the background, then
+-- it starts (or waits its turn); on_fail(why) if saving fails (the task is gone from the inbox then)
 -- land: "auto" / "manual" for this task, nil: the land option
-function M.start(text, cwd, land)
+function M.start(text, cwd, land, on_fail)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
+  local full = C().max_running and vim.tbl_count(jobs) >= C().max_running
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
-    task = text, check = check or C().check, time = os.time(), status = "running", attempts = 0, land = land }
-  e.base = git.snapshot(root, ref(e, "base"))
-  if not e.base then return nil, "could not save your work tree (git add / write-tree failed)" end
-  e.base0 = e.base
+    task = text, check = check or C().check, time = os.time(), status = full and "queued" or "running", attempts = 0, land = land }
   inbox.add(e)
-  launch(e, text .. "\n" .. notes(e), e.base)
+  jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
+  git.snapshot(root, ref(e, "base"), function(base)
+    local j = jobs[e.id]
+    jobs[e.id] = nil
+    if not base then
+      inbox.remove(e)
+      M._next()
+      return (on_fail or function(why) notify(why, ERROR) end)("could not save your work tree (git add / write-tree failed)")
+    end
+    e.base, e.base0 = base, base
+    if j.stopped then
+      e.status = "stopped"
+      inbox.changed(e)
+      notify("stopped: " .. e.title)
+      return M._next()
+    end
+    queue[#queue + 1] = { e, text .. "\n" .. notes(e), base } -- behind the tasks queued before it
+    M._next()
+    if queued(e) and e.status ~= "queued" then e.status = "queued"; inbox.changed(e) end
+  end)
   return e
 end
 

@@ -78,7 +78,7 @@ local STATUS = {
 }
 M.STATUS = STATUS
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  q close"
+local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  za fold  q close"
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -117,6 +117,7 @@ local function details(e)
   return d
 end
 
+local closed = {} -- task id -> true when you closed its fold
 local heads = {} -- row -> true for each task's first line, so j/k can skip its details
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
@@ -126,6 +127,14 @@ render = function()
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not b or #vim.fn.win_findbuf(b) == 0 then return end
   local root = vim.b[b].sepal_inbox
+  local w = vim.fn.win_findbuf(b)[1]
+  -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
+  local old = vim.b[b].sepal_rows or {}
+  vim.api.nvim_win_call(w, function()
+    for row in pairs(heads) do
+      if heads[row] and old[row] then closed[old[row]] = vim.fn.foldclosed(row) ~= -1 or nil end
+    end
+  end)
   local lines, rows, marks = { HELP, "" }, {}, {}
   local list = M.list(root)
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
@@ -147,6 +156,17 @@ render = function()
   vim.b[b].sepal_rows = rows
   heads = {}
   for row = 1, #lines do heads[row] = marks[row] ~= nil end
+  vim.api.nvim_win_call(w, function()
+    vim.cmd("silent! normal! zE")
+    for row = 1, #lines do
+      local last = row
+      while heads[row] and rows[last + 1] == rows[row] do last = last + 1 end
+      if last > row then
+        vim.cmd(("%d,%dfold"):format(row, last))
+        if not closed[rows[row]] then vim.cmd(row .. "foldopen") end
+      end
+    end
+  end)
 end
 M.render = function() render() end
 
@@ -197,6 +217,7 @@ function M.open(root)
   if w == -1 then w = vim.api.nvim_open_win(b, true, { split = "below", win = -1, height = 12 }) end
   vim.api.nvim_set_current_win(w)
   vim.wo[w].wrap, vim.wo[w].cursorline = false, true
+  vim.wo[w].foldmethod, vim.wo[w].foldenable, vim.wo[w].foldtext = "manual", true, "" -- foldtext "": a closed task shows as its own line
   render()
   if vim.api.nvim_buf_line_count(b) >= 3 then vim.api.nvim_win_set_cursor(w, { 3, 0 }) end
 end

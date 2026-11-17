@@ -80,7 +80,7 @@ cases.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  q close
+<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  za fold  q close
 
 ✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
     · shutdown() blocks until the queue is empty
@@ -94,6 +94,7 @@ cases.
   same chat, and the task is checked and lands again.
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
 - `<CR>` shows everything the task changed as a diff.
+- `j`/`k` go task to task. Each task is a fold: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
 
 That's all of it: write, send, keep working, read the `·` lines.
 

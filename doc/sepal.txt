@@ -85,8 +85,9 @@ files, fidget.nvim for a spinner.
 
                                                                       *:Sepal*
 :[range]Sepal [task]
-                  Write a task in a buffer above the code: Scope, Goal,
-                  Constraints, Done when, Files. In it:
+                  Write a task in a buffer above the code: Goal,
+                  Constraints, Done when, Files. Fields left
+                  empty aren't sent; an empty Goal: sends nothing. In it:
                     <c-c><c-c>  send it and close the buffer
                     <c-c><c-s>  have |sepal-task_suggest| write the task
                     <c-c><c-f>  add a file under Files: as @path

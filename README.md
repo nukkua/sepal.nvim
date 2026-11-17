@@ -39,8 +39,7 @@ vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox
 above your code:
 
 ```
-Scope: ThreadPool::shutdown()
-Goal: Finish queued tasks before stopping, refuse new ones.
+Goal: Finish queued tasks in ThreadPool::shutdown() before stopping, refuse new ones.
 
 Constraints:
 - don't change the public API
@@ -171,7 +170,7 @@ it to the command, which answers with the task:
 require("sepal").setup({
   task_suggest = { "claude", "-p", "--model", "opus", "--effort", "medium",
     "--no-session-persistence", "--tools=Read,Grep,Glob",
-    "Turn the rough idea on stdin into a short task: Scope, Goal, Constraints, Done when "
+    "Turn the rough idea on stdin into a short task: Goal, Constraints, Done when "
     .. "(one shell command that proves it works, e.g. the test to run), Files (as @path). "
     .. "Read the files so it matches the code. Output only the task, no code fences, no filler." },
 })

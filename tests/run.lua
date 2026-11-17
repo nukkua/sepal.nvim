@@ -110,7 +110,7 @@ end
 test("a task runs in a worktree and lands as unstaged changes, with what the agent assumed", function()
   reset()
   vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\n' > a.txt; printf 'new\n' > b.txt]]
-  local got = run({ "Scope: a.txt", "Goal: shout two", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.txt" })
+  local got = run({ "Goal: shout two", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.txt" })
   eq(got, { "working on it: shout two · :Sepal open watches", "landed: shout two · 2 files +2 −1\n· kept the old API\n· no new deps" })
   eq(file("a.txt"), "one\nTWO\nthree\n")
   eq(file("b.txt"), "new\n")
@@ -120,7 +120,7 @@ test("a task runs in a worktree and lands as unstaged changes, with what the age
   eq(vim.uv.fs_stat(cwd), nil, "the worktree was left behind")
   eq(args(), { "--permission-mode acceptEdits" })
   local p = prompts()
-  assert(p:find("Scope: a.txt\nGoal: shout two\n\nConstraints:\n\n\nFiles:\n- @a.txt\n\n---\n", 1, true), p) -- no empty bullet or Done when:
+  assert(p:find("Goal: shout two\n\nFiles:\n- @a.txt\n\n---\n", 1, true), p) -- no empty Constraints: or Done when:
   assert(p:find("Assumptions:", 1, true), "no assumptions asked for")
   local e = newest()
   eq({ e.status, e.session, e.assumptions }, { "landed", "s1", { "kept the old API", "no new deps" } })
@@ -457,7 +457,9 @@ test(":Sepal open shows the agent at work, and the chat once it's done", functio
   end)
   eq(#vim.api.nvim_list_tabpages(), 1, "the agent's tab stayed open")
   eq(vim.b.sepal_agent, true, "watching it to its end took you out of it") -- its chat comes up in the same float
-  vim.wait(1000, function() return #args() == 2 and vim.bo.buftype == "terminal" end)
+  eq(vim.bo.buftype, "terminal", "a spinner instead of the agent's last screen")
+  local id = newest().id
+  vim.wait(4000, function() return #args() == 2 and vim.api.nvim_buf_get_name(0) ~= "sepal://" .. id end)
   eq({ vim.bo.buftype, args()[2], vim.split(vim.trim(read(T .. "/cwd")), "\n")[2] }, { "terminal", "--resume", work })
   eq(vim.wo.number, false, "line numbers on the chat")
   vim.cmd.stopinsert()
@@ -635,7 +637,7 @@ test("task opens the template above, <c-c><c-f> adds files with fff", function()
   sepal.task()
   local b = task_buf()
   eq(vim.api.nvim_get_current_buf(), b)
-  eq(vim.api.nvim_buf_get_lines(b, 0, 3, false), { "Scope: ", "Goal: ", "" })
+  eq(vim.api.nvim_buf_get_lines(b, 0, 3, false), { "Goal: ", "", "Constraints:" })
   package.loaded.fff = { find_files = function(o) o.on_submit({}, { relative_path = "src/pool.cpp" }) end }
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-f>"), "tx", false)
   package.loaded.fff.find_files = function(o) o.on_submit({}, { relative_path = "src/pool.h" }) end
@@ -653,7 +655,7 @@ test(":'<,'>Sepal task puts the selected lines in the task and lists the file", 
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })
   vim.cmd("2,3Sepal task")
   local b = task_buf()
-  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: ", "Goal: ", "", "Constraints:", "- ", "",
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Constraints:", "- ", "",
     "Done when: ", "", "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
@@ -661,17 +663,30 @@ test("a selection joins the open draft, its file listed once", function()
   vim.cmd.wincmd("j")
   vim.cmd("4Sepal task")
   local lines = vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false)
-  eq(vim.list_slice(lines, 15), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
+  eq(vim.list_slice(lines, 14), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("code in a selection is sent as it is, even a line that is just -", function()
   reset()
   vim.api.nvim_set_current_win(vim.fn.bufwinid(task_buf()))
+  vim.api.nvim_buf_set_lines(task_buf(), 0, 1, false, { "Goal: keep the code" })
   notified(function() vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false); idle() end)
   local got = vim.split(prompts(), "\n")
   eq(vim.tbl_contains(got, "-"), true, "the - code line was dropped")
   eq(vim.tbl_contains(got, "- "), false, "the empty bullet was sent")
   vim.cmd("bwipeout! tests/pool.lua")
+end)
+
+test("<c-c><c-c> sends nothing and says so when the goal or the whole task is empty", function()
+  for _, want in ipairs({ "the goal is empty, nothing sent", "the task is empty, nothing sent" }) do
+    sepal.task()
+    if want:find("goal") then vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: ", "", "Constraints:", "- small" }) end
+    local got = notified(function() vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false) end)
+    eq(msgs(got), { want })
+    assert(task_buf(), "the task buffer was closed")
+    vim.api.nvim_buf_delete(task_buf(), { force = true })
+  end
+  eq(sepal.tidy({ "Goal:", "fix it", "", "Files:" }), { "Goal:", "fix it" }) -- text under a field counts
 end)
 
 test("closing the task window drops the draft: :Sepal task starts a new one", function()
@@ -680,7 +695,7 @@ test("closing the task window drops the draft: :Sepal task starts a new one", fu
   vim.cmd.close()
   eq(task_buf(), nil)
   sepal.task()
-  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 1, false), { "Scope: " })
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 1, false), { "Goal: " })
   vim.api.nvim_buf_delete(task_buf(), { force = true })
 end)
 

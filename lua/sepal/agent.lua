@@ -52,16 +52,16 @@ end
 local function ref(e, what) return "refs/sepal/" .. e.id .. "/" .. what end
 local function wtdir(e) return vim.fs.joinpath(C().worktrees, inbox.key(e.root), e.id) end
 
--- the task's check ("Done when: make test") and title (Goal, else Scope, else its first line)
+-- the task's check ("Done when: make test") and title (Goal, else its first line)
 function M.parse(text)
   local f = {}
   for l in (text .. "\n"):gmatch("([^\n]*)\n") do
-    for _, k in ipairs({ "Done when", "Goal", "Scope" }) do
+    for _, k in ipairs({ "Done when", "Goal" }) do
       local v = l:match("^%s*" .. k .. ":%s*(.-)%s*$")
       if v and v ~= "" and not f[k] then f[k] = v end
     end
   end
-  return f["Done when"], first(f.Goal or f.Scope or text, 40) or "task"
+  return f["Done when"], first(f.Goal or text, 40) or "task"
 end
 
 -- what sepal tells the agent besides the task
@@ -150,7 +150,7 @@ local function finish(e, wt, status, extra)
   -- watched to its end: its chat in the same float (or the float goes, with nothing to show)
   local w = j and watching(j)
   if w then
-    if e.session then M.open(e, w) else pcall(vim.api.nvim_win_close, w, true) end
+    if e.session then M.open(e, w, j.watch.kept) else pcall(vim.api.nvim_win_close, w, true) end
   end
   vim.schedule(M._next)
 end
@@ -235,17 +235,26 @@ agent = function(e, prompt, wt)
     over = true
     timer:stop(); timer:close()
     os.remove(events)
-    -- watched: you stay in its float, a spinner until its chat (or its retry) is in it
+    if not vim.api.nvim_buf_is_valid(b) then return end
+    local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
+    -- watched: you stay in its float. The check gets a spinner; else its last screen stays (claude
+    -- stopped) until its chat replaces it, and it's wiped then
     if vim.api.nvim_get_current_buf() == b then
-      local l, w = loading(vim.api.nvim_get_current_win(), e.check and "Running the check" or "Loading agent")
-      j.watch = { buf = l, win = w }
+      local w = vim.api.nvim_get_current_win()
+      if e.check then
+        local l = loading(w, "Running the check")
+        j.watch = { buf = l, win = w }
+      else
+        vim.cmd.stopinsert() -- a key in an exited terminal closes it
+        vim.bo[b].bufhidden = "wipe"
+        pcall(vim.fn.jobstop, vim.bo[b].channel)
+        j.watch = { buf = b, win = w, kept = true }
+        return lines[#lines]
+      end
     end
     for _, w in ipairs(vim.fn.win_findbuf(b)) do pcall(vim.api.nvim_win_close, w, true) end
-    if vim.api.nvim_buf_is_valid(b) then
-      local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
-      pcall(vim.api.nvim_buf_delete, b, { force = true }) -- ends claude too
-      return lines[#lines]
-    end
+    pcall(vim.api.nvim_buf_delete, b, { force = true }) -- ends claude too
+    return lines[#lines]
   end
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
@@ -580,7 +589,7 @@ end
 
 -- the task in Claude Code itself: while it runs, the agent at work (type to it if you like; q in normal
 -- mode hides it, it keeps going), after that its chat (claude --resume)
-function M.open(e, w)
+function M.open(e, w, kept)
   local j = jobs[e.id]
   if j and j.buf and vim.api.nvim_buf_is_valid(j.buf) then return show(j.buf) end -- its terminal is gone once its turn is over (sepal checks)
   if queued(e) then return notify("it's queued, it starts when a running task is done") end
@@ -605,8 +614,10 @@ function M.open(e, w)
   chats[e.id] = b
   vim.b[b].sepal_agent = true
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the chat (it keeps going)" })
-  -- meanwhile a spinner in the float it'll show in; leaving that (q, :Sepal open…) leaves it loading hidden
-  local l, lw = loading(w, "Loading agent")
+  -- meanwhile a spinner in the float it'll show in (or the screen kept there); leaving that (q,
+  -- :Sepal open…) leaves it loading hidden
+  local l, lw
+  if kept then l, lw = vim.api.nvim_win_get_buf(w), w else l, lw = loading(w, "Loading agent") end
   -- printed: 200ms without output once there's text (its longest pause mid-chat is ~160ms); 3s at most
   local tick, quiet, t0, timer = -1, 0, vim.uv.now(), vim.uv.new_timer()
   timer:start(50, 50, vim.schedule_wrap(function()

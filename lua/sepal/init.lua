@@ -151,8 +151,33 @@ function M.clean()
   M.notify("dropped " .. n .. " task" .. (n == 1 and "" or "s"))
 end
 
+-- the task as it's sent: no empty bullets, no field without text (Goal:, Constraints:, Files:…), no
+-- doubled blank lines; code in a ``` block is sent as it is. nil and why when there's nothing to send
+function M.tidy(buf)
+  local kept, fenced = {}, false
+  for _, l in ipairs(buf) do
+    if l:match("^%s*```") then fenced = not fenced end
+    if fenced or not l:match("^%s*%-%s*$") then kept[#kept + 1] = { l, fenced } end
+  end
+  local function field(l) return l and not l[2] and l[1]:match("^%s*%u[%w ]*:") end
+  local lines, goal = {}, false
+  for i, l in ipairs(kept) do
+    local empty = not l[2] and l[1]:match("^%s*%u[%w ]*:%s*$")
+    local blank = vim.trim(l[1]) == "" and not l[2]
+    local nxt = kept[i + 1]
+    -- an empty field is dropped when nothing is under it (the end, a blank line or the next field)
+    local drop = empty and (not nxt or (vim.trim(nxt[1]) == "" and not nxt[2]) or field(nxt))
+    if drop and l[1]:match("^%s*Goal:") then goal = true end
+    if not drop and not (blank and (#lines == 0 or vim.trim(lines[#lines]) == "")) then lines[#lines + 1] = l[1] end
+  end
+  while #lines > 0 and vim.trim(lines[#lines]) == "" do lines[#lines] = nil end
+  if #lines == 0 then return nil, "the task is empty, nothing sent" end
+  if goal then return nil, "the goal is empty, nothing sent" end
+  return lines
+end
+
 local function template()
-  return { "Scope: ", "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (C.check or ""), "", "Files:" }
+  return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (C.check or ""), "", "Files:" }
 end
 local IDEA = { "", "", "Files:" } -- with task_suggest: the idea goes on top, <c-c><c-s> writes the task
 local HINT = "what to change, where and why; <c-c><c-s> writes the task"
@@ -242,13 +267,8 @@ function M.task(range, lines)
 
   local o = { buffer = buf }
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function()
-    local fenced = false -- no empty bullets (or empty Done when:), but code in a ``` block is sent as it is
-    local lines = vim.tbl_filter(function(l)
-      if l:match("^%s*```") then fenced = not fenced end
-      return fenced or not (l:match("^%s*%-%s*$") or l:match("^%s*Done when:%s*$"))
-    end, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-    while #lines > 0 and vim.trim(lines[#lines]) == "" do lines[#lines] = nil end
-    if #lines == 0 then return M.notify("the task is empty", vim.log.levels.WARN) end
+    local lines, err = M.tidy(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    if not lines then return M.notify(err, vim.log.levels.WARN) end
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
     local text = table.concat(lines, "\n")

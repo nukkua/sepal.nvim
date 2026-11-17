@@ -117,7 +117,7 @@ local function details(e)
   return d
 end
 
-local closed = {} -- task id -> true when you closed its fold
+local opened = {} -- task id -> true when you opened its fold: tasks start folded
 local heads = {} -- row -> true for each task's first line, so j/k can skip its details
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
@@ -132,7 +132,7 @@ render = function()
   local old = vim.b[b].sepal_rows or {}
   vim.api.nvim_win_call(w, function()
     for row in pairs(heads) do
-      if heads[row] and old[row] then closed[old[row]] = vim.fn.foldclosed(row) ~= -1 or nil end
+      if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 or nil end
     end
   end)
   local lines, rows, marks = { HELP, "" }, {}, {}
@@ -163,7 +163,7 @@ render = function()
       while heads[row] and rows[last + 1] == rows[row] do last = last + 1 end
       if last > row then
         vim.cmd(("%d,%dfold"):format(row, last))
-        if not closed[rows[row]] then vim.cmd(row .. "foldopen") end
+        if opened[rows[row]] then vim.cmd(row .. "foldopen") end
       end
     end
   end)

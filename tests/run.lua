@@ -332,16 +332,17 @@ test("j/k in the inbox go task to task, past the lines under each", function()
   eq(vim.api.nvim_win_get_cursor(0)[1], 6)
   vim.cmd("normal k")
   eq(vim.api.nvim_win_get_cursor(0)[1], 3)
-  vim.cmd("normal za") -- folds second's lines under it, and that stays through a redraw
-  eq(vim.fn.foldclosed(3), 3)
+  eq(vim.fn.foldclosed(3), 3) -- tasks start folded
   eq(vim.fn.foldclosedend(3), 5)
+  vim.cmd("normal za") -- unfolds second's lines, and that stays through a redraw
+  eq(vim.fn.foldclosed(3), -1)
   inbox.render()
-  eq(vim.fn.foldclosed(3), 3)
-  eq(vim.fn.foldclosed(6), -1)
+  eq(vim.fn.foldclosed(3), -1)
+  eq(vim.fn.foldclosed(6), 6)
   vim.cmd("normal j")
   eq(inbox.current().title, "first")
   vim.cmd("normal kza")
-  eq(vim.fn.foldclosed(3), -1)
+  eq(vim.fn.foldclosed(3), 3)
   vim.cmd("close")
 end)
 

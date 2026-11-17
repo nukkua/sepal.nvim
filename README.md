@@ -94,7 +94,7 @@ cases.
   same chat, and the task is checked and lands again.
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
 - `<CR>` shows everything the task changed as a diff.
-- `j`/`k` go task to task. Each task is a fold: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
+- `j`/`k` go task to task. Each task is a fold, closed at first: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
 
 That's all of it: write, send, keep working, read the `·` lines.
 

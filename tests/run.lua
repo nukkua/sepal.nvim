@@ -643,24 +643,37 @@ test("a task shows its keys when it opens", function()
   sepal.config().task_suggest = nil
   vim.notify = notify
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-f> adds a file, <c-c><c-a> attaches an image, <c-c><c-k> discards",
-    "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-a> attaches an image, <c-c><c-k> discards" })
+  eq(got, { "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-f> adds a file, <c-c><c-p> pastes an image, <c-c><c-k> discards",
+    "task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox, <c-c><c-s> writes it for you, <c-c><c-f> adds a file, <c-c><c-p> pastes an image, <c-c><c-k> discards" })
 end)
 
-test("<c-c><c-a> attaches an image from outside the repo, the agent may read just that", function()
+test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", function()
   clean(); reset()
-  local img = vim.fs.joinpath(T, "shot.png")
-  vim.fn.writefile({ "png" }, img)
+  local bin = vim.fs.joinpath(T, "bin")
+  vim.fn.mkdir(bin, "p")
+  vim.fn.writefile({ "#!/bin/sh", "printf png" }, vim.fs.joinpath(bin, "wl-paste"))
+  vim.fn.setfperm(vim.fs.joinpath(bin, "wl-paste"), "rwxr-xr-x")
+  local path, wl = vim.env.PATH, vim.env.WAYLAND_DISPLAY
+  vim.env.PATH, vim.env.WAYLAND_DISPLAY = bin .. ":" .. path, "t"
   sepal.task()
-  local input = vim.ui.input
-  vim.ui.input = function(_, cb) cb(img) end
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-a>"), "tx", false)
-  vim.ui.input = input
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-p>"), "tx", false)
+  vim.env.PATH, vim.env.WAYLAND_DISPLAY = path, wl
   local lines = vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false)
-  eq(lines[#lines], "- @" .. img)
+  local img = lines[#lines]:match("^%- @(.*paste%-%d+%.png)$")
+  assert(img, lines[#lines])
+  eq(vim.fn.readfile(img, "b"), { "png" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   run({ "Goal: match the mockup", "", "Files:", "- @" .. img, "- @a.txt" })
   eq(args()[1], "--permission-mode acceptEdits --allowedTools Read(/" .. img .. ")")
+  -- a discarded draft's image, over a day old, goes on the next paste; the task's stays until it's dropped
+  local old = vim.fs.joinpath(agent.PASTES, "paste-1.png")
+  vim.fn.writefile({ "png" }, old)
+  vim.uv.fs_utime(old, os.time() - 2 * 86400, os.time() - 2 * 86400)
+  vim.uv.fs_utime(img, os.time() - 2 * 86400, os.time() - 2 * 86400)
+  agent.sweep_pastes()
+  eq({ vim.uv.fs_stat(old) == nil, vim.uv.fs_stat(img) ~= nil }, { true, true })
+  agent.drop(newest())
+  eq(vim.uv.fs_stat(img), nil)
 end)
 
 test("task opens the template above, <c-c><c-f> adds files with fff", function()

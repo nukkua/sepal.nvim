@@ -255,12 +255,12 @@ end
 -- the task's keys, shown when it opens (like petal's commit buffer); one notification, replaced each time
 local function keys()
   M.notify("task: <c-c><c-c> sends it, <c-c><c-w> sends it to wait in the inbox" .. (C.task_suggest and ", <c-c><c-s> writes it for you" or "")
-    .. ", <c-c><c-f> adds a file, <c-c><c-a> attaches an image, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-task-keys" })
+    .. ", <c-c><c-f> adds a file, <c-c><c-p> pastes an image, <c-c><c-k> discards", vim.log.levels.INFO, { key = "sepal-task-keys" })
 end
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
--- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-a> an image (any path),
+-- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-p> pastes an image,
 -- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
@@ -364,17 +364,24 @@ function M.task(range, lines)
     if ok then return fff.find_files({ on_submit = function(_, ctx) add_file(buf, ctx.relative_path) end }) end
     vim.ui.input({ prompt = "File: ", completion = "file" }, function(p) add_file(buf, p) end)
   end, vim.tbl_extend("force", o, { desc = "Add a file to the task" }))
-  -- an image (a screenshot, a mockup) from anywhere: outside the repo it's listed by its absolute path,
-  -- which the agent is allowed to read (see sepal.agent)
-  vim.keymap.set({ "n", "i" }, "<c-c><c-a>", function()
-    vim.cmd.stopinsert()
-    vim.ui.input({ prompt = "Image: ", completion = "file" }, function(p)
-      if not p or p == "" then return end
-      p = vim.fn.fnamemodify(vim.fn.expand(p), ":p")
-      if not vim.uv.fs_stat(p) then return M.notify("no such file: " .. p, vim.log.levels.WARN) end
-      add_file(buf, vim.fn.fnamemodify(p, ":."))
-    end)
-  end, vim.tbl_extend("force", o, { desc = "Attach an image to the task" }))
+  -- the clipboard's image (a screenshot, a mockup), saved under the cache so it outlives Neovim for r
+  -- (dropping the task deletes it); listed by its absolute path, which the agent may read (see sepal.agent)
+  vim.keymap.set({ "n", "i" }, "<c-c><c-p>", function()
+    local cmd = vim.env.WAYLAND_DISPLAY and { "wl-paste", "--type", "image/png" }
+      or vim.fn.has("mac") == 1 and { "pngpaste", "-" }
+      or { "xclip", "-selection", "clipboard", "-t", "image/png", "-o" }
+    local ok, r = pcall(function() return vim.system(cmd):wait(3000) end)
+    if not ok then return M.notify("could not run " .. cmd[1], vim.log.levels.ERROR) end
+    if r.code ~= 0 or (r.stdout or "") == "" then return M.notify("no image in the clipboard", vim.log.levels.WARN) end
+    local agent = require("sepal.agent")
+    vim.fn.mkdir(agent.PASTES, "p")
+    agent.sweep_pastes()
+    local p = vim.fs.joinpath(agent.PASTES, ("paste-%d.png"):format(vim.uv.hrtime()))
+    local f = assert(io.open(p, "wb"))
+    f:write(r.stdout)
+    f:close()
+    add_file(buf, p)
+  end, vim.tbl_extend("force", o, { desc = "Paste the clipboard's image into the task" }))
 end
 
 

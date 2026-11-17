@@ -227,7 +227,7 @@ agent = function(e, prompt, wt)
   os.remove(events)
   local argv = cmd(C().args or {})
   if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
-  -- files from outside the repo (<c-c><c-a>'s images): read-only access to just those ("//" is an absolute path)
+  -- files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those ("//" is an absolute path)
   for l in vim.gsplit(e.task, "\n") do
     local f = l:match("^%s*%- @(/.-)%s*$")
     if f then vim.list_extend(argv, { "--allowedTools", "Read(/" .. f .. ")" }) end
@@ -509,12 +509,31 @@ end
 function M.running(e) return jobs[e.id] ~= nil or queued(e) ~= nil end
 function M.chatting(e) return chat(e) ~= nil end
 
--- forget e: its commits and its line in the inbox
+-- images pasted into tasks (<c-c><c-p>): each stays while its task is in the inbox (r may reread it)
+M.PASTES = vim.fs.joinpath(vim.fn.stdpath("cache"), "sepal")
+
+-- delete pasted images no inbox lists that are over a day old: discarded drafts' (a day spares an open one's)
+function M.sweep_pastes()
+  local listed = {}
+  for name in vim.fs.dir(C().worktrees) do
+    local f = name:match("%.json$") and io.open(vim.fs.joinpath(C().worktrees, name))
+    if f then listed[#listed + 1] = f:read("a"); f:close() end
+  end
+  listed = table.concat(listed)
+  for name in vim.fs.dir(M.PASTES) do
+    local p = vim.fs.joinpath(M.PASTES, name)
+    local st = name:match("^paste%-%d+%.png$") and vim.uv.fs_stat(p)
+    if st and os.time() - st.mtime.sec > 86400 and not listed:find(name, 1, true) then os.remove(p) end
+  end
+end
+
+-- forget e: its commits, its pasted images and its line in the inbox
 function M.drop(e)
   if M.running(e) then return notify("it's running: x stops it first") end
   endchat(e)
   if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
   git.delete_refs(e.root, "refs/sepal/" .. e.id)
+  for p in e.task:gmatch("@(" .. vim.pesc(M.PASTES) .. "/paste%-%d+%.png)") do os.remove(p) end
   inbox.remove(e)
 end
 

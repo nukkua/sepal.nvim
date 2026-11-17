@@ -112,7 +112,7 @@ files, fidget.nvim for a spinner.
 :Sepal undo       Take the newest landed task back out (a merge too: your
                   edits since stay).
                                                                 *:Sepal-open*
-:Sepal open       The newest task in Claude Code, in a new tab. While it
+:Sepal open       The newest task in Claude Code, full screen. While it
                   runs: the agent at work, live; type to it if you like.
                   `q` (normal mode) hides it, it keeps going. Once it's done:
                   its chat (`claude --resume`). From the agent or a chat

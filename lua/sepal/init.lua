@@ -56,7 +56,7 @@ M.progress = progress
 function M.close()
   local cur = vim.api.nvim_get_current_buf()
   local wins = vim.tbl_filter(function(w) return vim.api.nvim_win_get_config(w).relative == "" end, vim.api.nvim_tabpage_list_wins(0))
-  if #wins > 1 or vim.fn.tabpagenr("$") > 1 then
+  if vim.api.nvim_win_get_config(0).relative ~= "" or #wins > 1 or vim.fn.tabpagenr("$") > 1 then -- a float (the agent) always closes
     vim.cmd.close()
   else -- back to the buffer before, unless that's another agent or chat: :Sepal open would bounce between them
     local alt = vim.fn.bufnr("#")

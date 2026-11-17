@@ -179,6 +179,12 @@ local function reply_of(ev)
   return last
 end
 
+-- the whole editor: the agent's terminal is this size from its start to every :Sepal open
+local function screen()
+  return { relative = "editor", row = 0, col = 0, style = "minimal", zindex = 1, -- under notifications
+    width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight, 1) }
+end
+
 -- the agent: Claude Code itself, in a hidden terminal buffer (:Sepal open shows it). Its turn is over
 -- at the Stop hook; then it's closed, and sepal checks and lands what it did
 agent = function(e, prompt, wt)
@@ -258,10 +264,9 @@ agent = function(e, prompt, wt)
     finish(e, wt, "error", { error = started and "the agent quit before it was done (exit " .. code .. ")"
       or "the agent didn't start: " .. (first(last, 200) or ("exit " .. code)) })
   end
-  -- started in a hidden window the size of a tab, so Claude Code draws for the screen it's shown
-  -- on (nvim_buf_call's window is a few lines tall: its output would scroll away and redraw on open)
-  local win = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, hide = true, focusable = false, style = "minimal",
-    width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight - 2, 1) })
+  -- started in a hidden window the size of the float M.open shows it in: a resize makes Claude Code
+  -- redraw everything (slow, and it leaves old frames above the new one)
+  local win = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
   local ok, chan = pcall(vim.api.nvim_win_call, win, function()
     return vim.fn.jobstart(argv, { term = true, cwd = wt, env = { SEPAL_EVENTS = events, CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" }, on_exit = vim.schedule_wrap(exited) })
   end)
@@ -471,19 +476,20 @@ local function tab()
   if vim.api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then vim.api.nvim_buf_delete(b, {}) end
 end
 
--- the task in Claude Code itself, in a new tab: while it runs, the agent at work (type to it if you
+-- the task in Claude Code itself: while it runs, in a full-screen float, the agent at work (type to it if you
 -- like; q in normal mode hides it, it keeps going), after that its chat (claude --resume)
 function M.open(e)
   local j = jobs[e.id]
   if j and j.buf and vim.api.nvim_buf_is_valid(j.buf) then -- its terminal is gone once its turn is over (sepal checks)
     local w = vim.fn.bufwinid(j.buf)
     if w ~= -1 then vim.api.nvim_set_current_win(w) else
-      -- as wide as the minimal window it started in, set before it shows: a resize makes Claude Code
-      -- redraw, which leaves its old frames above the new one
-      tab()
-      vim.bo.bufhidden = "wipe"
-      vim.wo.number, vim.wo.relativenumber, vim.wo.signcolumn, vim.wo.foldcolumn = false, false, "no", "0"
-      vim.api.nvim_win_set_buf(0, j.buf)
+      -- a float the size it started at, whatever tabs, splits or statusline there are: no resize, no redraw
+      w = vim.api.nvim_open_win(j.buf, true, screen())
+      vim.api.nvim_create_autocmd("WinLeave", { callback = function() -- left (<c-w>w…): hide it, it keeps working
+        if vim.api.nvim_get_current_win() ~= w then return end
+        vim.schedule(function() pcall(vim.api.nvim_win_close, w, true) end)
+        return true
+      end })
     end
     -- a terminal window follows the output only with the cursor on its last line; a new one starts at the top
     vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(j.buf), 0 })

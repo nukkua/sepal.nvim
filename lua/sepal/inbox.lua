@@ -135,13 +135,20 @@ render = function()
       if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 or nil end
     end
   end)
-  local lines, rows, marks = { HELP, "" }, {}, {}
+  local lines, rows, marks, spans = { HELP, "" }, {}, {}, {}
   local list = M.list(root)
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   for _, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
-    lines[#lines + 1] = ("%s %s %s  %s  %s"):format(st[1], fit(st[2], 12), fit(ago(e.time), 3), fit(e.title or "", 34), facts(e))
-    rows[#lines], marks[#lines] = e.id, { st[3], #st[1] + 1 + #fit(st[2], 12) }
+    local head = ("%s %s "):format(st[1], fit(st[2], 12))
+    local pre = ("%s%s  %s  "):format(head, fit(ago(e.time), 3), fit(e.title or "", 34))
+    local f = facts(e)
+    lines[#lines + 1] = pre .. f
+    rows[#lines], marks[#lines] = e.id, { st[3], #head - 1 }
+    -- the age dimmed, the diff counts colored like a diff
+    spans[#spans + 1] = { #lines, #head, #head + 3, "Comment" }
+    for a, z in f:gmatch("()%+%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "Added" } end
+    for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "Removed" } end
     for _, d in ipairs(details(e)) do lines[#lines + 1] = "    " .. d; rows[#lines] = e.id end
   end
   vim.bo[b].modifiable = true
@@ -150,6 +157,7 @@ render = function()
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
   vim.api.nvim_buf_set_extmark(b, NS, 0, 0, { end_row = 0, end_col = #HELP, hl_group = "Comment" })
   for row, m in pairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { end_col = m[2], hl_group = m[1] }) end
+  for _, sp in ipairs(spans) do vim.api.nvim_buf_set_extmark(b, NS, sp[1] - 1, sp[2], { end_col = sp[3], hl_group = sp[4] }) end
   for row = 3, #lines do
     if not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "Comment" }) end
   end
@@ -218,8 +226,13 @@ function M.open(root)
   vim.api.nvim_set_current_win(w)
   vim.wo[w].wrap, vim.wo[w].cursorline = false, true
   vim.wo[w].foldmethod, vim.wo[w].foldenable, vim.wo[w].foldtext = "manual", true, "" -- foldtext "": a closed task shows as its own line
+  -- a list, not code: no gutter, no fold dots, no Folded band over closed tasks
+  vim.wo[w].number, vim.wo[w].relativenumber, vim.wo[w].signcolumn, vim.wo[w].foldcolumn = false, false, "no", "0"
+  vim.wo[w].fillchars, vim.wo[w].winhighlight = "fold: ,eob: ", "Folded:SepalInboxFolded"
+  vim.api.nvim_set_hl(0, "SepalInboxFolded", { default = true })
   render()
   if vim.api.nvim_buf_line_count(b) >= 3 then vim.api.nvim_win_set_cursor(w, { 3, 0 }) end
+  vim.fn.winrestview({ topline = 1 }) -- keep the key help in view
 end
 
 M._t = { reset = function() cache = {} end }

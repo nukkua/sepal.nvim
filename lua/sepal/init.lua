@@ -68,6 +68,15 @@ end
 
 M.progress = progress
 
+-- in the agent (or a chat) fidget's window is noise: hide it there, it shows again (with what's current) once you leave
+local hid_fidget = false
+vim.api.nvim_create_autocmd("BufEnter", { group = vim.api.nvim_create_augroup("sepal.fidget", {}), callback = function()
+  local agent = vim.b.sepal_agent == true
+  if agent == hid_fidget then return end -- only flip on a change, so your own suppress() isn't undone
+  local ok, n = pcall(require, "fidget.notification")
+  if ok then n.suppress(agent); hid_fidget = agent end
+end })
+
 -- q in sepal's buffers: close the window; in the last one (E444: can't close it) show another buffer there
 function M.close()
   local cur = vim.api.nvim_get_current_buf()

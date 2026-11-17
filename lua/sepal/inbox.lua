@@ -117,6 +117,7 @@ local function details(e)
   return d
 end
 
+local heads = {} -- row -> true for each task's first line, so j/k can skip its details
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
 
@@ -144,6 +145,8 @@ render = function()
     if not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "Comment" }) end
   end
   vim.b[b].sepal_rows = rows
+  heads = {}
+  for row = 1, #lines do heads[row] = marks[row] ~= nil end
 end
 M.render = function() render() end
 
@@ -173,6 +176,21 @@ function M.open(root)
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
+    -- j/k go task to task, past the detail lines under each
+    local function step(dir)
+      return function()
+        local row = vim.api.nvim_win_get_cursor(0)[1]
+        for _ = 1, vim.v.count1 do
+          local r = row + dir
+          while r >= 1 and r <= #heads and not heads[r] do r = r + dir end
+          if not heads[r] then break end
+          row = r
+        end
+        vim.api.nvim_win_set_cursor(0, { row, 0 })
+      end
+    end
+    vim.keymap.set("n", "j", step(1), o("Next task"))
+    vim.keymap.set("n", "k", step(-1), o("Previous task"))
   end
   vim.b[b].sepal_inbox = root
   local w = vim.fn.bufwinid(b)

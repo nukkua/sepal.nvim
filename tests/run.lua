@@ -317,6 +317,23 @@ test("the inbox lists the tasks and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
+test("j/k in the inbox go task to task, past the lines under each", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  run({ "Goal: first" })
+  run({ "Goal: second" })
+  vim.cmd("Sepal inbox")
+  vim.api.nvim_win_set_cursor(0, { 3, 0 })
+  vim.cmd("normal j")
+  eq(vim.api.nvim_win_get_cursor(0)[1], 6) -- rows 4-5 are second's assumptions
+  eq(inbox.current().title, "first")
+  vim.cmd("normal j") -- the last task: stays
+  eq(vim.api.nvim_win_get_cursor(0)[1], 6)
+  vim.cmd("normal k")
+  eq(vim.api.nvim_win_get_cursor(0)[1], 3)
+  vim.cmd("close")
+end)
+
 test("a task's chat is saved as soon as it starts: o and r still work after a quit mid-run", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP = "3"

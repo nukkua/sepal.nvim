@@ -93,16 +93,16 @@ local function fit(s, w)
   return s .. string.rep(" ", w - vim.fn.strdisplaywidth(s))
 end
 
--- the facts after the title: "3 files +42 −8  make test ✓"
+-- the facts after the title as columns: { "3 files", "+42", "−8", "make test ✓" }
 local function facts(e)
-  local f = {}
-  if e.stat and e.stat.files > 0 then f[#f + 1] = ("%d file%s +%d −%d"):format(e.stat.files, e.stat.files == 1 and "" or "s", e.stat.add, e.stat.del) end
+  local s, f = e.stat and e.stat.files > 0 and e.stat, {}
   if e.check then
     local mark = e.checked == true and " ✓" or e.checked == false and " ✗" or ""
     f[#f + 1] = e.check .. mark
   end
   if e.status == "running" and e.activity then f[#f + 1] = e.activity end
-  return table.concat(f, "  ")
+  return { s and ("%d file%s"):format(s.files, s.files == 1 and "" or "s") or "", s and "+" .. s.add or "",
+    s and "−" .. s.del or "", table.concat(f, "  ") }
 end
 
 -- the lines under an entry: what you should read
@@ -139,11 +139,19 @@ render = function()
   local lines, rows, marks, spans = { HELP, "" }, {}, {}, {}
   local list = M.list(root)
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
-  for _, e in ipairs(list) do
+  -- every column padded to its widest value in the list, so every line is the same width
+  local cols, wid = {}, { 0, 0, 0, 0 }
+  for i, e in ipairs(list) do
+    cols[i] = facts(e)
+    for c = 1, 4 do wid[c] = math.max(wid[c], vim.fn.strdisplaywidth(cols[i][c])) end
+  end
+  for i, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
     local head = ("%s %s "):format(cfg_icon(e.status, st[1]), fit(st[2], 12))
     local pre = ("%s%s  %s  "):format(head, fit(ago(e.time), 3), fit(e.title or "", 34))
-    local f = facts(e)
+    local c = cols[i]
+    local f = wid[1] > 0 and ("%s %s %s"):format(fit(c[1], wid[1]), fit(c[2], wid[2]), fit(c[3], wid[3])) or ""
+    f = f .. (wid[1] > 0 and wid[4] > 0 and "  " or "") .. fit(c[4], wid[4])
     lines[#lines + 1] = pre .. f
     rows[#lines], marks[#lines] = e.id, { st[3], #head - 1 }
     -- the age dimmed, the diff counts colored like a diff

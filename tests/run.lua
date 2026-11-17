@@ -332,6 +332,22 @@ test("the inbox lists the tasks and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
+test("every task line in the inbox is the same width", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  run({ "Goal: one" })
+  local e = newest()
+  inbox.add(vim.tbl_extend("force", e, { id = "b", title = "many", stat = { files = 12, add = 100, del = 2 } }))
+  inbox.add(vim.tbl_extend("force", e, { id = "c", title = "none", stat = { files = 0, add = 0, del = 0 } }))
+  vim.cmd("Sepal inbox")
+  local w = {}
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+    if not l:match("^    ") and l:find("now") then w[#w + 1] = vim.fn.strdisplaywidth(l) end
+  end
+  eq({ #w, w[1], w[1] }, { 3, w[2], w[3] })
+  vim.cmd("close")
+end)
+
 test("j/k in the inbox go task to task, past the lines under each", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]

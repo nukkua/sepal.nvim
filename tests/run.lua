@@ -450,7 +450,7 @@ test(":Sepal open shows the agent at work, and the chat once it's done", functio
     vim.wait(200)
     vim.cmd("Sepal open")
     eq({ vim.bo.buftype, vim.api.nvim_buf_get_name(0) }, { "terminal", "sepal://" .. newest().id })
-    eq(vim.wo.number, true, "no line numbers on the agent")
+    eq(vim.wo.number, false, "line numbers on the agent")
     vim.cmd.stopinsert()
     idle()
   end)
@@ -458,7 +458,7 @@ test(":Sepal open shows the agent at work, and the chat once it's done", functio
   eq(vim.b.sepal_agent, true, "watching it to its end took you out of it") -- its chat comes up in the same float
   vim.wait(1000, function() return #args() == 2 and vim.bo.buftype == "terminal" end)
   eq({ vim.bo.buftype, args()[2], vim.split(vim.trim(read(T .. "/cwd")), "\n")[2] }, { "terminal", "--resume", work })
-  eq(vim.wo.number, true, "no line numbers on the chat")
+  eq(vim.wo.number, false, "line numbers on the chat")
   vim.cmd.stopinsert()
   vim.cmd("bwipeout!")
 end)

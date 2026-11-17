@@ -216,8 +216,8 @@ local function screen()
   return { relative = "editor", row = 0, col = 0, style = "minimal", zindex = 1, -- under notifications
     width = vim.o.columns, height = math.max(vim.o.lines - vim.o.cmdheight, 1) }
 end
--- line numbers on an agent's window, at a fixed width: a wider column would resize its terminal
-local function termwin(w) vim.wo[w].number, vim.wo[w].numberwidth = true, 6 end
+-- no line numbers on an agent's window, whatever the buffer shown there before had
+local function termwin(w) vim.wo[w].number, vim.wo[w].relativenumber = false, false end
 
 -- the agent: Claude Code itself, in a hidden terminal buffer (:Sepal open shows it). Its turn is over
 -- at the Stop hook; then it's closed, and sepal checks and lands what it did

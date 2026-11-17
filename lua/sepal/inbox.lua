@@ -63,20 +63,21 @@ end
 -- the inbox buffer ---------------------------------------------------------------------------
 
 local STATUS = {
-  queued = { "…", "queued", "Comment" },
-  running = { "⋯", "running", "DiagnosticInfo" },
-  checking = { "⋯", "checking", "DiagnosticInfo" },
-  landed = { "✓", "landed", "DiagnosticOk" },
-  ready = { "●", "ready", "DiagnosticOk" },
-  nochange = { "○", "no changes", "Comment" },
-  failed = { "✗", "check failed", "DiagnosticError" },
-  error = { "✗", "failed", "DiagnosticError" },
-  needs = { "▲", "needs you", "DiagnosticWarn" },
-  stopped = { "○", "stopped", "Comment" },
-  interrupted = { "○", "interrupted", "Comment" },
-  undone = { "↺", "undone", "Comment" },
+  queued = { "…", "queued", "SepalDim" },
+  running = { "⋯", "running", "SepalAccent" },
+  checking = { "⋯", "checking", "SepalAccent" },
+  landed = { "✓", "landed", "SepalOk" },
+  ready = { "●", "ready", "SepalOk" },
+  nochange = { "○", "no changes", "SepalDim" },
+  failed = { "✗", "check failed", "SepalError" },
+  error = { "✗", "failed", "SepalError" },
+  needs = { "▲", "needs you", "SepalWarn" },
+  stopped = { "○", "stopped", "SepalDim" },
+  interrupted = { "○", "interrupted", "SepalDim" },
+  undone = { "↺", "undone", "SepalDim" },
 }
 M.STATUS = STATUS
+local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
 local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  za fold  q close"
 
@@ -140,26 +141,26 @@ render = function()
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   for _, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
-    local head = ("%s %s "):format(st[1], fit(st[2], 12))
+    local head = ("%s %s "):format(cfg_icon(e.status, st[1]), fit(st[2], 12))
     local pre = ("%s%s  %s  "):format(head, fit(ago(e.time), 3), fit(e.title or "", 34))
     local f = facts(e)
     lines[#lines + 1] = pre .. f
     rows[#lines], marks[#lines] = e.id, { st[3], #head - 1 }
     -- the age dimmed, the diff counts colored like a diff
-    spans[#spans + 1] = { #lines, #head, #head + 3, "Comment" }
-    for a, z in f:gmatch("()%+%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "Added" } end
-    for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "Removed" } end
+    spans[#spans + 1] = { #lines, #head, #head + 3, "SepalDim" }
+    for a, z in f:gmatch("()%+%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAdded" } end
+    for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalRemoved" } end
     for _, d in ipairs(details(e)) do lines[#lines + 1] = "    " .. d; rows[#lines] = e.id end
   end
   vim.bo[b].modifiable = true
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
-  vim.api.nvim_buf_set_extmark(b, NS, 0, 0, { end_row = 0, end_col = #HELP, hl_group = "Comment" })
+  vim.api.nvim_buf_set_extmark(b, NS, 0, 0, { end_row = 0, end_col = #HELP, hl_group = "SepalDim" })
   for row, m in pairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { end_col = m[2], hl_group = m[1] }) end
   for _, sp in ipairs(spans) do vim.api.nvim_buf_set_extmark(b, NS, sp[1] - 1, sp[2], { end_col = sp[3], hl_group = sp[4] }) end
   for row = 3, #lines do
-    if not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "Comment" }) end
+    if not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalDim" }) end
   end
   vim.b[b].sepal_rows = rows
   heads = {}
@@ -229,7 +230,6 @@ function M.open(root)
   -- a list, not code: no gutter, no fold dots, no Folded band over closed tasks
   vim.wo[w].number, vim.wo[w].relativenumber, vim.wo[w].signcolumn, vim.wo[w].foldcolumn = false, false, "no", "0"
   vim.wo[w].fillchars, vim.wo[w].winhighlight = "fold: ,eob: ", "Folded:SepalInboxFolded"
-  vim.api.nvim_set_hl(0, "SepalInboxFolded", { default = true })
   render()
   if vim.api.nvim_buf_line_count(b) >= 3 then vim.api.nvim_win_set_cursor(w, { 3, 0 }) end
   vim.fn.winrestview({ topline = 1 }) -- keep the key help in view

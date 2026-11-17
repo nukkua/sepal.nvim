@@ -113,8 +113,21 @@ require("sepal").setup({
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
+  sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
+  highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
+  icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
 })
 ```
+
+### Colors
+
+Everything sepal draws uses its own groups, linked to your colorscheme's: `SepalTitle` (Title),
+`SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalOk` (DiagnosticOk), `SepalWarn`,
+`SepalError`, `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`. With
+`sakura = true` (the default) the title, accent, info and ok groups are cherry-blossom pinks, a
+lighter set on a dark background and a deeper one on a light background. Warnings and errors
+always use your theme's colors. A colorscheme that defines a `Sepal*` group wins over both,
+and the `highlights` option wins over everything.
 
 ## Commands
 

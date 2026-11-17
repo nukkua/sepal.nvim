@@ -17,15 +17,50 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
+  sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
+  highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
+  icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
 }
-function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}) end
+local highlight -- below
+function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}); highlight() end
 function M.config() return C end
+
+-- sepal's colors are its own groups, linked to your colorscheme's by default: a colorscheme (or
+-- :hi) that sets a Sepal* group wins over the links and over sakura; the highlights option wins over all
+local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = "DiagnosticOk",
+  SepalWarn = "DiagnosticWarn", SepalError = "DiagnosticError", SepalDim = "Comment", SepalAdded = "Added",
+  SepalRemoved = "Removed", SepalInboxFolded = false }
+-- sakura: { on a dark background, on a light one }. Warnings and errors keep your theme's: they must read as such
+local SAKURA = { SepalTitle = { "#ffb6c1", "#c2185b", bold = true }, SepalAccent = { "#ffb6c1", "#d81b60" },
+  SepalInfo = { "#c49aa6", "#ad1457" }, SepalOk = { "#ffb6c1", "#c2477a" } }
+-- what sepal set each group to: a group that's empty or still sepal's is redefined, one your
+-- colorscheme (or :hi) set is left alone, so setup() after :colorscheme doesn't undo it
+local mine = {}
+highlight = function()
+  for name, link in pairs(LINKS) do
+    local cur = vim.api.nvim_get_hl(0, { name = name })
+    if vim.tbl_isempty(cur) or vim.deep_equal(cur, mine[name]) then
+      local s = C.sakura and SAKURA[name]
+      vim.api.nvim_set_hl(0, name, s and { fg = s[vim.o.background == "light" and 2 or 1], bold = s.bold } or { link = link or nil })
+      mine[name] = vim.api.nvim_get_hl(0, { name = name })
+    end
+  end
+  for name, spec in pairs(C.highlights or {}) do vim.api.nvim_set_hl(0, name, spec) end
+end
+highlight()
+-- :colorscheme clears every group; a new background wants sakura's pinks for it
+vim.api.nvim_create_autocmd("ColorScheme", { group = vim.api.nvim_create_augroup("sepal.hl", {}), callback = function() highlight() end })
+vim.api.nvim_create_autocmd("OptionSet", { group = "sepal.hl", pattern = "background", callback = function() highlight() end })
+
+-- a status's icon in the inbox: the icons option, then sakura's blossoms, then def
+local BLOSSOM = { landed = "❀", ready = "✿" }
+function M.icon(status, def) return (C.icons or {})[status] or (C.sakura and BLOSSOM[status]) or def end
 
 -- every message is "what happened", shown under "sepal".
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
 -- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
-local ICON = { [vim.log.levels.ERROR] = { "✗", "DiagnosticError" }, [vim.log.levels.WARN] = { "▲", "DiagnosticWarn" } }
+local ICON = { [vim.log.levels.ERROR] = { "✗", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
 -- while you're in the agent (or a chat) they wait, shown once you leave it
 local held = {}
 function M.notify(msg, lvl, o)
@@ -48,8 +83,8 @@ function M.notify(msg, lvl, o)
     return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal", key = o.key, ttl = o.ttl })
   end
   if not (debug.getinfo(vim.notify, "S").source or ""):match("^@?vim/") then return vim.notify(msg, lvl, { title = "sepal" }) end
-  local icon = o.icon or ICON[lvl] or { "●", "DiagnosticInfo" }
-  vim.api.nvim_echo({ { icon[1] .. " ", icon[2] }, { "sepal ", "Title" }, { msg } }, true, { err = lvl >= vim.log.levels.ERROR })
+  local icon = o.icon or ICON[lvl] or { "●", "SepalInfo" }
+  vim.api.nvim_echo({ { icon[1] .. " ", icon[2] }, { "sepal ", "SepalTitle" }, { msg } }, true, { err = lvl >= vim.log.levels.ERROR })
 end
 
 -- fidget spinner while waiting; returns done(msg), update(msg). done(msg) ends it showing msg,
@@ -260,7 +295,7 @@ function M.task(range, lines)
       if not vim.api.nvim_buf_is_valid(buf) then return end
       vim.api.nvim_buf_clear_namespace(buf, HINT_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
       if (vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or "") ~= "" then return end
-      vim.api.nvim_buf_set_extmark(buf, HINT_NS, 0, 0, { virt_text = { { HINT, "Comment" } }, virt_text_pos = "overlay" })
+      vim.api.nvim_buf_set_extmark(buf, HINT_NS, 0, 0, { virt_text = { { HINT, "SepalDim" } }, virt_text_pos = "overlay" })
     end
     vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = hint })
     hint()

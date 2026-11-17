@@ -23,7 +23,7 @@ files, fidget.nvim for a spinner.
 2. Select the code you mean (or don't) and press <leader>as. Fill in the
    task. "Done when:" is a shell command that has to pass, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
-4. "✓ landed: …" means it passed the check and is in your files, unstaged.
+4. "❀ landed: …" means it passed the check and is in your files, unstaged.
    The "·" lines under it are the decisions the agent made alone: read them.
 5. Review with `git diff`, gitsigns, fugitive. |:Sepal-undo| takes it back.
 6. A warning means it needs you: <leader>ai shows why; `r` replies to the
@@ -46,6 +46,9 @@ files, fidget.nvim for a spinner.
     worktrees = vim.fn.stdpath("state") .. "/sepal",
     task_suggest = nil,
     max_running = 2,
+    sakura = true,
+    highlights = {},
+    icons = {},
   })
 <
 `cmd`        the agent: Claude Code. A task runs `cmd <args> <task>` in a
@@ -80,6 +83,23 @@ files, fidget.nvim for a spinner.
 `task_suggest` argv that gets the task buffer on stdin (your idea and
              Files:) and prints the finished task. <c-c><c-s> runs it. For
              Claude Code, pass -p and --no-session-persistence.
+                                                             *sepal-sakura*
+`sakura`     true: cherry-blossom pinks for SepalTitle, SepalAccent,
+             SepalInfo and SepalOk (lighter on a dark 'background', deeper
+             on a light one), and ❀ / ✿ for landed / ready tasks in the
+             inbox. false: those groups link to your colorscheme's.
+                                                         *sepal-highlights*
+`highlights` group -> |nvim_set_hl()| spec, applied over everything:
+             `{ SepalOk = { fg = "#a3be8c" }, SepalDim = { link = "NonText" } }`
+             Groups and their default links: SepalTitle (Title),
+             SepalAccent (Special), SepalInfo (DiagnosticInfo), SepalOk
+             (DiagnosticOk), SepalWarn (DiagnosticWarn), SepalError
+             (DiagnosticError), SepalDim (Comment), SepalAdded (Added),
+             SepalRemoved (Removed), SepalInboxFolded (empty). A colorscheme
+             that defines one wins over the links and sakura.
+`icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
+             Statuses: queued, running, checking, landed, ready, nochange,
+             failed, error, needs, stopped, interrupted, undone.
 
 ==============================================================================
 4. COMMANDS                                                    *sepal-commands*
@@ -154,6 +174,7 @@ it there.
 6. HEALTH                                                       *sepal-health*
 
 `:checkhealth sepal` checks git, `cmd`, `args`, `check`, `retries`, `land`,
-`prepare`, `max_running`, `task_suggest`, fidget and fff.
+`prepare`, `max_running`, `task_suggest`, `sakura`, `highlights`, `icons`,
+fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

@@ -460,7 +460,7 @@ function M.land(e, auto)
   if #conflicts > 0 then
     return notify(msg .. "\nconflict markers in " .. table.concat(conflicts, ", "), WARN)
   end
-  notify(msg, vim.log.levels.INFO, { icon = { "✓", "DiagnosticOk" } })
+  notify(msg, vim.log.levels.INFO, { icon = { require("sepal").icon("landed", "✓"), "SepalOk" } })
 end
 
 -- take a landed task back out of your work tree (again a merge: your edits since stay)
@@ -571,9 +571,9 @@ loading = function(w, label)
     vim.api.nvim_buf_set_lines(l, 0, -1, false, lines)
     vim.api.nvim_buf_clear_namespace(l, ns, 0, -1)
     local at = #main - #label - 2 - #s
-    vim.api.nvim_buf_set_extmark(l, ns, row, at, { end_col = at + #s, hl_group = "Special" })
-    vim.api.nvim_buf_set_extmark(l, ns, row, #main - #label, { end_col = #main, hl_group = "Title" })
-    vim.api.nvim_buf_set_extmark(l, ns, row + 2, 0, { end_col = #lines[row + 3], hl_group = "Comment" })
+    vim.api.nvim_buf_set_extmark(l, ns, row, at, { end_col = at + #s, hl_group = "SepalAccent" })
+    vim.api.nvim_buf_set_extmark(l, ns, row, #main - #label, { end_col = #main, hl_group = "SepalTitle" })
+    vim.api.nvim_buf_set_extmark(l, ns, row + 2, 0, { end_col = #lines[row + 3], hl_group = "SepalDim" })
   end
   frame(0)
   local n, timer = 0, vim.uv.new_timer()
@@ -648,7 +648,7 @@ function M.reply(e)
   local function hint()
     vim.api.nvim_buf_clear_namespace(b, ns, 0, -1)
     if vim.api.nvim_buf_line_count(b) == 1 and vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "" then
-      vim.api.nvim_buf_set_extmark(b, ns, 0, 0, { virt_text = { { "reply to " .. e.title .. ": <c-c><c-c> sends, <c-c><c-k> discards", "Comment" } }, virt_text_pos = "overlay" })
+      vim.api.nvim_buf_set_extmark(b, ns, 0, 0, { virt_text = { { "reply to " .. e.title .. ": <c-c><c-c> sends, <c-c><c-k> discards", "SepalDim" } }, virt_text_pos = "overlay" })
     end
   end
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = b, callback = hint })

@@ -320,7 +320,7 @@ test("the inbox lists the tasks and survives a restart", function()
   run({ "Goal: listed" })
   vim.cmd("Sepal inbox")
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  assert(lines[3]:match("^✓ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
+  assert(lines[3]:match("^❀ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
   eq(vim.list_slice(lines, 4), { "    · kept the old API", "    · no new deps" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
   eq(inbox.current().title, "listed")
@@ -711,6 +711,27 @@ test("closing the task window drops the draft: :Sepal task starts a new one", fu
   sepal.task()
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 1, false), { "Goal: " })
   vim.api.nvim_buf_delete(task_buf(), { force = true })
+end)
+
+test("colors: sakura pinks or your theme's links, the highlights option over both; icons", function()
+  local function hl(n) return vim.api.nvim_get_hl(0, { name = n }) end
+  vim.o.background = "dark"
+  eq(hl("SepalOk").fg, 0xffb6c1)
+  eq(hl("SepalWarn").link, "DiagnosticWarn") -- warnings keep the theme's, sakura or not
+  vim.o.background = "light"
+  eq(hl("SepalOk").fg, 0xc2477a)
+  sepal.setup({ sakura = false, highlights = { SepalDim = { fg = "#123456" } }, icons = { running = "~" } })
+  eq(hl("SepalOk").link, "DiagnosticOk")
+  eq(hl("SepalDim").fg, 0x123456)
+  eq({ sepal.icon("running", "⋯"), sepal.icon("landed", "✓") }, { "~", "✓" })
+  vim.api.nvim_set_hl(0, "SepalTitle", { fg = "#abcdef" }) -- as a colorscheme would
+  vim.api.nvim_exec_autocmds("ColorScheme", {})
+  sepal.setup({ sakura = false }) -- a setup() after the colorscheme doesn't undo it
+  vim.o.background = "light"
+  eq(hl("SepalTitle").fg, 0xabcdef)
+  vim.o.background = "dark"
+  sepal.setup({ sakura = true, highlights = {}, icons = {} })
+  eq(sepal.icon("landed", "✓"), "❀")
 end)
 
 print(("%d/%d passed"):format(n - fails, n))

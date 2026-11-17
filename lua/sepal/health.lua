@@ -16,6 +16,7 @@ function M.check()
   else
     h.ok("cmd: " .. table.concat(C.cmd, " "))
   end
+  if C.auto_mode then h.ok("auto_mode: tasks and chats run in Claude Code's auto mode") end
   if type(C.args) ~= "table" then h.error("args must be a list of arguments, e.g. { \"--permission-mode\", \"acceptEdits\" }")
   else h.ok("tasks run with: " .. table.concat(C.args, " ")) end
   if C.check == nil then h.info("check not set: tasks without a `Done when:` line aren't checked")

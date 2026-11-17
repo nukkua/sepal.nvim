@@ -12,6 +12,15 @@ local function sepal() return require("sepal") end
 local function C() return require("sepal").config() end
 local function notify(...) return sepal().notify(...) end
 local WARN, ERROR = vim.log.levels.WARN, vim.log.levels.ERROR
+-- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args
+local function cmd(extra)
+  local a = vim.list_extend({}, extra)
+  if C().auto_mode then
+    for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
+    vim.list_extend(a, { "--permission-mode", "auto" })
+  end
+  return vim.list_extend(vim.list_extend({}, C().cmd), a)
+end
 
 -- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update, exclude }
 local jobs = {}
@@ -202,7 +211,7 @@ agent = function(e, prompt, wt)
   local j = jobs[e.id]
   local events = wt .. ".events"
   os.remove(events)
-  local argv = vim.list_extend(vim.list_extend({}, C().cmd), C().args or {})
+  local argv = cmd(C().args or {})
   if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
   if e.session then vim.list_extend(argv, { "--resume", e.session }) end
   vim.list_extend(argv, { "--settings", SETTINGS, prompt })
@@ -517,7 +526,7 @@ function M.open(e)
   local b = vim.api.nvim_create_buf(false, true)
   local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
   local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
-    return vim.fn.jobstart(vim.list_extend(vim.list_extend({}, C().cmd), { "--resume", e.session }), { term = true, cwd = e.root,
+    return vim.fn.jobstart(vim.list_extend(cmd({}), { "--resume", e.session }), { term = true, cwd = e.root,
       env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   end)
   pcall(vim.api.nvim_win_close, hidden, true)

@@ -38,6 +38,7 @@ files, fidget.nvim for a spinner.
   require("sepal").setup({
     cmd = { "claude" },
     args = { "--permission-mode", "acceptEdits" },
+    auto_mode = false,
     check = nil,
     retries = 1,
     land = "auto",
@@ -57,6 +58,8 @@ files, fidget.nvim for a spinner.
              and you answer in |:Sepal-open|. Allow what you trust upfront:
              `{ "--permission-mode", "acceptEdits", "--allowedTools",
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
+`auto_mode`  true: every run and chat (|:Sepal-open|) uses Claude Code's
+             auto mode, `--permission-mode auto` instead of the one in `args`.
 `check`      the check for tasks without a "Done when:" line, e.g.
              "make test". nil: those tasks aren't checked.
 `retries`    when the check fails, the agent gets its output and this many

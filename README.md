@@ -105,6 +105,7 @@ That's all of it: write, send, keep working, read the `·` lines.
 require("sepal").setup({
   cmd = { "claude" },                            -- the agent
   args = { "--permission-mode", "acceptEdits" }, -- added to each run (see Permissions)
+  auto_mode = false,   -- true: every run and chat in Claude Code's auto mode (--permission-mode auto)
   check = nil,         -- the check for tasks without a `Done when:` line, e.g. "make test"
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
   land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits for L in the inbox
@@ -198,6 +199,12 @@ require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowed
 ```
 
 Other flags go there too, e.g. `"--model", "opus"`.
+
+Or let Claude Code's auto mode decide, for tasks and chats alike (it replaces the `--permission-mode` in `args`):
+
+```lua
+require("sepal").setup({ auto_mode = true })
+```
 
 ## Watching
 

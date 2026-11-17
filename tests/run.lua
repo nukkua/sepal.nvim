@@ -535,6 +535,30 @@ test("notify: info goes to fidget, warnings to vim.notify", function()
   eq(got, { { "fidget", "task sent", vim.log.levels.INFO, "sepal" }, { "notify", "the task is empty", vim.log.levels.WARN, "sepal" } })
 end)
 
+test("auto_mode: every run in Claude Code's auto mode, instead of args' permission mode", function()
+  clean(); reset()
+  sepal.config().auto_mode = true
+  run({ "Goal: shout two" })
+  sepal.config().auto_mode = false
+  eq(args(), { "--permission-mode auto" })
+end)
+
+test("notify: held while in the agent, shown once you leave it", function()
+  local got, notify = {}, vim.notify
+  vim.notify = function(msg) got[#got + 1] = msg end -- a notifier plugin
+  local back = vim.api.nvim_get_current_buf()
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.b[b].sepal_agent = true
+  vim.api.nvim_set_current_buf(b)
+  sepal.notify("one")
+  sepal.notify("two", vim.log.levels.WARN)
+  eq(got, {})
+  vim.api.nvim_set_current_buf(back)
+  vim.notify = notify
+  vim.api.nvim_buf_delete(b, { force = true })
+  eq(got, { "one", "two" })
+end)
+
 test("notify: the builtin vim.notify gets a colored echo", function()
   vim.cmd.messages("clear")
   sepal.notify("the agent is the only window", vim.log.levels.WARN)

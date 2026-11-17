@@ -9,6 +9,7 @@ local M = {}
 local C = {
   cmd = { "claude" },  -- the agent. A task runs Claude Code (cmd <args> <task>) in a hidden terminal in its worktree
   args = { "--permission-mode", "acceptEdits" }, -- added to each run: --model, --allowedTools…
+  auto_mode = false,   -- true: every run and chat in Claude Code's auto mode (--permission-mode auto, instead of args')
   check = nil,         -- the check for tasks without a `Done when:` line, e.g. "make test"; nil: no check
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
   land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits in the inbox for L
@@ -25,7 +26,22 @@ function M.config() return C end
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
 -- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
 local ICON = { [vim.log.levels.ERROR] = { "✗", "DiagnosticError" }, [vim.log.levels.WARN] = { "▲", "DiagnosticWarn" } }
+-- while you're in the agent (or a chat) they wait, shown once you leave it
+local held = {}
 function M.notify(msg, lvl, o)
+  if vim.b.sepal_agent then
+    held[#held + 1] = { msg, lvl, o }
+    if #held == 1 then
+      vim.api.nvim_create_autocmd("BufEnter", { callback = function()
+        if vim.b.sepal_agent then return end
+        local h = held
+        held = {}
+        for _, n in ipairs(h) do M.notify(n[1], n[2], n[3]) end
+        return true
+      end })
+    end
+    return
+  end
   lvl, o = lvl or vim.log.levels.INFO, o or {}
   local ok, fidget = pcall(require, "fidget")
   if ok and lvl <= vim.log.levels.INFO then

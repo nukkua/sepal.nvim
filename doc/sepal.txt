@@ -115,9 +115,10 @@ files, fidget.nvim for a spinner.
 :Sepal open       The newest task in Claude Code, full screen. While it
                   runs: the agent at work, live; type to it if you like.
                   `q` (normal mode) hides it, it keeps going. Once it's done:
-                  its chat (`claude --resume`). From the agent or a chat
+                  its chat (`claude --resume`), hidden by `q` too and kept
+                  going until `x` or `:Sepal stop`. From the agent or a chat
                   (normal mode) it's a toggle: it leaves, like `q`.
-:Sepal stop       Stop every running task.
+:Sepal stop       Stop every running task, and close their chats.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted.
 

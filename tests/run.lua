@@ -380,16 +380,18 @@ test(":Sepal open toggles the agent and its chat when it's the only window of a 
     idle()
   end)
   fresh()
-  vim.cmd("Sepal open") -- done: its chat
-  vim.wait(1000, function() return vim.b.sepal_agent == true end)
+  vim.cmd("Sepal open") -- done: its chat, a spinner until it's printed
+  eq({ vim.b.sepal_agent, vim.bo.buftype }, { true, "nofile" }, "no loading float")
+  vim.wait(1000, function() return vim.bo.buftype == "terminal" end)
   local chat = vim.api.nvim_get_current_buf()
+  eq(vim.bo.buftype, "terminal", "the chat didn't show")
   toggled("chat")
+  eq(vim.api.nvim_get_current_buf(), chat, "toggling the chat started another one")
+  vim.cmd("enew!") -- hidden any other way, it keeps going too
   vim.wait(50)
-  eq(vim.api.nvim_buf_is_valid(chat), false, "the chat left behind still runs")
-  chat = vim.api.nvim_get_current_buf()
-  vim.cmd("enew!") -- any other way out ends it too
-  vim.wait(50)
-  eq(vim.api.nvim_buf_is_valid(chat), false, "the chat left with :enew still runs")
+  eq(vim.api.nvim_buf_is_valid(chat), true, "hiding the chat ended it")
+  notified(function() vim.cmd("Sepal stop") end) -- only stopping ends it
+  eq(vim.api.nvim_buf_is_valid(chat), false, ":Sepal stop left the chat running")
   local leaked = vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^term://.*/state/") end, vim.api.nvim_list_bufs())
   eq(#leaked, 0, "renamed agent terminals left their old names behind")
 end)

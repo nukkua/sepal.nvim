@@ -16,6 +16,17 @@ local WARN, ERROR = vim.log.levels.WARN, vim.log.levels.ERROR
 -- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update, exclude }
 local jobs = {}
 local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
+local chats = {} -- task id → its chat's terminal (claude --resume): hidden, it goes on until stopped
+-- e's chat, while claude runs in it
+local function chat(e)
+  local b = chats[e.id]
+  return b and vim.api.nvim_buf_is_valid(b) and vim.fn.jobwait({ vim.bo[b].channel }, 0)[1] == -1 and b or nil
+end
+local function endchat(e)
+  local b = chats[e.id]
+  chats[e.id] = nil
+  if b then pcall(vim.api.nvim_buf_delete, b, { force = true }) end -- ends claude
+end
 
 -- the first non-empty line of s, cut to n characters
 local function first(s, n)
@@ -373,6 +384,7 @@ end
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
 function M.continue(e, text)
   if M.running(e) then return notify("it's still running") end
+  endchat(e) -- the agent goes on with the same chat
   e.attempts, e.checked, e.why, e.error, e.check_out = 0, nil, nil, nil, nil
   e.time = os.time()
   launch(e, text .. "\n" .. notes(e), e.result or e.base)
@@ -431,6 +443,10 @@ function M.undo(e)
 end
 
 function M.stop(e)
+  if chat(e) then
+    endchat(e)
+    return notify("closed the chat: " .. e.title)
+  end
   local i = queued(e)
   if i then
     table.remove(queue, i)
@@ -445,10 +461,12 @@ function M.stop(e)
 end
 
 function M.running(e) return jobs[e.id] ~= nil or queued(e) ~= nil end
+function M.chatting(e) return chat(e) ~= nil end
 
 -- forget e: its commits and its line in the inbox
 function M.drop(e)
   if M.running(e) then return notify("it's running: x stops it first") end
+  endchat(e)
   if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
   git.delete_refs(e.root, "refs/sepal/" .. e.id)
   inbox.remove(e)
@@ -467,9 +485,9 @@ function M.show(e)
 end
 
 -- b in a full-screen float, the size its terminal started at whatever tabs, splits or statusline there
--- are: no resize, no redraw. Leaving it (<c-w>w…) hides it
-local function show(b)
-  local w = vim.fn.bufwinid(b)
+-- are: no resize, no redraw. Leaving it (<c-w>w…) hides it. w: the loading float to show it in
+local function show(b, w)
+  if w then vim.api.nvim_set_current_win(w); vim.api.nvim_win_set_buf(w, b) else w = vim.fn.bufwinid(b) end
   if w ~= -1 then vim.api.nvim_set_current_win(w) else
     w = vim.api.nvim_open_win(b, true, screen())
     vim.api.nvim_create_autocmd("WinLeave", { callback = function()
@@ -492,6 +510,8 @@ function M.open(e)
   if queued(e) then return notify("it's queued, it starts when a running task is done") end
   if j then return notify(j.buf and "the agent is done, sepal is " .. e.status or "it's starting: making its worktree") end
   if not e.session then return notify("this task has no chat yet") end
+  if chat(e) then return show(chats[e.id]) end
+  endchat(e) -- quit (/exit): a new one
   -- started hidden and shown once it's printed the chat: claude --resume prints all of it at once,
   -- and a terminal on screen scrolls down through every line
   local b = vim.api.nvim_create_buf(false, true)
@@ -505,23 +525,42 @@ function M.open(e)
     pcall(vim.api.nvim_buf_delete, b, { force = true })
     return notify("could not run " .. tostring(C().cmd[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")), WARN)
   end
+  chats[e.id] = b
   vim.b[b].sepal_agent = true
-  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the chat" })
+  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Hide the chat (it keeps going)" })
+  -- meanwhile a spinner in the float it'll show in; leaving that (q, :Sepal open…) leaves it loading hidden
+  local l = vim.api.nvim_create_buf(false, true)
+  vim.bo[l].bufhidden, vim.b[l].sepal_agent = "wipe", true
+  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = l, desc = "Hide the chat (it keeps going)" })
+  show(l)
+  vim.cmd.stopinsert() -- show's insert is for a terminal
+  local lw = vim.api.nvim_get_current_win()
+  local spin = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+  local function frame(i)
+    local text = spin[i % #spin + 1] .. " opening the chat of " .. e.title .. "…"
+    local pad = math.max(math.floor((vim.o.columns - vim.fn.strdisplaywidth(text)) / 2), 0)
+    local lines = {}
+    for _ = 1, math.floor(vim.api.nvim_win_get_height(lw) / 2) do lines[#lines + 1] = "" end
+    lines[#lines + 1] = (" "):rep(pad) .. text
+    vim.api.nvim_buf_set_lines(l, 0, -1, false, lines)
+  end
+  frame(0)
   -- printed: 200ms without output once there's text (its longest pause mid-chat is ~160ms); 3s at most
-  local tick, quiet, t0, timer = -1, 0, vim.uv.now(), vim.uv.new_timer()
+  local tick, quiet, t0, n, timer = -1, 0, vim.uv.now(), 0, vim.uv.new_timer()
   timer:start(50, 50, vim.schedule_wrap(function()
-    if not vim.api.nvim_buf_is_valid(b) then timer:stop(); return timer:close() end
+    local gone = not vim.api.nvim_win_is_valid(lw) or vim.api.nvim_win_get_buf(lw) ~= l
+    if gone or not vim.api.nvim_buf_is_valid(b) then
+      timer:stop(); timer:close()
+      return pcall(vim.api.nvim_win_close, lw, true)
+    end
+    n = n + 1
+    frame(math.floor(n / 2))
     local t = vim.api.nvim_buf_get_changedtick(b)
     if t ~= tick then tick, quiet = t, 0 else quiet = quiet + 50 end
     local printed = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false)):find("%S")
     if not (printed and quiet >= 200) and vim.uv.now() - t0 < 3000 then return end
     timer:stop(); timer:close()
-    show(b)
-    vim.bo[b].bufhidden = "wipe"
-    -- bufhidden=wipe doesn't wipe a terminal while claude runs in it: however you leave the chat, end it
-    vim.api.nvim_create_autocmd("BufHidden", { buffer = b, once = true, callback = function()
-      vim.schedule(function() pcall(vim.api.nvim_buf_delete, b, { force = true }) end)
-    end })
+    show(b, lw)
   end))
 end
 

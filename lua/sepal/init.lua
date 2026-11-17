@@ -114,7 +114,7 @@ function M.open()
 end
 function M.stop()
   local agent, n = require("sepal.agent"), 0
-  for _, e in ipairs(entries() or {}) do if agent.running(e) then agent.stop(e); n = n + 1 end end
+  for _, e in ipairs(entries() or {}) do if agent.running(e) or agent.chatting(e) then agent.stop(e); n = n + 1 end end
   if n == 0 then M.notify("no task is running") end
 end
 -- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted)

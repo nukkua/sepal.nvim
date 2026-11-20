@@ -78,9 +78,12 @@ local STATUS = {
   undone = { "↺", "undone", "SepalDim" },
 }
 M.STATUS = STATUS
+M.LIVE = { running = true, checking = true } -- these spin in the inbox and the panel
+local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }, 1, nil
+function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  u undo  r reply  c continue  o watch/chat  x stop  D drop  C clean  za fold  q close"
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -129,12 +132,21 @@ local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) a
 
 render = function()
   local panel = package.loaded["sepal.panel"] -- the side panel shows the same tasks: it redraws with the inbox
-  if panel then panel.render() end
+  local live = panel and panel.render() or false
   local b = buf()
+  local w = b and vim.fn.win_findbuf(b)[1]
+  local root = w and vim.b[b].sepal_inbox
+  local list = w and M.list(root) or {}
+  live = live or vim.iter(list):any(function(e) return M.LIVE[e.status] end)
+  -- one timer spins both while a task they show runs, and stops when none does
+  if live and not timer then
+    timer = assert(vim.uv.new_timer())
+    timer:start(100, 100, vim.schedule_wrap(function() frame = frame % #SPIN + 1; render() end))
+  elseif not live and timer then
+    timer:stop(); timer:close(); timer = nil
+  end
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
-  if not b or #vim.fn.win_findbuf(b) == 0 then return end
-  local root = vim.b[b].sepal_inbox
-  local w = vim.fn.win_findbuf(b)[1]
+  if not w then return end
   -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
   local old = vim.b[b].sepal_rows or {}
   vim.api.nvim_win_call(w, function()
@@ -143,7 +155,6 @@ render = function()
     end
   end)
   local lines, rows, marks, spans = { HELP, "" }, {}, {}, {}
-  local list = M.list(root)
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   -- every column padded to its widest value in the list, so every line is the same width
   local cols, wid = {}, { 0, 0, 0, 0 }
@@ -153,7 +164,7 @@ render = function()
   end
   for i, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
-    local head = ("%s %s "):format(cfg_icon(e.status, st[1]), fit(st[2], 12))
+    local head = ("%s %s "):format(M.LIVE[e.status] and SPIN[frame] or cfg_icon(e.status, st[1]), fit(st[2], 12))
     local pre = ("%s%s  %s  "):format(head, fit(ago(e.time), 3), fit(e.title or "", 34))
     local c = cols[i]
     local f = wid[1] > 0 and ("%s %s %s"):format(fit(c[1], wid[1]), fit(c[2], wid[2]), fit(c[3], wid[3])) or ""
@@ -215,6 +226,7 @@ function M.open(root)
     vim.keymap.set("n", "L", on(agent.land), o("Land it in your work tree"))
     vim.keymap.set("n", "u", on(agent.undo), o("Take a landed task back out"))
     vim.keymap.set("n", "r", on(agent.reply), o("Reply: the agent continues this task"))
+    vim.keymap.set("n", "c", on(agent.resume), o("Continue a task that was cut short (quit, stopped, crashed)"))
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))

@@ -417,6 +417,13 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   assert(lines[2]:match("1 running"), lines[2])
   assert(vim.tbl_contains(lines, " ▎ → Edit a.txt"), vim.inspect(lines))
+  assert(lines[5]:match("^ ▎ ⠋ carded"), lines[5]) -- it spins, and so does the inbox
+  vim.cmd("Sepal inbox")
+  local ib = vim.api.nvim_get_current_buf()
+  assert(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^⠋ running"))
+  vim.wait(350, function() return vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^⠋") == nil end)
+  assert(not vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^⠋"), "the inbox's spinner moves")
+  vim.cmd("close")
   e.status = "landed"; inbox.changed(e)
   vim.cmd("Sepal panel") -- a toggle
   eq(vim.fn.bufwinid(b), -1)
@@ -866,6 +873,44 @@ test("colors: sakura pinks or your theme's links, the highlights option over bot
   vim.o.background = "dark"
   sepal.setup({ sakura = true, highlights = {}, icons = {} })
   eq(sepal.icon("landed", "✓"), "❀")
+end)
+
+test("c continues a task nvim quit on: what its worktree had is kept, the agent resumes its chat", function()
+  clean(); reset()
+  run({ "Goal: quit on" }, "<c-c><c-w>")
+  local e = newest()
+  -- as after a quit mid-run: interrupted, its worktree left with the agent's half-done work in it
+  e.status = "interrupted"
+  local wt = vim.fs.joinpath(T, "state", inbox.key(work), e.id)
+  sh(("git worktree add -q --detach %q %s && printf 'half\\n' > %q/c.txt"):format(wt, e.base, wt))
+  reset()
+  local got = msgs(notified(function() agent.resume(e); idle() end))
+  eq(vim.endswith(args()[1], "--resume s1"), true)
+  assert(vim.startswith(prompts(), "You were interrupted."), prompts())
+  eq(e.status, "ready")
+  eq(vim.tbl_contains(e.stat.list, "c.txt +1 −0"), true, vim.inspect(e.stat.list))
+  eq(got[#got]:match("^● ready"), "● ready")
+  eq(msgs(notified(function() agent.resume(e) end)), { "it wasn't cut short: r replies to it" })
+end)
+
+test("c starts over a task that never got its agent going; x keeps what the agent did", function()
+  clean(); reset()
+  vim.env.SEPAL_FAIL = "start"
+  run({ "Goal: never went" })
+  local e = newest()
+  eq({ e.status, e.session }, { "error", nil })
+  reset()
+  vim.env.SEPAL_SLEEP = "1"
+  notified(function()
+    agent.resume(e)
+    assert(vim.wait(2000, function() return e.activity ~= nil end, 20), "the agent never started")
+    vim.fn.writefile({ "so far" }, vim.fs.joinpath(T, "state", inbox.key(work), e.id, "d.txt")) -- in its worktree, mid-turn
+    agent.stop(e)
+    idle()
+  end)
+  eq(vim.endswith(args()[1], "--resume s1"), false)
+  assert(vim.startswith(prompts(), "Goal: never went\n"), prompts())
+  eq({ e.status, e.stat and e.stat.list }, { "stopped", { "d.txt +1 −0" } })
 end)
 
 print(("%d/%d passed"):format(n - fails, n))

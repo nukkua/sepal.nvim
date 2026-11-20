@@ -79,7 +79,7 @@ cases.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  C clean  za fold  q close
+<CR> diff  L land  u undo  r reply  c continue  o chat  x stop  D drop  C clean  za fold  q close
 
 ✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
     · shutdown() blocks until the queue is empty
@@ -91,6 +91,8 @@ cases.
 
 - `r` replies to a task ("the timeout is 200ms on CI"). The agent continues from where it was, in the
   same chat, and the task is checked and lands again.
+- `c` continues a task that was cut short (Neovim quit, `x`, Esc, the agent crashed): what it had done
+  is kept and the agent picks up in the same chat; one whose agent never started starts over.
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
 - `<CR>` shows everything the task changed as a diff.
 - `j`/`k` go task to task. Each task is a fold, closed at first: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
@@ -158,7 +160,7 @@ and the `highlights` option wins over everything.
    has unsaved changes, it waits as "needs you".
 5. The worktree is removed and the result stays as a commit (`refs/sepal/<id>/*`) until you drop
    the task. The inbox is saved per repo, so it survives a restart. A task that was running when
-   Neovim quit shows as "interrupted", and `r` continues it.
+   Neovim quit shows as "interrupted", and `c` continues it with what it had done so far.
 
 ## Tasks
 

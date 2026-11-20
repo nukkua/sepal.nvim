@@ -134,6 +134,10 @@ files, fidget.nvim for a spinner.
                     r     reply: the agent continues in the same chat from
                           what it did; it's checked and lands again (only
                           what's new)
+                    c     continue a task cut short (Neovim quit, x, Esc,
+                          a crash): what it did so far is kept and the
+                          agent goes on in its chat; one that never started
+                          starts over
                     o     watch it (running) or open its chat (done)
                     x     stop it
                     D     drop it
@@ -176,7 +180,7 @@ merge-file), unstaged. With land = "auto" it only lands when that's clean: no
 overlap with your edits and no unsaved buffer of a file it touches; otherwise
 the task waits as "needs you". Results are kept as refs/sepal/<id>/* until
 the task is dropped. A task running when Neovim quits shows as "interrupted";
-`r` continues it.
+`c` continues it, from what was in its worktree.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal
 warns ("▲ …: Claude Code asks to trust the worktree · :Sepal open"); answer

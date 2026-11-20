@@ -7,8 +7,6 @@ local M = {}
 local inbox = require("sepal.inbox")
 local NS = vim.api.nvim_create_namespace("sepal.panel")
 local WIDTH = 46
-local SPIN = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-local LIVE = { running = true, checking = true }
 -- the header's counts, in this order: { label, statuses, hl }
 local COUNTS = {
   { "running", { running = true, checking = true }, "SepalAccent" },
@@ -18,7 +16,7 @@ local COUNTS = {
   { "landed", { landed = true }, "SepalOk" },
 }
 
-local panel_buf, timer, frame = nil, nil, 1
+local panel_buf
 local rows = {} -- row -> task id
 local function buf() return panel_buf and vim.api.nvim_buf_is_valid(panel_buf) and panel_buf or nil end
 local function win()
@@ -41,7 +39,7 @@ end
 -- a task as rows of { text, hl } chunks, behind a rail in its status's color
 local function card(e, w)
   local st = inbox.STATUS[e.status] or { "?", e.status, "Normal" }
-  local icon = LIVE[e.status] and SPIN[frame] or require("sepal").icon(e.status, st[1])
+  local icon = inbox.LIVE[e.status] and inbox.spin() or require("sepal").icon(e.status, st[1])
   local rail, age = { "▎ ", st[3] }, inbox.ago(e.time)
   local inner = w - 2
   local out = {
@@ -73,7 +71,7 @@ local function card(e, w)
   if e.why then para(e.why, "SepalWarn", "", 3) end
   if e.error then para(e.error, "SepalError", "", 3) end
   if e.summary then para(e.summary, "Normal", "", 3)
-  elseif not LIVE[e.status] and e.status ~= "queued" then -- nothing said yet: what was asked
+  elseif not inbox.LIVE[e.status] and e.status ~= "queued" then -- nothing said yet: what was asked
     para(vim.trim((e.task or ""):gsub("^%s*Goal:%s*", ""):gsub("\n.*", "")), "SepalDim", "", 2)
   end
   local n = #(e.assumptions or {})
@@ -81,17 +79,11 @@ local function card(e, w)
   return out
 end
 
+-- returns whether a task it shows is running, for the inbox's spinner timer
 function M.render()
   local w = win()
-  local list = w and inbox.list(vim.b[buf()].sepal_panel) or {}
-  local live = vim.iter(list):any(function(e) return LIVE[e.status] end)
-  if live and not timer then
-    timer = assert(vim.uv.new_timer())
-    timer:start(100, 100, vim.schedule_wrap(function() frame = frame % #SPIN + 1; M.render() end))
-  elseif not live and timer then
-    timer:stop(); timer:close(); timer = nil
-  end
-  if not w then return end
+  if not w then return false end
+  local list = inbox.list(vim.b[buf()].sepal_panel)
   local width = vim.api.nvim_win_get_width(w) - 1
   local root = vim.b[buf()].sepal_panel
   local out = { { { " " .. require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" }, { "  " .. vim.fs.basename(root), "SepalDim" } } }
@@ -136,7 +128,7 @@ function M.toggle(root)
   local w = win()
   if w then
     if not pcall(vim.api.nvim_win_close, w, false) then require("sepal").close() end -- the last window
-    return M.render() -- stops the spinner
+    return inbox.render() -- stops the spinner
   end
   local b = buf()
   if not b then
@@ -159,7 +151,7 @@ function M.toggle(root)
   vim.wo[w].wrap, vim.wo[w].cursorline, vim.wo[w].winfixwidth = false, false, true
   vim.wo[w].number, vim.wo[w].relativenumber, vim.wo[w].signcolumn, vim.wo[w].foldcolumn = false, false, "no", "0"
   vim.wo[w].list, vim.wo[w].spell, vim.wo[w].fillchars = false, false, "eob: "
-  M.render()
+  inbox.render() -- starts the spinner
 end
 
 M._t = { rows = function() return rows end }

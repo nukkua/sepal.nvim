@@ -22,7 +22,7 @@ local function cmd(extra)
   return vim.list_extend(vim.list_extend({}, C().cmd), a)
 end
 
--- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update, exclude }
+-- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update }
 local jobs = {}
 local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
 local chats = {} -- task id → its chat's terminal (claude --resume): hidden, it goes on until stopped
@@ -264,7 +264,7 @@ agent = function(e, prompt, wt)
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
     local reply = reply_of(ev)
-    git.result(e.root, wt, e.base, ref(e, "result"), j.exclude, function(result)
+    git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
       e.result = result or e.result
       e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
       e.summary = first(reply, 100) -- the reply itself isn't kept: only its summary and assumptions are shown
@@ -342,8 +342,8 @@ agent = function(e, prompt, wt)
     if over then return end
     poll()
     if over then return end
+    if j.stopped then return stopped({ transcript_path = transcript }) end -- x: what it did so far is kept, as with Esc
     local last = close()
-    if j.stopped then return finish(e, wt, "stopped") end
     finish(e, wt, "error", { error = started and "the agent quit before it was done (exit " .. code .. ")"
       or "the agent didn't start: " .. (first(last, 200) or ("exit " .. code)) })
   end
@@ -417,6 +417,7 @@ end
 function M._prepare(e, prompt, wt)
   local update = jobs[e.id].update
   local prepare = C().prepare
+  e.exclude = nil -- on e, not the job: c salvages a worktree left by a quit after a restart
   if not prepare then return agent(e, prompt, wt) end
   update(e.title .. ": preparing")
   local pok, job = pcall(vim.system, { "sh", "-c", prepare }, { cwd = wt, text = true, env = { SEPAL_ROOT = e.root } }, vim.schedule_wrap(function(out)
@@ -427,8 +428,8 @@ function M._prepare(e, prompt, wt)
     end
     -- whatever prepare made (node_modules links, builds…) isn't the agent's work
     local st = git.run(wt, { "status", "--porcelain=v1", "-z", "--untracked-files=normal" }).stdout or ""
-    j.exclude = {}
-    for entry in st:gmatch("[^%z]+") do j.exclude[#j.exclude + 1] = entry:sub(4) end
+    e.exclude = {}
+    for entry in st:gmatch("[^%z]+") do e.exclude[#e.exclude + 1] = entry:sub(4) end
     agent(e, prompt, wt)
   end))
   if not pok then return finish(e, wt, "error", { error = "could not run prepare: " .. tostring(job):match("[^\n]*") }) end
@@ -486,6 +487,30 @@ function M.continue(e, text)
   e.attempts, e.checked, e.why, e.error, e.check_out = 0, nil, nil, nil, nil
   e.time = os.time()
   launch(e, text .. "\n" .. notes(e), e.result or e.base)
+end
+
+-- c: an agent cut short (nvim quit, x, Esc, it crashed) goes on where it was. A quit leaves its
+-- worktree behind: what's in it is saved as the result first. One that never started starts over
+function M.resume(e)
+  if M.running(e) then return notify("it's still running") end
+  if not vim.tbl_contains({ "interrupted", "stopped", "error" }, e.status) then
+    return notify("it wasn't cut short: r replies to it")
+  end
+  if not e.base then return notify("it never started (your work tree wasn't saved): send it again") end
+  local function go()
+    M.continue(e, e.session and "You were interrupted. Carry on with the task from where you left off." or e.task)
+  end
+  local wt = wtdir(e)
+  -- no session: quit before the agent started, the checkout may be half made (it'd read as deletions)
+  if not (e.session and vim.uv.fs_stat(wt)) then return go() end
+  jobs[e.id] = {} -- saving it: counts as running, x stops it
+  git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
+    local j = jobs[e.id]
+    jobs[e.id] = nil
+    if result then e.result, e.stat = result, git.stat(e.root, e.base, result) end
+    if j.stopped then e.status = "stopped"; inbox.changed(e); M._next(); return notify("stopped: " .. e.title) end
+    go()
+  end)
 end
 
 -- land e in your work tree as unstaged changes: a three-way merge per file, so what you changed

@@ -154,7 +154,7 @@ files, fidget.nvim for a spinner.
                   spinner while it runs), its diff, and a short summary of
                   what it said. It redraws with the inbox and keeps your
                   cursor where it is. Again: hides it. In it:
-                    <CR>  watch the task (running) or open its chat (done)
+                    o     watch the task (running) or open its chat (done)
                     q     close the panel
 :Sepal land       Land the newest task that's waiting.
                                                                 *:Sepal-undo*

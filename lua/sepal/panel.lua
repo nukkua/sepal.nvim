@@ -1,6 +1,6 @@
 -- sepal.panel — :Sepal panel, a board at the right that only shows: each task as a card with its
 -- status, what the agent is doing right now and a short summary. It redraws with the inbox (and
--- spins while a task runs); <CR> watches the task under the cursor, q closes it. To act, :Sepal inbox.
+-- spins while a task runs); o watches the task under the cursor, q closes it. To act, :Sepal inbox.
 
 local M = {}
 
@@ -19,14 +19,14 @@ local COUNTS = {
 -- what each status means for you, next to it: the label alone didn't say what to do
 local HINT = {
   queued = "waits for a free agent",
-  running = "working · <CR> to watch",
+  running = "working · o to watch",
   checking = "running the check",
   ready = "done · review and L in :Sepal inbox",
   landed = "in your work tree",
   nochange = "done, nothing changed",
   failed = "r in :Sepal inbox to fix it",
   error = "c in :Sepal inbox to retry",
-  needs = "waiting on you · <CR> to answer",
+  needs = "waiting on you · o to answer",
   stopped = "c in :Sepal inbox to continue",
   interrupted = "c in :Sepal inbox to continue",
   undone = "taken back out",
@@ -151,7 +151,7 @@ function M.render()
     end
   end
   out[#out + 1] = counts
-  out[#out + 1] = { { MASCOT[3], "SepalClaude" }, { "<CR> watch · q close", "SepalDim" } }
+  out[#out + 1] = { { MASCOT[3], "SepalClaude" }, { "o watch · q close", "SepalDim" } }
   out[#out + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
   rows = {}
   if #list == 0 then -- the empty state: centered under the divider, saying how to start
@@ -212,7 +212,7 @@ function M.toggle(root)
     vim.api.nvim_buf_set_name(b, "sepal://panel")
     local o = function(desc) return { buffer = b, desc = desc, nowait = true } end
     vim.keymap.set("n", "q", function() M.toggle() end, o("Close the panel"))
-    vim.keymap.set("n", "<CR>", function()
+    vim.keymap.set("n", "o", function()
       local id = rows[vim.api.nvim_win_get_cursor(0)[1]]
       local e = id and inbox.find(vim.b[b].sepal_panel, id)
       if e then require("sepal.agent").open(e) end

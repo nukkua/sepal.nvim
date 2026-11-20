@@ -31,9 +31,26 @@ local HINT = {
   interrupted = "c in :Sepal inbox to continue",
   undone = "taken back out",
 }
--- "claude-opus-5-5[1m]" -> "opus 5.5", "claude-sonnet-4-5-20250929" -> "sonnet 4.5"
+-- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
+local PROVIDERS = {
+  { "claude", "▐▛███▜▌", { "claude", "opus", "sonnet", "haiku", "fable" } },
+  { "openai", "֎", { "gpt", "chatgpt", "codex", "openai", "^o%d" } },
+  { "gemini", "✦", { "gemini" } },
+  { "opencode", "⌬", { "opencode" } },
+}
+-- the logo and its color: claude's is the Claude Code mascot's head, as its banner draws it, in its orange
+local function logo(m)
+  m = m:lower()
+  for _, p in ipairs(PROVIDERS) do
+    for _, k in ipairs(p[3]) do
+      if m:find(k) then return require("sepal").icon(p[1], p[2]), p[1] == "claude" and "SepalClaude" or "SepalDim" end
+    end
+  end
+  return "◇", "SepalDim"
+end
+-- "claude-opus-5-5[1m]" -> "opus 5.5", "claude-sonnet-4-5-20250929" -> "sonnet 4.5", "openai/gpt-5" -> "gpt-5"
 local function model(m)
-  m = m:gsub("%[.-%]$", ""):gsub("^claude%-", ""):gsub("%-%d%d%d%d%d%d%d%d$", "")
+  m = m:gsub("%[.-%]$", ""):gsub("^.*/", ""):gsub("^claude%-", ""):gsub("%-%d%d%d%d%d%d%d%d$", "")
   return (m:gsub("%-(%d+)%-(%d+)$", " %1.%2"):gsub("%-(%d+)$", " %1"))
 end
 
@@ -68,6 +85,10 @@ local function card(e, w)
       { " " .. age, "SepalDim" } },
   }
   local function row(...) out[#out + 1] = { rail, ... } end
+  if e.model then
+    local l, hl = logo(e.model)
+    row({ l, hl }, { " " .. model(e.model), "SepalDim" })
+  end -- who works on it, under its name
   -- status · try · check
   local meta = { { st[2]:upper(), st[3] } }
   if HINT[e.status] then meta[#meta + 1] = { "  " .. HINT[e.status], "SepalDim" } end
@@ -98,10 +119,6 @@ local function card(e, w)
   end
   local n = #(e.assumptions or {})
   if n > 0 then row({ ("· %d decision%s to read"):format(n, n == 1 and "" or "s"), "SepalDim" }) end
-  if e.model then -- subtle, at the right of the card's last row
-    local tag = "✻ " .. model(e.model)
-    row({ string.rep(" ", math.max(inner - dw(tag), 0)), "SepalDim" }, { tag, "SepalDim" })
-  end
   return out
 end
 

@@ -101,6 +101,7 @@ files, fidget.nvim for a spinner.
 `icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
              failed, error, needs, stopped, interrupted, undone.
+             Also the panel's model logos: `claude`, `openai`, `gemini`, `opencode`.
 
 ==============================================================================
 4. COMMANDS                                                    *sepal-commands*

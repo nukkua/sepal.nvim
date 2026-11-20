@@ -29,7 +29,10 @@ function M.config() return C end
 -- :hi) that sets a Sepal* group wins over the links and over sakura; the highlights option wins over all
 local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = "DiagnosticOk",
   SepalWarn = "DiagnosticWarn", SepalError = "DiagnosticError", SepalDim = "Comment", SepalAdded = "Added",
-  SepalRemoved = "Removed", SepalInboxFolded = false, SepalPanelTitle = "@markup.strong" }
+  SepalRemoved = "Removed", SepalInboxFolded = false, SepalPanelTitle = "@markup.strong",
+  SepalClaude = false }
+-- groups with a color of their own instead of a link
+local FG = { SepalClaude = "#d97757" }
 -- sakura: { on a dark background, on a light one }. Warnings and errors keep your theme's: they must read as such
 local SAKURA = { SepalTitle = { "#ffb6c1", "#c2185b", bold = true }, SepalAccent = { "#ffb6c1", "#d81b60" },
   SepalInfo = { "#c49aa6", "#ad1457" }, SepalOk = { "#ffb6c1", "#c2477a" } }
@@ -41,7 +44,7 @@ highlight = function()
     local cur = vim.api.nvim_get_hl(0, { name = name })
     if vim.tbl_isempty(cur) or vim.deep_equal(cur, mine[name]) then
       local s = C.sakura and SAKURA[name]
-      vim.api.nvim_set_hl(0, name, s and { fg = s[vim.o.background == "light" and 2 or 1], bold = s.bold } or { link = link or nil })
+      vim.api.nvim_set_hl(0, name, s and { fg = s[vim.o.background == "light" and 2 or 1], bold = s.bold } or FG[name] and { fg = FG[name] } or { link = link or nil })
       mine[name] = vim.api.nvim_get_hl(0, { name = name })
     end
   end

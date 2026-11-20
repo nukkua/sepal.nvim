@@ -33,13 +33,12 @@ local HINT = {
 }
 -- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
 local PROVIDERS = {
-  { "claude", " ▐▛███▜▌\n▝▜█████▛▘\n  ▘▘ ▝▝", { "claude", "opus", "sonnet", "haiku", "fable" } },
+  { "claude", "✻", { "claude", "opus", "sonnet", "haiku", "fable" } },
   { "openai", "֎", { "gpt", "chatgpt", "codex", "openai", "^o%d" } },
   { "gemini", "✦", { "gemini" } },
   { "opencode", "⌬", { "opencode" } },
 }
--- the logo and its color: claude's is the Claude Code mascot, as its banner draws it, in its orange.
--- A logo can take several lines ("\n"): the model's name goes next to the middle one
+-- the logo and its color: claude's in its orange
 local function logo(m)
   m = m:lower()
   for _, p in ipairs(PROVIDERS) do
@@ -54,6 +53,9 @@ local function model(m)
   m = m:gsub("%[.-%]$", ""):gsub("^.*/", ""):gsub("^claude%-", ""):gsub("%-%d%d%d%d%d%d%d%d$", "")
   return (m:gsub("%-(%d+)%-(%d+)$", " %1.%2"):gsub("%-(%d+)$", " %1"))
 end
+
+-- the Claude Code mascot, as its banner draws it: once, in the header, not on every card
+local MASCOT = { "  ▐▛███▜▌  ", " ▝▜█████▛▘ ", "   ▘▘ ▝▝   " }
 
 local panel_buf
 local rows = {} -- row -> task id
@@ -88,12 +90,7 @@ local function card(e, w)
   local function row(...) out[#out + 1] = { rail, ... } end
   if e.model then
     local l, hl = logo(e.model)
-    local lines = vim.split(l, "\n")
-    local w = math.max(unpack(vim.tbl_map(dw, lines)))
-    for i, line in ipairs(lines) do
-      local pad = { line .. string.rep(" ", w - dw(line)), hl }
-      if i == math.ceil(#lines / 2) then row(pad, { " " .. model(e.model), "SepalDim" }) else row(pad) end
-    end
+    row({ l, hl }, { " " .. model(e.model), "SepalDim" })
   end -- who works on it, under its name
   -- status · try · check
   local meta = { { st[2]:upper(), st[3] } }
@@ -135,8 +132,9 @@ function M.render()
   local list = inbox.list(vim.b[buf()].sepal_panel)
   local width = vim.api.nvim_win_get_width(w) - 1
   local root = vim.b[buf()].sepal_panel
-  local out = { { { " " .. require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" }, { "  " .. vim.fs.basename(root), "SepalDim" } } }
-  local counts = { { " ", "SepalDim" } }
+  local out = { { { MASCOT[1], "SepalClaude" }, { require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" },
+    { "  " .. vim.fs.basename(root), "SepalDim" } } }
+  local counts = { { MASCOT[2], "SepalClaude" } }
   for _, c in ipairs(COUNTS) do
     local k = #vim.tbl_filter(function(e) return c[2][e.status] end, list)
     if k > 0 then
@@ -144,7 +142,8 @@ function M.render()
       counts[#counts + 1] = { k .. " " .. c[1], c[3] }
     end
   end
-  out[#out + 1] = #counts > 1 and counts or { { " nothing yet: :Sepal task", "SepalDim" } }
+  out[#out + 1] = #counts > 1 and counts or { counts[1], { "nothing yet: :Sepal task", "SepalDim" } }
+  out[#out + 1] = { { MASCOT[3], "SepalClaude" }, { "<CR> watch · q close", "SepalDim" } }
   out[#out + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
   rows = {}
   for _, e in ipairs(list) do

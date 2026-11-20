@@ -59,6 +59,7 @@ local MASCOT = { "  ▐▛███▜▌  ", " ▝▜█████▛▘ ", "
 
 local panel_buf
 local drawn -- what it shows, spinners blanked: see render
+local spun = {} -- { row, col } of each spinner drawn
 local rows = {} -- row -> task id
 local function buf() return panel_buf and vim.api.nvim_buf_is_valid(panel_buf) and panel_buf or nil end
 local function win()
@@ -136,7 +137,7 @@ end
 -- returns whether a task it shows is running, for the inbox's spinner timer
 function M.render()
   local w = win()
-  if not w then return false end
+  if not w then drawn = nil; return false end -- stale once hidden: no tick may touch it
   local list = inbox.list(vim.b[buf()].sepal_panel)
   local width = vim.api.nvim_win_get_width(w) - 1
   local root = vim.b[buf()].sepal_panel
@@ -180,20 +181,26 @@ function M.render()
     lines[i], key[#key + 1] = text, k
   end
   key = table.concat(key, "\n")
+  spun = spins
+  if key == drawn then M.spin(); return #spins > 0 end
+  drawn = key
   local b = buf()
   vim.bo[b].modifiable = true
-  if key == drawn then -- only the spinners moved (each frame is 3 bytes): rewrite just them
-    local f = inbox.spin()
-    for _, s in ipairs(spins) do vim.api.nvim_buf_set_text(b, s[1], s[2], s[1], s[2] + #f, { f }) end
-    vim.bo[b].modifiable, vim.bo[b].modified = false, false
-    return #spins > 0
-  end
-  drawn = key
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
   for _, m in ipairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, m[1], m[2], { end_col = m[3], hl_group = m[4] }) end
   return #spins > 0
+end
+
+-- only the spinners moved (each frame is 3 bytes): rewrite just them, in what render drew last
+function M.spin()
+  local b = buf()
+  if not (drawn and win()) then return end
+  local f = inbox.spin()
+  vim.bo[b].modifiable = true
+  for _, s in ipairs(spun) do vim.api.nvim_buf_set_text(b, s[1], s[2], s[1], s[2] + #f, { f }) end
+  vim.bo[b].modifiable, vim.bo[b].modified = false, false
 end
 
 -- :Sepal panel: shows the board of root's tasks at the right, or hides it

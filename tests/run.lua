@@ -438,12 +438,14 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   assert(lines[6]:match("^ ▎ ⠋ carded"), lines[6]) -- it spins, and so does the inbox
   vim.wait(350, function() return not vim.api.nvim_buf_get_lines(b, 5, 6, false)[1]:match("⠋") end)
   assert(not vim.api.nvim_buf_get_lines(b, 5, 6, false)[1]:match("⠋"), "the panel's spinner moves on its own")
+  assert(vim.api.nvim_buf_get_lines(b, 5, 6, false)[1]:match("^ ▎ %S+ carded%s+now$"), "a tick rewrites only the spinner")
   vim.cmd("Sepal inbox")
   local ib = vim.api.nvim_get_current_buf()
   local f0 = inbox.spin()
   assert(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^" .. f0 .. " running"))
   vim.wait(350, function() return not vim.startswith(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1], f0) end)
   assert(not vim.startswith(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1], f0), "the inbox's spinner moves")
+  assert(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^%S+ running%s+now  carded"), "a tick rewrites only the spinner")
   vim.cmd("close")
   e.status = "landed"; inbox.changed(e)
   vim.cmd("Sepal panel") -- a toggle

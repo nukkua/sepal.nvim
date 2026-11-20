@@ -132,6 +132,7 @@ end
 local opened = {} -- task id -> true when you opened its fold: tasks start folded
 local heads = {} -- row -> true for each task's first line, where its fold starts
 local drawn -- what the inbox shows, its spinners blanked: a redraw that only moves them rewrites just those
+local spun = {} -- the rows drawn with a spinner
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
 -- the buffer is edited like oil: a task's line is known by its text past the status icon (which spins)
@@ -146,6 +147,12 @@ local function quiet(b, f)
   vim.bo[b].undolevels, vim.bo[b].modified = ul, false
 end
 
+local function spin(b)
+  quiet(b, function()
+    for _, row in ipairs(spun) do vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #SPIN[frame], { SPIN[frame] }) end
+  end)
+end
+
 render = function()
   local panel = package.loaded["sepal.panel"] -- the side panel shows the same tasks: it redraws with the inbox
   local live = panel and panel.render() or false
@@ -157,12 +164,19 @@ render = function()
   -- one timer spins both while a task they show runs, and stops when none does
   if live and not timer then
     timer = assert(vim.uv.new_timer())
-    timer:start(100, 100, vim.schedule_wrap(function() frame = frame % #SPIN + 1; render() end))
+    timer:start(100, 100, vim.schedule_wrap(function()
+      frame = frame % #SPIN + 1
+      -- every change redraws at once, so a tick only moves the spinners; a whole redraw once a turn (1s) moves the ages
+      if frame == 1 then return render() end
+      if package.loaded["sepal.panel"] then package.loaded["sepal.panel"].spin() end
+      local b = buf()
+      if drawn and b and vim.fn.win_findbuf(b)[1] and not vim.bo[b].modified then spin(b) end
+    end))
   elseif not live and timer then
     timer:stop(); timer:close(); timer = nil
   end
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
-  if not w then return end
+  if not w then drawn = nil; return end -- what it showed is stale now: no tick may touch it
   if vim.bo[b].modified then return end -- your edits wait for :w (or u): a redraw would throw them away
   local lines, rows, marks, spans, spins, agents = { HELP, "" }, {}, {}, {}, {}, {}
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
@@ -196,11 +210,8 @@ render = function()
   for row, l in ipairs(lines) do key[#key + 1] = tostring(rows[row]) .. "\0" .. l end
   for _, row in ipairs(spins) do key[row + 1] = rows[row] .. "\0\1" .. lines[row]:sub(#SPIN[frame] + 1) end
   key = table.concat(key, "\n")
-  if key == drawn then -- a spinner tick: every frame is 3 bytes, so the other marks and folds stay put
-    return quiet(b, function()
-      for _, row in ipairs(spins) do vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #SPIN[frame], { SPIN[frame] }) end
-    end)
-  end
+  spun = spins
+  if key == drawn then return spin(b) end -- only the spinners moved: every frame is 3 bytes, so the other marks and folds stay put
   drawn = key
   -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
   local old = vim.b[b].sepal_rows or {}

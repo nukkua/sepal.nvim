@@ -83,7 +83,7 @@ local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  u undo  r reply  c continue  o watch/chat  x stop  D drop  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  dd/D drop  yyp copy  :w apply  u revert  r reply  c continue  o watch/chat  x stop  C clean  za fold  q close"
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -126,10 +126,21 @@ local function details(e)
 end
 
 local opened = {} -- task id -> true when you opened its fold: tasks start folded
-local heads = {} -- row -> true for each task's first line, so j/k can skip its details
+local heads = {} -- row -> true for each task's first line, where its fold starts
 local drawn -- what the inbox shows, its spinners blanked: a redraw that only moves them rewrites just those
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
+-- the buffer is edited like oil: a task's line is known by its text past the status icon (which spins)
+local ids = {} -- that text -> the ids of the tasks drawn with it (two tasks can read the same)
+local function tkey(l) return l and l:match("^%S+ (.*)$") end
+local function head(b, row) return ids[tkey(vim.api.nvim_buf_get_lines(b, row - 1, row, false)[1])] end
+-- the inbox's own writes are no change of yours: u never undoes them
+local function quiet(b, f)
+  local ul = vim.bo[b].undolevels
+  vim.bo[b].undolevels = -1
+  f()
+  vim.bo[b].undolevels, vim.bo[b].modified = ul, false
+end
 
 render = function()
   local panel = package.loaded["sepal.panel"] -- the side panel shows the same tasks: it redraws with the inbox
@@ -148,6 +159,7 @@ render = function()
   end
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not w then return end
+  if vim.bo[b].modified then return end -- your edits wait for :w (or u): a redraw would throw them away
   local lines, rows, marks, spans, spins = { HELP, "" }, {}, {}, {}, {}
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   -- every column padded to its widest value in the list, so every line is the same width
@@ -176,11 +188,10 @@ render = function()
   for row, l in ipairs(lines) do key[#key + 1] = tostring(rows[row]) .. "\0" .. l end
   for _, row in ipairs(spins) do key[row + 1] = rows[row] .. "\0\1" .. lines[row]:sub(#SPIN[frame] + 1) end
   key = table.concat(key, "\n")
-  vim.bo[b].modifiable = true
   if key == drawn then -- a spinner tick: every frame is 3 bytes, so the other marks and folds stay put
-    for _, row in ipairs(spins) do vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #SPIN[frame], { SPIN[frame] }) end
-    vim.bo[b].modifiable, vim.bo[b].modified = false, false
-    return
+    return quiet(b, function()
+      for _, row in ipairs(spins) do vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #SPIN[frame], { SPIN[frame] }) end
+    end)
   end
   drawn = key
   -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
@@ -190,8 +201,11 @@ render = function()
       if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 or nil end
     end
   end)
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
-  vim.bo[b].modifiable, vim.bo[b].modified = false, false
+  quiet(b, function() vim.api.nvim_buf_set_lines(b, 0, -1, false, lines) end)
+  ids = {}
+  for row, id in pairs(rows) do
+    if marks[row] then local k = tkey(lines[row]); ids[k] = ids[k] or {}; table.insert(ids[k], id) end
+  end
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
   vim.api.nvim_buf_set_extmark(b, NS, 0, 0, { end_row = 0, end_col = #HELP, hl_group = "SepalDim" })
   for row, m in pairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { end_col = m[2], hl_group = m[1] }) end
@@ -219,8 +233,39 @@ M.render = function() render() end
 -- the entry under the cursor in the inbox
 function M.current()
   local b = vim.api.nvim_get_current_buf()
-  local id = (vim.b[b].sepal_rows or {})[vim.api.nvim_win_get_cursor(0)[1]]
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local id = (vim.b[b].sepal_rows or {})[row]
+  if vim.bo[b].modified then -- edited: rows moved, find the task line at or above the cursor
+    id = nil
+    for r = row, 1, -1 do if head(b, r) then id = head(b, r)[1] break end end
+  end
   return id and M.find(vim.b[b].sepal_inbox, id)
+end
+
+-- :w in the inbox: a task whose line is gone is dropped, a line put twice (yyp) opens a new task
+-- with that task's text, to add to and send
+function M.write(b)
+  local root, seen, copies = vim.b[b].sepal_inbox, {}, {}
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
+    local k = tkey(l)
+    if ids[k] then
+      seen[k] = (seen[k] or 0) + 1
+      if seen[k] > #ids[k] then copies[#copies + 1] = ids[k][1] end
+    end
+  end
+  local gone = {}
+  for k, list in pairs(ids) do
+    for i = (seen[k] or 0) + 1, #list do gone[#gone + 1] = list[i] end
+  end
+  vim.bo[b].modified = false
+  local agent = require("sepal.agent")
+  for _, id in ipairs(gone) do local e = M.find(root, id); if e then agent.drop(e) end end -- a running one stays
+  drawn = nil
+  render()
+  local e = copies[1] and M.find(root, copies[1])
+  -- shortcut: one draft at a time (sepal.task), so only the first copy opens; more copies need a draft list
+  if e then require("sepal").task(nil, vim.split(e.task, "\n")) end
+  if #copies > 1 then require("sepal").notify("one task draft at a time: copied only " .. e.title) end
 end
 
 function M.open(root)
@@ -229,19 +274,20 @@ function M.open(root)
     b = vim.api.nvim_create_buf(false, true)
     inbox_buf = b
     vim.bo[b].bufhidden = "hide"
-    vim.bo[b].filetype = "sepal-inbox"
+    vim.bo[b].filetype, vim.bo[b].buftype = "sepal-inbox", "acwrite"
     vim.api.nvim_buf_set_name(b, "sepal://inbox")
+    vim.api.nvim_create_autocmd("BufWriteCmd", { buffer = b, callback = function() M.write(b) end })
     local agent = require("sepal.agent")
     local function on(f) return function() local e = M.current(); if e then f(e) end end end
     local o = function(desc) return { buffer = b, desc = desc, nowait = true } end
     vim.keymap.set("n", "<CR>", on(agent.show), o("Show what the task changed"))
     vim.keymap.set("n", "L", on(agent.land), o("Land it in your work tree"))
-    vim.keymap.set("n", "u", on(agent.undo), o("Take a landed task back out"))
+    vim.keymap.set("n", "U", on(agent.undo), o("Take a landed task back out")) -- u is vim's undo: the buffer is edited
     vim.keymap.set("n", "r", on(agent.reply), o("Reply: the agent continues this task"))
     vim.keymap.set("n", "c", on(agent.resume), o("Continue a task that was cut short (quit, stopped, crashed)"))
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
-    vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))
+    vim.keymap.set("n", "D", "dd", o("Drop it (on :w)"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
     -- j/k go task to task, past the detail lines under each
@@ -250,8 +296,9 @@ function M.open(root)
         local row = vim.api.nvim_win_get_cursor(0)[1]
         for _ = 1, vim.v.count1 do
           local r = row + dir
-          while r >= 1 and r <= #heads and not heads[r] do r = r + dir end
-          if not heads[r] then break end
+          local n = vim.api.nvim_buf_line_count(b)
+          while r >= 1 and r <= n and not head(b, r) do r = r + dir end
+          if r < 1 or r > n then break end
           row = r
         end
         vim.api.nvim_win_set_cursor(0, { row, 0 })
@@ -274,6 +321,6 @@ function M.open(root)
   vim.fn.winrestview({ topline = 1 }) -- keep the key help in view
 end
 
-M._t = { reset = function() cache, drawn = {}, nil end }
+M._t = { reset = function() cache, drawn, ids = {}, nil, {} end }
 
 return M

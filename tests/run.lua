@@ -462,6 +462,33 @@ test("j/k in the inbox go task to task, past the lines under each", function()
   vim.cmd("close")
 end)
 
+test("the inbox is edited like oil: dd/D drop on :w, u takes it back, yyp opens a copy to add to", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  run({ "Goal: first" })
+  run({ "Goal: second" })
+  vim.cmd("Sepal inbox")
+  local b = vim.api.nvim_get_current_buf()
+  vim.api.nvim_win_set_cursor(0, { 3, 0 })
+  vim.cmd("normal D") -- second's closed fold: its line and the lines under it
+  assert(vim.bo[b].modified)
+  vim.cmd("normal u")
+  eq(vim.bo[b].modified, false)
+  eq(vim.api.nvim_win_get_cursor(0)[1], 3)
+  vim.cmd("normal dd")
+  eq(inbox.current().title, "first") -- rows moved: still the task under the cursor
+  vim.cmd("write")
+  eq(vim.tbl_map(function(e) return e.title end, inbox.list(work)), { "first" })
+  eq(vim.bo[b].modified, false)
+  vim.api.nvim_win_set_cursor(0, { 3, 0 })
+  vim.cmd("normal yyp")
+  vim.cmd("write")
+  eq(#inbox.list(work), 1) -- the copy is a draft, not a task yet
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), vim.split(newest().task, "\n"))
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
+  vim.cmd("close")
+end)
+
 test("a task's chat is saved as soon as it starts: o and r still work after a quit mid-run", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP = "3"

@@ -131,7 +131,7 @@ files, fidget.nvim for a spinner.
                     <CR>  everything the task changed, as a diff (q closes)
                     L     land it (with conflict markers if it overlaps
                           your edits)
-                    u     take a landed task back out
+                    U     take a landed task back out
                     r     reply: the agent continues in the same chat from
                           what it did; it's checked and lands again (only
                           what's new)
@@ -141,7 +141,10 @@ files, fidget.nvim for a spinner.
                           starts over
                     o     watch it (running) or open its chat (done)
                     x     stop it
-                    D     drop it
+                    dd D  drop it, once you :w (u before :w takes it
+                          back): the inbox is edited like oil.nvim
+                    yyp   a copied line opens, on :w, a new task with
+                          that task's text, to add to and send
                     C     drop the tasks that are over (:Sepal clean)
                     q     close the inbox
                                                               *:Sepal-panel*

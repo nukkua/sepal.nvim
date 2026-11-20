@@ -132,6 +132,18 @@ function M.stat(root, a, b)
   return s
 end
 
+-- the line of each file's first change in b: { [path] = line }
+-- shortcut: paths git quotes (odd characters) aren't found, they start at line 1
+function M.firsts(root, a, b)
+  local t, path = {}, nil
+  for l in (out(root, { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b }) or ""):gmatch("[^\n]+") do
+    path = l:match("^diff %-%-git a/.- b/(.*)$") or path
+    local n = l:match("^@@ %-%S+ %+(%d+)")
+    if n and path and not t[path] then t[path] = math.max(1, tonumber(n)) end
+  end
+  return t
+end
+
 -- path's content at rev, "" if it isn't there (added or deleted)
 function M.file(root, rev, path)
   local r = M.run(root, { "show", rev .. ":" .. path })

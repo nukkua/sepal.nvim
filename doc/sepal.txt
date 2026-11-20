@@ -144,10 +144,11 @@ files, fidget.nvim for a spinner.
 :Sepal inbox      Every task of this repo, newest first, with what to read
                   under each (assumptions, why it needs you, the failing
                   check's output). In it:
-                    <CR>  everything the task changed, in a new tab: its
-                          files, and the one under the cursor before | after
-                          in diff mode (]c next change, ]f [f next file,
-                          q closes); a btw's answer
+                    <CR>  everything the task changed, in a new tab: each
+                          file before | after in diff mode, all of them in
+                          a location list (]q [q or ]l [l next file, ]c next
+                          change, gf the file in your work tree, q closes);
+                          a btw's answer
                     L     land it (with conflict markers if it overlaps
                           your edits)
                     U     take a landed task back out

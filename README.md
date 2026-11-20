@@ -99,8 +99,9 @@ to add to and send.
 - `c` continues a task that was cut short (Neovim quit, `x`, Esc, the agent crashed): what it had done
   is kept and the agent picks up in the same chat; one whose agent never started starts over.
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
-- `<CR>` reviews what the task changed in a new tab: its files on the left, the one under the cursor
-  before | after in diff mode with its syntax highlighted (`]c` next change, `]f` `[f` next file, `q` closes).
+- `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
+  in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
+  your work tree, `q` closes).
 - `j`/`k` go task to task. Each task is a fold, closed at first: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
 
 That's all of it: write, send, keep working, read the `·` lines.

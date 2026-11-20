@@ -143,22 +143,33 @@ test("a task runs in a worktree and lands as unstaged changes, with what the age
   eq({ e.status, e.session, e.assumptions }, { "landed", "s1", { "kept the old API", "no new deps" } })
 end)
 
-test("<CR> shows the task's files, and each one before | after in diff mode", function()
+test("<CR> shows the file before | after in diff mode, its files in a location list; ]q next, gf the real one", function()
   local e = newest() -- the one above: a.txt changed, b.txt added
   agent.show(e)
   local wins = vim.api.nvim_tabpage_list_wins(0)
-  local function names() return vim.tbl_map(function(w) return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match("[^/]+/[^/]+$") or "" end, wins) end
-  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[1]), 0, -1, false), { "a.txt +1 −1", "b.txt +1 −0" })
-  eq(names(), { "", "before/a.txt", "after/a.txt" })
-  eq({ vim.wo[wins[2]].diff, vim.wo[wins[3]].diff }, { true, true })
-  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[3]), 0, -1, false), { "one", "TWO", "three" })
-  vim.api.nvim_set_current_win(wins[3])
-  vim.api.nvim_feedkeys("]f", "x", false)
-  eq(names(), { "", "before/b.txt", "after/b.txt" })
-  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[2]), 0, -1, false), { "" }) -- added: nothing before
-  local tabs = vim.fn.tabpagenr("$")
+  local function names() return vim.tbl_map(function(w) return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match("[^/]+/[^/]+$") or vim.bo[vim.api.nvim_win_get_buf(w)].buftype end, wins) end
+  eq(names(), { "before/a.txt", "after/a.txt", "quickfix" })
+  eq({ #vim.fn.getqflist(), #vim.fn.getloclist(wins[2]) }, { 0, 2 }) -- the global list is left alone
+  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[3]), 0, -1, false), { "a.txt +1 −1", "b.txt +1 −0" })
+  eq({ vim.wo[wins[1]].diff, vim.wo[wins[2]].diff }, { true, true })
+  eq({ vim.api.nvim_get_current_win(), vim.fn.line(".") }, { wins[2], 2 }) -- at the first change
+  eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "one", "TWO", "three" })
+  vim.api.nvim_set_current_win(wins[1])
+  vim.api.nvim_feedkeys("]q", "x", false) -- from the before side too
+  eq(names(), { "before/b.txt", "after/b.txt", "quickfix" })
+  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[1]), 0, -1, false), { "" }) -- added: nothing before
+  vim.api.nvim_feedkeys("[q", "x", false)
+  eq(names(), { "before/a.txt", "after/a.txt", "quickfix" })
+  local review, tabs = vim.api.nvim_get_current_tabpage(), vim.fn.tabpagenr("$")
+  vim.api.nvim_set_current_win(wins[2])
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  vim.api.nvim_feedkeys("gf", "x", false)
+  eq({ vim.api.nvim_buf_get_name(0), vim.fn.line(".") }, { vim.fs.joinpath(work, "a.txt"), 2 })
+  vim.cmd.tabclose()
+  vim.api.nvim_set_current_tabpage(review)
   vim.api.nvim_feedkeys("q", "x", false)
   eq(vim.fn.tabpagenr("$"), tabs - 1)
+  eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/after/") end, vim.api.nvim_list_bufs()), 0, "after buffers left")
 end)
 
 test("your edits since the task started are kept; u takes the task back out", function()

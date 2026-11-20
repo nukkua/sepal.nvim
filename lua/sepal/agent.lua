@@ -690,8 +690,9 @@ local function scratch(lines, name, ft)
   return b
 end
 
--- everything the task changed, in a new tab: its files on the left; the one under the cursor
--- before | after, highlighted and in diff mode (]c next change, ]f [f next file). A btw's answer
+-- everything the task changed, in a new tab: the file before | after in diff mode, all its files in
+-- the after window's location list (]q [q or ]l [l next file, ]c next change, gf the file in your
+-- work tree). A btw's answer
 function M.show(e)
   local btw = e.kind == "btw"
   if btw and not e.answer then return notify("no answer yet") end
@@ -703,49 +704,77 @@ function M.show(e)
   local a, z = e.base0 or e.base, e.result
   local st = git.stat(e.root, a, z)
   if st.files == 0 then return notify("no changes") end
+  local first = git.firsts(e.root, a, z)
   vim.cmd.tabnew()
-  local new = vim.api.nvim_get_current_win()
+  local tab, new = vim.api.nvim_get_current_tabpage(), vim.api.nvim_get_current_win()
   vim.cmd("leftabove vsplit")
   local old = vim.api.nvim_get_current_win()
-  vim.cmd("topleft vsplit")
-  local lw = vim.api.nvim_get_current_win()
-  local list = scratch(st.list)
-  vim.api.nvim_win_set_buf(lw, list)
-  vim.api.nvim_win_set_width(lw, math.min(40, math.max(20, unpack(vim.tbl_map(function(l) return vim.fn.strdisplaywidth(l) end, st.list)))))
-  vim.wo[lw].winfixwidth, vim.wo[lw].cursorline, vim.wo[lw].number, vim.wo[lw].wrap = true, true, false, false
-  vim.wo[lw].winbar = ("%%#SepalAdded#+%d %%#SepalRemoved#−%d%%* · %s"):format(st.add, st.del, plural(st.files, "file"))
-  local ns = vim.api.nvim_create_namespace("sepal.review")
-  for i, l in ipairs(st.list) do
-    for c, d in l:gmatch("()%+%d+()") do vim.api.nvim_buf_set_extmark(list, ns, i - 1, c - 1, { end_col = d - 1, hl_group = "SepalAdded" }) end
-    for c, d in l:gmatch("()−%d+()") do vim.api.nvim_buf_set_extmark(list, ns, i - 1, c - 1, { end_col = d - 1, hl_group = "SepalRemoved" }) end
+  local function gf() -- the same line: off a bit if you edited it since, or on the before side
+    local rel, l = vim.b.sepal_path, vim.fn.line(".")
+    local p = vim.fs.joinpath(e.root, rel)
+    if not vim.uv.fs_stat(p) then return notify(rel .. " isn't in your work tree", WARN) end
+    vim.cmd("tab drop " .. vim.fn.fnameescape(p))
+    pcall(vim.api.nvim_win_set_cursor, 0, { l, 0 })
   end
-  local shown, open
-  local function step(d) -- ]f [f: the list's cursor goes along
-    if not vim.api.nvim_win_is_valid(lw) then return end
-    local row = math.max(1, math.min(#st.list, shown + d))
-    vim.api.nvim_win_set_cursor(lw, { row, 0 })
-    open(row)
-  end
-  open = function(i)
-    if i == shown or not (vim.api.nvim_win_is_valid(old) and vim.api.nvim_win_is_valid(new)) then return end
-    shown = i
-    local path, bin = st.paths[i], st.list[i]:match(" binary$")
-    for _, side in ipairs({ { old, a, "before" }, { new, z, "after" } }) do
-      local w, rev = side[1], side[2]
-      local text = bin and "binary file" or git.file(e.root, rev, path):gsub("\n$", "")
-      local b = scratch(vim.split(text, "\n"), ("sepal://%s/%s/%s"):format(e.id, side[3], path),
-        not bin and vim.filetype.match({ filename = path }) or nil)
-      vim.keymap.set("n", "]f", function() step(1) end, { buffer = b, desc = "Next file" })
-      vim.keymap.set("n", "[f", function() step(-1) end, { buffer = b, desc = "Previous file" })
-      vim.api.nvim_win_call(w, function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(w, b); vim.cmd("diffthis") end)
-      vim.wo[w].winbar = side[3] .. ": " .. path
+  local function keys(b) -- the list is the after window's: from the before side too
+    vim.keymap.set("n", "gf", gf, { buffer = b, desc = "The file in your work tree" })
+    for k, d in pairs({ ["]q"] = "lnext", ["[q"] = "lprevious" }) do
+      vim.keymap.set("n", k, function() vim.api.nvim_win_call(new, function() pcall(vim.cmd, vim.v.count1 .. d) end) end, { buffer = b })
     end
-    vim.api.nvim_win_call(new, function() pcall(vim.cmd, "normal! gg]c") end) -- to the first change
   end
-  vim.api.nvim_create_autocmd("CursorMoved", { buffer = list, callback = function() open(vim.fn.line(".")) end })
-  vim.keymap.set("n", "<CR>", function() open(vim.fn.line(".")); vim.api.nvim_set_current_win(new) end, { buffer = list, desc = "Into the file's diff" })
-  open(1)
+  local function content(rev, i)
+    if st.list[i]:match(" binary$") then return { "binary file" } end
+    return vim.split((git.file(e.root, rev, st.paths[i]):gsub("\n$", "")), "\n")
+  end
+  -- the after side of each file, for the quickfix list to point at. Filled now: filling it later
+  -- would move the list's line numbers. shortcut: a git process per file, batch them if it's slow
+  local after, busy = {}, false
+  for i, path in ipairs(st.paths) do
+    local b = scratch(content(z, i), ("sepal://%s/after/%s"):format(e.id, path))
+    vim.bo[b].bufhidden, vim.b[b].sepal_path = "hide", path
+    keys(b)
+    after[i] = b
+    vim.api.nvim_create_autocmd("BufWinEnter", { buffer = b, callback = function()
+      if busy or not (vim.api.nvim_win_is_valid(old) and vim.api.nvim_win_is_valid(new)) then return end
+      busy = true -- setting the windows' buffers below fires this again
+      if vim.bo[b].filetype == "" then vim.bo[b].filetype = vim.filetype.match({ filename = path }) or "" end -- once shown: it may start a parser
+      local w = vim.api.nvim_get_current_win()
+      local before = scratch(content(a, i), ("sepal://%s/before/%s"):format(e.id, path), vim.bo[b].filetype)
+      vim.b[before].sepal_path = path
+      keys(before)
+      -- after on the right, before on the left, whichever window the quickfix list opened it in
+      for _, s in ipairs({ { old, before, "before" }, { new, b, "after" } }) do
+        vim.api.nvim_win_call(s[1], function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(s[1], s[2]); vim.cmd("diffthis") end)
+        vim.wo[s[1]].winbar = s[3] .. ": " .. path
+      end
+      if w == old then vim.api.nvim_set_current_win(new) end
+      busy = false
+    end })
+  end
+  vim.api.nvim_create_autocmd("TabClosed", { callback = function()
+    if vim.api.nvim_tabpage_is_valid(tab) then return end
+    for _, b in ipairs(after) do pcall(vim.api.nvim_buf_delete, b, { force = true }) end
+    return true
+  end })
+  local items = {}
+  for i, b in ipairs(after) do items[i] = { bufnr = b, lnum = first[st.paths[i]] or 1 } end
+  vim.fn.setloclist(new, {}, " ", { title = ("%s · +%d −%d · %s"):format(e.title or e.id, st.add, st.del, plural(st.files, "file")),
+    items = items, quickfixtextfunc = function(info)
+      local lines = {}
+      for i = info.start_idx, info.end_idx do lines[#lines + 1] = st.list[i] end
+      return lines
+    end })
+  vim.api.nvim_win_call(new, function() vim.cmd("botright lopen " .. math.min(st.files, 10)) end)
+  local qb, ns = vim.fn.getloclist(new, { qfbufnr = 1 }).qfbufnr, vim.api.nvim_create_namespace("sepal.review")
+  vim.api.nvim_buf_clear_namespace(qb, ns, 0, -1)
+  for i, l in ipairs(st.list) do
+    for c, d in l:gmatch("()%+%d+()") do vim.api.nvim_buf_set_extmark(qb, ns, i - 1, c - 1, { end_col = d - 1, hl_group = "SepalAdded" }) end
+    for c, d in l:gmatch("()−%d+()") do vim.api.nvim_buf_set_extmark(qb, ns, i - 1, c - 1, { end_col = d - 1, hl_group = "SepalRemoved" }) end
+  end
+  vim.api.nvim_set_current_win(new)
+  vim.cmd.lfirst()
 end
+
 -- b in a full-screen float, the size its terminal started at whatever tabs, splits or statusline there
 -- are: no resize, no redraw. Leaving it (<c-w>w…) hides it. w: the loading float to show it in
 show = function(b, w)

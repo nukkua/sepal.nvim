@@ -407,11 +407,14 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   assert(lines[2]:match("1 landed"), lines[2])
   assert(lines[5]:match("^ ▎ ❀ carded%s+now$"), lines[5])
-  eq(lines[6], " ▎ ▐▛███▜▌ opus 5.5") -- the model and its provider's logo, between the name and the status
-  eq(lines[7], " ▎ LANDED  in your work tree")
-  eq(lines[8], " ▎ 1 file +1 −3")
-  eq(lines[9], " ▎ Did it.")
-  eq(lines[10], " ▎ · 2 decisions to read")
+  -- the model and its provider's logo (the Claude Code mascot), between the name and the status
+  eq(lines[6], " ▎  ▐▛███▜▌ ")
+  eq(lines[7], " ▎ ▝▜█████▛▘ opus 5.5")
+  eq(lines[8], " ▎   ▘▘ ▝▝  ")
+  eq(lines[9], " ▎ LANDED  in your work tree")
+  eq(lines[10], " ▎ 1 file +1 −3")
+  eq(lines[11], " ▎ Did it.")
+  eq(lines[12], " ▎ · 2 decisions to read")
   local e = newest()
   e.status, e.activity, e.summary = "running", "Edit a.txt", nil
   inbox.changed(e)

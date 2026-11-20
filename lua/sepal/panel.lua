@@ -33,12 +33,13 @@ local HINT = {
 }
 -- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
 local PROVIDERS = {
-  { "claude", "▐▛███▜▌", { "claude", "opus", "sonnet", "haiku", "fable" } },
+  { "claude", " ▐▛███▜▌\n▝▜█████▛▘\n  ▘▘ ▝▝", { "claude", "opus", "sonnet", "haiku", "fable" } },
   { "openai", "֎", { "gpt", "chatgpt", "codex", "openai", "^o%d" } },
   { "gemini", "✦", { "gemini" } },
   { "opencode", "⌬", { "opencode" } },
 }
--- the logo and its color: claude's is the Claude Code mascot's head, as its banner draws it, in its orange
+-- the logo and its color: claude's is the Claude Code mascot, as its banner draws it, in its orange.
+-- A logo can take several lines ("\n"): the model's name goes next to the middle one
 local function logo(m)
   m = m:lower()
   for _, p in ipairs(PROVIDERS) do
@@ -87,7 +88,12 @@ local function card(e, w)
   local function row(...) out[#out + 1] = { rail, ... } end
   if e.model then
     local l, hl = logo(e.model)
-    row({ l, hl }, { " " .. model(e.model), "SepalDim" })
+    local lines = vim.split(l, "\n")
+    local w = math.max(unpack(vim.tbl_map(dw, lines)))
+    for i, line in ipairs(lines) do
+      local pad = { line .. string.rep(" ", w - dw(line)), hl }
+      if i == math.ceil(#lines / 2) then row(pad, { " " .. model(e.model), "SepalDim" }) else row(pad) end
+    end
   end -- who works on it, under its name
   -- status · try · check
   local meta = { { st[2]:upper(), st[3] } }

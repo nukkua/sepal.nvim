@@ -396,6 +396,16 @@ test("every task line in the inbox is the same width", function()
   vim.cmd("close")
 end)
 
+test(":Sepal panel with no tasks shows an empty state that says how to start", function()
+  clean(); reset()
+  vim.cmd("Sepal panel")
+  local lines = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
+  eq(vim.trim(lines[8]), "no tasks yet")
+  eq(vim.trim(lines[9]), "start one with :Sepal task")
+  assert(lines[8]:match("^%s%s%s+no"), lines[8]) -- centered
+  vim.cmd("Sepal panel")
+end)
+
 test(":Sepal panel shows each task as a card at the right, and redraws with the inbox", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
@@ -732,6 +742,15 @@ test("task <c-c><c-k> discards it", function()
   sepal.task()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   eq(task_buf(), nil)
+end)
+
+test("fidget's window hides while the panel is open: the panel shows the same", function()
+  local got = {}
+  package.loaded["fidget.notification"] = { suppress = function(v) got[#got + 1] = v end }
+  vim.cmd("Sepal panel")
+  vim.cmd("Sepal panel")
+  package.loaded["fidget.notification"] = nil
+  eq(got, { true, false })
 end)
 
 test("notify: info goes to fidget, warnings to vim.notify", function()

@@ -144,10 +144,16 @@ function M.render()
       counts[#counts + 1] = { k .. " " .. c[1], c[3] }
     end
   end
-  out[#out + 1] = #counts > 1 and counts or { counts[1], { "nothing yet: :Sepal task", "SepalDim" } }
+  out[#out + 1] = counts
   out[#out + 1] = { { MASCOT[3], "SepalClaude" }, { "<CR> watch · q close", "SepalDim" } }
   out[#out + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
   rows = {}
+  if #list == 0 then -- the empty state: centered under the divider, saying how to start
+    out[#out + 1] = {}
+    for _, l in ipairs({ { "◇", "SepalDim" }, {}, { "no tasks yet", "SepalPanelTitle" }, { "start one with :Sepal task", "SepalDim" } }) do
+      out[#out + 1] = l[1] and { { string.rep(" ", math.max(0, math.floor((width - dw(l[1])) / 2))) .. l[1], l[2] } } or {}
+    end
+  end
   for _, e in ipairs(list) do
     out[#out + 1] = {}
     for _, r in ipairs(card(e, width - 1)) do
@@ -189,7 +195,8 @@ function M.toggle(root)
   local w = win()
   if w then
     if not pcall(vim.api.nvim_win_close, w, false) then require("sepal").close() end -- the last window
-    return inbox.render() -- stops the spinner
+    inbox.render() -- stops the spinner
+    return require("sepal").fidget()
   end
   local b = buf()
   if not b then
@@ -213,6 +220,7 @@ function M.toggle(root)
   vim.wo[w].number, vim.wo[w].relativenumber, vim.wo[w].signcolumn, vim.wo[w].foldcolumn = false, false, "no", "0"
   vim.wo[w].list, vim.wo[w].spell, vim.wo[w].fillchars = false, false, "eob: "
   inbox.render() -- starts the spinner
+  require("sepal").fidget()
 end
 
 M._t = { rows = function() return rows end }

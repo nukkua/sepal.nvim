@@ -343,6 +343,19 @@ test("the inbox lists the tasks and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
+test("a task saved by an older inbox (as spec) can still be dropped", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  run({ "Goal: old" })
+  local e = newest()
+  e.spec, e.task = e.task, nil
+  inbox.save(work)
+  inbox._t.reset()
+  eq(newest().task, e.spec)
+  sepal.clean()
+  eq(#inbox.list(work), 0)
+end)
+
 test("every task line in the inbox is the same width", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]

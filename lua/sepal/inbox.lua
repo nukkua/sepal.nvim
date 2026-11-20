@@ -21,6 +21,7 @@ function M.list(root)
   for _, e in ipairs(list) do
     -- nvim quit while it ran: the agent was stopped with it
     if e.status == "running" or e.status == "checking" or e.status == "queued" then e.status = "interrupted" end
+    e.task, e.spec = e.task or e.spec or "", nil -- older inboxes saved the task as spec
   end
   cache[root] = list
   return list

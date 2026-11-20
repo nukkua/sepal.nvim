@@ -656,12 +656,24 @@ function M.sweep_pastes()
   end
 end
 
--- forget e: its commits, its pasted images and its line in the inbox
+-- Claude Code's record of a chat: <config>/projects/<cwd>/<session>.jsonl, and a <session>/ dir beside it
+local function rm_session(id)
+  if not (id and id:match("^[%w-]+$")) then return end -- it goes in a glob
+  local dir = vim.fs.joinpath(vim.env.CLAUDE_CONFIG_DIR or vim.fs.joinpath(vim.uv.os_homedir(), ".claude"), "projects")
+  for _, p in ipairs(vim.fn.glob(dir .. "/*/" .. id .. ".jsonl", true, true)) do
+    os.remove(p)
+    vim.fn.delete(vim.fs.joinpath(vim.fs.dirname(p), id), "rf")
+    vim.uv.fs_rmdir(vim.fs.dirname(p)) -- a worktree's project dir, now empty; fails (kept) if not
+  end
+end
+
+-- forget e: its commits, its chat, its pasted images and its line in the inbox
 function M.drop(e)
   if M.running(e) then return notify("it's running: x stops it first") end
   endchat(e)
   if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
   git.delete_refs(e.root, "refs/sepal/" .. e.id)
+  rm_session(e.session)
   for p in e.task:gmatch("@(" .. vim.pesc(M.PASTES) .. "/paste%-%d+%.png)") do os.remove(p) end
   inbox.remove(e)
 end

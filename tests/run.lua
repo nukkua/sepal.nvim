@@ -14,6 +14,7 @@ vim.fn.chdir(work)
 local function sh(cmd) return vim.system({ "sh", "-c", cmd }, { cwd = work, text = true }):wait() end
 sh("git init -q && printf 'one\\ntwo\\nthree\\n' > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm init")
 vim.env.SEPAL_T = T
+vim.env.CLAUDE_CONFIG_DIR = vim.fs.joinpath(T, "claude") -- drop deletes chats from there
 
 -- a fake Claude Code: logs where it runs, its arguments (without --settings and the prompt) and the
 -- prompt (its last argument), reports through the hooks ($SEPAL_EVENTS), runs $SEPAL_EDIT ($SEPAL_FIX
@@ -871,8 +872,15 @@ test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", fu
   vim.uv.fs_utime(img, os.time() - 2 * 86400, os.time() - 2 * 86400)
   agent.sweep_pastes()
   eq({ vim.uv.fs_stat(old) == nil, vim.uv.fs_stat(img) ~= nil }, { true, true })
+  -- and its chat in Claude Code's folder, with the project dir it leaves empty; another chat stays
+  local proj = vim.fs.joinpath(vim.env.CLAUDE_CONFIG_DIR, "projects", "-wt")
+  vim.fn.mkdir(vim.fs.joinpath(proj, newest().session, "subagents"), "p")
+  vim.fn.writefile({}, vim.fs.joinpath(proj, newest().session .. ".jsonl"))
+  local other = vim.fs.joinpath(vim.env.CLAUDE_CONFIG_DIR, "projects", "-repo", "other.jsonl")
+  vim.fn.mkdir(vim.fs.dirname(other), "p"); vim.fn.writefile({}, other)
   agent.drop(newest())
   eq(vim.uv.fs_stat(img), nil)
+  eq({ vim.uv.fs_stat(proj) == nil, vim.uv.fs_stat(other) ~= nil }, { true, true })
 end)
 
 test("task opens the template above, <c-c><c-f> adds files with fff", function()

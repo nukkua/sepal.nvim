@@ -282,7 +282,8 @@ agent = function(e, prompt, wt)
   local transcript, toff = nil, 0
   -- an Esc in Claude Code ends the turn without a Stop hook: its transcript says so
   local function interrupted()
-    local f = transcript and io.open(transcript)
+    local st = transcript and vim.uv.fs_stat(transcript) -- polled 10 times a second: open it only when it grew
+    local f = st and st.size > toff and io.open(transcript)
     if not f then return end
     f:seek("set", toff)
     local s = f:read("a")
@@ -330,7 +331,8 @@ agent = function(e, prompt, wt)
   end
   local off = 0
   local function poll()
-    local f = io.open(events)
+    local st = vim.uv.fs_stat(events)
+    local f = st and st.size > off and io.open(events)
     if not f then return end
     f:seek("set", off)
     local s = f:read("a")

@@ -93,8 +93,8 @@ local function ago(t)
   return "now"
 end
 local function fit(s, w)
-  if vim.fn.strdisplaywidth(s) > w then s = vim.fn.strcharpart(s, 0, w - 1) .. "…" end
-  return s .. string.rep(" ", w - vim.fn.strdisplaywidth(s))
+  if vim.api.nvim_strwidth(s) > w then s = vim.fn.strcharpart(s, 0, w - 1) .. "…" end
+  return s .. string.rep(" ", w - vim.api.nvim_strwidth(s))
 end
 
 M.ago, M.fit = ago, fit
@@ -127,6 +127,7 @@ end
 
 local opened = {} -- task id -> true when you opened its fold: tasks start folded
 local heads = {} -- row -> true for each task's first line, so j/k can skip its details
+local drawn -- what the inbox shows, its spinners blanked: a redraw that only moves them rewrites just those
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
 
@@ -147,20 +148,13 @@ render = function()
   end
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not w then return end
-  -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
-  local old = vim.b[b].sepal_rows or {}
-  vim.api.nvim_win_call(w, function()
-    for row in pairs(heads) do
-      if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 or nil end
-    end
-  end)
-  local lines, rows, marks, spans = { HELP, "" }, {}, {}, {}
+  local lines, rows, marks, spans, spins = { HELP, "" }, {}, {}, {}, {}
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   -- every column padded to its widest value in the list, so every line is the same width
   local cols, wid = {}, { 0, 0, 0, 0 }
   for i, e in ipairs(list) do
     cols[i] = facts(e)
-    for c = 1, 4 do wid[c] = math.max(wid[c], vim.fn.strdisplaywidth(cols[i][c])) end
+    for c = 1, 4 do wid[c] = math.max(wid[c], vim.api.nvim_strwidth(cols[i][c])) end
   end
   for i, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
@@ -170,6 +164,7 @@ render = function()
     local f = wid[1] > 0 and ("%s %s %s"):format(fit(c[1], wid[1]), fit(c[2], wid[2]), fit(c[3], wid[3])) or ""
     f = f .. (wid[1] > 0 and wid[4] > 0 and "  " or "") .. fit(c[4], wid[4])
     lines[#lines + 1] = pre .. f
+    if M.LIVE[e.status] then spins[#spins + 1] = #lines end
     rows[#lines], marks[#lines] = e.id, { st[3], #head - 1 }
     -- the age dimmed, the diff counts colored like a diff
     spans[#spans + 1] = { #lines, #head, #head + 3, "SepalDim" }
@@ -177,7 +172,24 @@ render = function()
     for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalRemoved" } end
     for _, d in ipairs(details(e)) do lines[#lines + 1] = "    " .. d; rows[#lines] = e.id end
   end
+  local key = { w }
+  for row, l in ipairs(lines) do key[#key + 1] = tostring(rows[row]) .. "\0" .. l end
+  for _, row in ipairs(spins) do key[row + 1] = rows[row] .. "\0\1" .. lines[row]:sub(#SPIN[frame] + 1) end
+  key = table.concat(key, "\n")
   vim.bo[b].modifiable = true
+  if key == drawn then -- a spinner tick: every frame is 3 bytes, so the other marks and folds stay put
+    for _, row in ipairs(spins) do vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #SPIN[frame], { SPIN[frame] }) end
+    vim.bo[b].modifiable, vim.bo[b].modified = false, false
+    return
+  end
+  drawn = key
+  -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
+  local old = vim.b[b].sepal_rows or {}
+  vim.api.nvim_win_call(w, function()
+    for row in pairs(heads) do
+      if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 or nil end
+    end
+  end)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
@@ -262,6 +274,6 @@ function M.open(root)
   vim.fn.winrestview({ topline = 1 }) -- keep the key help in view
 end
 
-M._t = { reset = function() cache = {} end }
+M._t = { reset = function() cache, drawn = {}, nil end }
 
 return M

@@ -58,6 +58,7 @@ end
 local MASCOT = { "  ▐▛███▜▌  ", " ▝▜█████▛▘ ", "   ▘▘ ▝▝   " }
 
 local panel_buf
+local drawn -- what it shows, spinners blanked: see render
 local rows = {} -- row -> task id
 local function buf() return panel_buf and vim.api.nvim_buf_is_valid(panel_buf) and panel_buf or nil end
 local function win()
@@ -66,7 +67,7 @@ local function win()
   return w ~= -1 and w or nil
 end
 
-local function dw(s) return vim.fn.strdisplaywidth(s) end
+local function dw(s) return vim.api.nvim_strwidth(s) end
 local function wrap(s, w)
   local out, line = {}, ""
   for word in s:gmatch("%S+") do
@@ -80,11 +81,12 @@ end
 -- a task as rows of { text, hl } chunks, behind a rail in its status's color
 local function card(e, w)
   local st = inbox.STATUS[e.status] or { "?", e.status, "Normal" }
-  local icon = inbox.LIVE[e.status] and inbox.spin() or require("sepal").icon(e.status, st[1])
+  local live = inbox.LIVE[e.status]
+  local icon = live and inbox.spin() or require("sepal").icon(e.status, st[1])
   local rail, age = { "▎ ", st[3] }, inbox.ago(e.time)
   local inner = w - 2
   local out = {
-    { rail, { icon .. " ", st[3] }, { inbox.fit(e.title or "", inner - dw(icon) - 2 - dw(age)), "SepalPanelTitle" },
+    { rail, { icon .. " ", st[3], spin = live }, { inbox.fit(e.title or "", inner - dw(icon) - 2 - dw(age)), "SepalPanelTitle" },
       { " " .. age, "SepalDim" } },
   }
   local function row(...) out[#out + 1] = { rail, ... } end
@@ -154,22 +156,32 @@ function M.render()
       rows[#out] = e.id
     end
   end
-  local lines, marks = {}, {}
+  local lines, marks, spins, key = {}, {}, {}, { w, root }
   for i, r in ipairs(out) do
-    local text = ""
+    local text, k = "", tostring(rows[i])
     for _, c in ipairs(r) do
       marks[#marks + 1] = { i - 1, #text, #text + #c[1], c[2] }
+      if c.spin then spins[#spins + 1] = { i - 1, #text } end
+      k = k .. "\0" .. (c.spin and "\1" .. c[1]:sub(#inbox.spin() + 1) or c[1])
       text = text .. c[1]
     end
-    lines[i] = text
+    lines[i], key[#key + 1] = text, k
   end
+  key = table.concat(key, "\n")
   local b = buf()
   vim.bo[b].modifiable = true
+  if key == drawn then -- only the spinners moved (each frame is 3 bytes): rewrite just them
+    local f = inbox.spin()
+    for _, s in ipairs(spins) do vim.api.nvim_buf_set_text(b, s[1], s[2], s[1], s[2] + #f, { f }) end
+    vim.bo[b].modifiable, vim.bo[b].modified = false, false
+    return #spins > 0
+  end
+  drawn = key
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
   for _, m in ipairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, m[1], m[2], { end_col = m[3], hl_group = m[4] }) end
-  return vim.iter(list):any(function(e) return inbox.LIVE[e.status] end)
+  return #spins > 0
 end
 
 -- :Sepal panel: shows the board of root's tasks at the right, or hides it

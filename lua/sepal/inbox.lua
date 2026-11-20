@@ -31,7 +31,7 @@ local function save(root)
   vim.fn.mkdir(cfg().worktrees, "p")
   local keep = vim.tbl_map(function(e) -- a shallow copy is enough: it's only encoded
     local c = {}
-    for k, v in pairs(e) do if k ~= "activity" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
+    for k, v in pairs(e) do if k ~= "activity" and k ~= "subagents" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
     return c
   end, M.list(root))
   local f = io.open(file(root), "w")
@@ -107,6 +107,7 @@ local function facts(e)
     f[#f + 1] = e.check .. mark
   end
   if e.status == "running" and e.activity then f[#f + 1] = e.activity end
+  if e.status == "running" and e.subagents and #e.subagents > 0 then f[#f + 1] = "subagents: " .. #e.subagents end
   return { s and ("%d file%s"):format(s.files, s.files == 1 and "" or "s") or "", s and "+" .. s.add or "",
     s and "−" .. s.del or "", table.concat(f, "  ") }
 end
@@ -116,6 +117,9 @@ local function details(e)
   local d = {}
   if e.why then d[#d + 1] = e.why end
   if e.error then d[#d + 1] = e.error end
+  if e.status == "running" then
+    for _, a in ipairs(e.subagents or {}) do d[#d + 1] = "↳ " .. a.name end
+  end
   if e.status == "failed" and e.check_out then
     for _, l in ipairs(vim.list_slice(vim.split(vim.trim(e.check_out), "\n"), 1, 3)) do d[#d + 1] = "│ " .. l end
   end

@@ -39,6 +39,12 @@ t="$SEPAL_EVENTS.jsonl"
 : > "$t"
 ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"model\":\"claude-opus-5-5[1m]\",\"transcript_path\":\"$t\"}"
 ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/a.txt\"}}"
+if [ -n "$SEPAL_SUB" ]; then
+  ev '{"hook_event_name":"SubagentStart","session_id":"s1","agent_id":"a1","agent_type":"Explore"}'
+  ev '{"hook_event_name":"SubagentStart","session_id":"s1","agent_id":"a2","agent_type":"Plan"}'
+  ev '{"hook_event_name":"SubagentStop","session_id":"s1","agent_id":"a1","agent_type":"Explore"}'
+  ev '{"hook_event_name":"SubagentStart","session_id":"s1","agent_id":"a3","agent_type":"general-purpose"}'
+fi
 if [ -n "$SEPAL_SLEEP" ]; then sleep "$SEPAL_SLEEP"; fi
 if [ -n "$resumed" ] && [ -n "$SEPAL_FIX" ]; then sh -c "$SEPAL_FIX"; elif [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
 if [ "$SEPAL_FAIL" = quit ]; then exit 1; fi
@@ -78,7 +84,7 @@ local function args() return vim.split(vim.trim(read(T .. "/args") or ""), "\n")
 local function prompts() return read(T .. "/prompts") or "" end
 local function reset()
   for _, f in ipairs({ "args", "prompts", "cwd" }) do os.remove(T .. "/" .. f) end
-  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT" }) do vim.env[k] = nil end
+  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT", "SEPAL_SUB" }) do vim.env[k] = nil end
 end
 local function idle()
   assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the task never finished")
@@ -511,6 +517,27 @@ test("a task's chat is saved as soon as it starts: o and r still work after a qu
     idle()
   end)
   inbox._t.reset()
+end)
+
+test("the panel and the inbox show the running subagents: their count, and their names unfolded", function()
+  clean(); reset()
+  vim.env.SEPAL_SLEEP, vim.env.SEPAL_SUB = "1", "1"
+  notified(function()
+    send({ "Goal: with helpers" })
+    assert(vim.wait(2000, function() return #(newest().subagents or {}) == 2 end, 20), "no subagents seen")
+    eq(vim.tbl_map(function(a) return a.name end, newest().subagents), { "Plan", "general-purpose" })
+    vim.cmd("Sepal panel")
+    local pl = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
+    assert(vim.tbl_contains(pl, " ▎ subagents: 2"), vim.inspect(pl))
+    vim.cmd("Sepal panel")
+    vim.cmd("Sepal inbox")
+    local il = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(il[3]:match("subagents: 2"), il[3])
+    assert(vim.tbl_contains(il, "    ↳ Plan") and vim.tbl_contains(il, "    ↳ general-purpose"), vim.inspect(il))
+    vim.cmd("close")
+    idle()
+  end)
+  eq(newest().subagents, nil) -- gone when the run is over
 end)
 
 test("q in the agent's last window shows another buffer instead of E444, and the agent keeps working", function()

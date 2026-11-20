@@ -136,7 +136,7 @@ local function finish(e, wt, status, extra)
   local j = jobs[e.id]
   jobs[e.id] = nil
   if wt then git.remove_worktree(e.root, wt) end
-  e.status, e.activity = status, nil
+  e.status, e.activity, e.subagents = status, nil, nil
   for k, v in pairs(extra or {}) do e[k] = v end
   inbox.changed(e)
   if j and j.done then j.done(true) end
@@ -188,7 +188,7 @@ end
 -- Claude Code reports back through hooks: each one appends its input (a JSON line) to $SEPAL_EVENTS
 local HOOK = { { hooks = { { type = "command", command = [[{ tr -d '\n'; echo; } >> "$SEPAL_EVENTS"]] } } } }
 local SETTINGS = vim.json.encode({ hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
-  Notification = HOOK, Stop = HOOK } })
+  Notification = HOOK, Stop = HOOK, SubagentStart = HOOK, SubagentStop = HOOK } })
 
 -- the agent's last reply: from the Stop hook, else the end of its transcript
 local function reply_of(ev)
@@ -325,6 +325,15 @@ agent = function(e, prompt, wt)
       e.activity = "needs you"
       inbox.render()
       notify("▲ " .. e.title .. ": " .. tostring(ev.message or "it needs you") .. " · :Sepal open", WARN)
+    elseif name == "SubagentStart" then -- running subagents, in the order they started
+      e.subagents = e.subagents or {}
+      table.insert(e.subagents, { id = ev.agent_id, name = tostring(ev.agent_type or "agent") })
+      inbox.render()
+    elseif name == "SubagentStop" then
+      for i, a in ipairs(e.subagents or {}) do
+        if a.id == ev.agent_id then table.remove(e.subagents, i); break end
+      end
+      inbox.render()
     elseif name == "Stop" then
       stopped(ev)
     end

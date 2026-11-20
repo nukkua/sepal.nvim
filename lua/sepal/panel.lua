@@ -116,6 +116,7 @@ local function card(e, w)
     end
   end
   if e.status == "running" and e.activity then para(e.activity, "SepalInfo", "→ ", 2) end
+  if e.status == "running" and e.subagents and #e.subagents > 0 then row({ "subagents: " .. #e.subagents, "SepalDim" }) end
   if e.why then para(e.why, "SepalWarn", "", 3) end
   if e.error then para(e.error, "SepalError", "", 3) end
   if e.summary then para(e.summary, "Normal", "", 3)

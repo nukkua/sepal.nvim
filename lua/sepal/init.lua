@@ -29,7 +29,7 @@ function M.config() return C end
 -- :hi) that sets a Sepal* group wins over the links and over sakura; the highlights option wins over all
 local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = "DiagnosticOk",
   SepalWarn = "DiagnosticWarn", SepalError = "DiagnosticError", SepalDim = "Comment", SepalAdded = "Added",
-  SepalRemoved = "Removed", SepalInboxFolded = false }
+  SepalRemoved = "Removed", SepalInboxFolded = false, SepalPanelTitle = "@markup.strong" }
 -- sakura: { on a dark background, on a light one }. Warnings and errors keep your theme's: they must read as such
 local SAKURA = { SepalTitle = { "#ffb6c1", "#c2185b", bold = true }, SepalAccent = { "#ffb6c1", "#d81b60" },
   SepalInfo = { "#c49aa6", "#ad1457" }, SepalOk = { "#ffb6c1", "#c2477a" } }
@@ -156,6 +156,11 @@ end
 function M.inbox()
   local _, root = entries()
   if root then require("sepal.inbox").open(root) end
+end
+-- :Sepal panel: a board at the right that shows each task and what its agent is doing (a toggle)
+function M.panel()
+  local _, root = entries()
+  if root then require("sepal.panel").toggle(root) end
 end
 -- :Sepal land / undo / open / stop: the newest task it applies to (the inbox acts on any)
 function M.land()

@@ -123,7 +123,7 @@ require("sepal").setup({
 
 Everything sepal draws uses its own groups, linked to your colorscheme's: `SepalTitle` (Title),
 `SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalOk` (DiagnosticOk), `SepalWarn`,
-`SepalError`, `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`. With
+`SepalError`, `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong). With
 `sakura = true` (the default) the title, accent, info and ok groups are cherry-blossom pinks, a
 lighter set on a dark background and a deeper one on a light background. Warnings and errors
 always use your theme's colors. A colorscheme that defines a `Sepal*` group wins over both,
@@ -135,6 +135,7 @@ and the `highlights` option wins over everything.
 | -------------------- | ------------------------------------------------------------------------ |
 | `:[range]Sepal task` | write a task (with a range: those lines go in as a `Selection:`)         |
 | `:Sepal inbox`       | every task of this repo and where it stands                              |
+| `:Sepal panel`       | a board at the right: each task, what its agent is doing, a summary (toggle) |
 | `:Sepal land`        | land the newest task that's waiting (with conflict markers if it overlaps your edits) |
 | `:Sepal undo`        | take the newest landed task back out                                     |
 | `:Sepal open`        | watch the newest task in Claude Code (its chat once it's done)           |

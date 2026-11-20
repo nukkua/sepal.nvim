@@ -396,6 +396,32 @@ test("every task line in the inbox is the same width", function()
   vim.cmd("close")
 end)
 
+test(":Sepal panel shows each task as a card at the right, and redraws with the inbox", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  run({ "Goal: carded" })
+  local cur = vim.api.nvim_get_current_win()
+  vim.cmd("Sepal panel")
+  eq(vim.api.nvim_get_current_win(), cur) -- it's for looking at: the cursor stays
+  local b = vim.fn.bufnr("sepal://panel")
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  assert(lines[2]:match("1 landed"), lines[2])
+  assert(lines[5]:match("^ ▎ ❀ carded%s+now$"), lines[5])
+  eq(lines[6], " ▎ landed")
+  eq(lines[7], " ▎ 1 file +1 −3")
+  eq(lines[8], " ▎ Did it.")
+  eq(lines[9], " ▎ · 2 decisions to read")
+  local e = newest()
+  e.status, e.activity, e.summary = "running", "Edit a.txt", nil
+  inbox.changed(e)
+  lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  assert(lines[2]:match("1 running"), lines[2])
+  assert(vim.tbl_contains(lines, " ▎ → Edit a.txt"), vim.inspect(lines))
+  e.status = "landed"; inbox.changed(e)
+  vim.cmd("Sepal panel") -- a toggle
+  eq(vim.fn.bufwinid(b), -1)
+end)
+
 test("j/k in the inbox go task to task, past the lines under each", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]

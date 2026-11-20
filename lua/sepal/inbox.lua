@@ -94,6 +94,8 @@ local function fit(s, w)
   return s .. string.rep(" ", w - vim.fn.strdisplaywidth(s))
 end
 
+M.ago, M.fit = ago, fit
+
 -- the facts after the title as columns: { "3 files", "+42", "−8", "make test ✓" }
 local function facts(e)
   local s, f = e.stat and e.stat.files > 0 and e.stat, {}
@@ -126,6 +128,8 @@ local inbox_buf -- kept, not searched for: render runs on every tool call of eve
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
 
 render = function()
+  local panel = package.loaded["sepal.panel"] -- the side panel shows the same tasks: it redraws with the inbox
+  if panel then panel.render() end
   local b = buf()
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not b or #vim.fn.win_findbuf(b) == 0 then return end

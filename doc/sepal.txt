@@ -95,7 +95,8 @@ files, fidget.nvim for a spinner.
              SepalAccent (Special), SepalInfo (DiagnosticInfo), SepalOk
              (DiagnosticOk), SepalWarn (DiagnosticWarn), SepalError
              (DiagnosticError), SepalDim (Comment), SepalAdded (Added),
-             SepalRemoved (Removed), SepalInboxFolded (empty). A colorscheme
+             SepalRemoved (Removed), SepalInboxFolded (empty), SepalPanelTitle
+             (@markup.strong). A colorscheme
              that defines one wins over the links and sakura.
 `icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
@@ -138,6 +139,14 @@ files, fidget.nvim for a spinner.
                     D     drop it
                     C     drop the tasks that are over (:Sepal clean)
                     q     close the inbox
+                                                              *:Sepal-panel*
+:Sepal panel      A board at the right that only shows: each task as a card
+                  with its status, what the agent is doing right now (a
+                  spinner while it runs), its diff, and a short summary of
+                  what it said. It redraws with the inbox and keeps your
+                  cursor where it is. Again: hides it. In it:
+                    <CR>  watch the task (running) or open its chat (done)
+                    q     close the panel
 :Sepal land       Land the newest task that's waiting.
                                                                 *:Sepal-undo*
 :Sepal undo       Take the newest landed task back out (a merge too: your
@@ -153,7 +162,7 @@ files, fidget.nvim for a spinner.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted.
 
-Lua: `require("sepal").task()`, `.inbox()`, `.land()`, `.undo()`, `.open()`,
+Lua: `require("sepal").task()`, `.inbox()`, `.land()`, `.undo()`, `.open()`, `.panel()`,
 `.stop()`, `.clean()`.
 
 ==============================================================================

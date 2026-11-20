@@ -678,20 +678,74 @@ function M.drop(e)
   inbox.remove(e)
 end
 
--- everything the task changed, as a diff in a new tab; a btw's answer
+-- a read-only scratch buffer with lines; q closes the tab it's in
+local function scratch(lines, name, ft)
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.bo[b].bufhidden = "wipe"
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+  vim.bo[b].modifiable = false
+  if name then pcall(vim.api.nvim_buf_set_name, b, name) end -- taken: the same task in another tab
+  if ft then vim.bo[b].filetype = ft end
+  vim.keymap.set("n", "q", function() if not pcall(vim.cmd.tabclose) then sepal().close() end end, { buffer = b, desc = "Close it" })
+  return b
+end
+
+-- everything the task changed, in a new tab: its files on the left; the one under the cursor
+-- before | after, highlighted and in diff mode (]c next change, ]f [f next file). A btw's answer
 function M.show(e)
   local btw = e.kind == "btw"
   if btw and not e.answer then return notify("no answer yet") end
   if not btw and not e.result then return notify("no changes yet") end
-  local b = vim.api.nvim_create_buf(false, true)
-  vim.bo[b].bufhidden = "wipe"
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, vim.split(btw and e.answer or git.diff(e.root, e.base0 or e.base, e.result), "\n"))
-  vim.bo[b].modifiable, vim.bo[b].filetype = false, btw and "markdown" or "diff"
+  if btw then
+    vim.cmd.tabnew()
+    return vim.api.nvim_win_set_buf(0, scratch(vim.split(e.answer, "\n"), nil, "markdown"))
+  end
+  local a, z = e.base0 or e.base, e.result
+  local st = git.stat(e.root, a, z)
+  if st.files == 0 then return notify("no changes") end
   vim.cmd.tabnew()
-  vim.api.nvim_win_set_buf(0, b)
-  vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the diff" })
+  local new = vim.api.nvim_get_current_win()
+  vim.cmd("leftabove vsplit")
+  local old = vim.api.nvim_get_current_win()
+  vim.cmd("topleft vsplit")
+  local lw = vim.api.nvim_get_current_win()
+  local list = scratch(st.list)
+  vim.api.nvim_win_set_buf(lw, list)
+  vim.api.nvim_win_set_width(lw, math.min(40, math.max(20, unpack(vim.tbl_map(function(l) return vim.fn.strdisplaywidth(l) end, st.list)))))
+  vim.wo[lw].winfixwidth, vim.wo[lw].cursorline, vim.wo[lw].number, vim.wo[lw].wrap = true, true, false, false
+  vim.wo[lw].winbar = ("%%#SepalAdded#+%d %%#SepalRemoved#−%d%%* · %s"):format(st.add, st.del, plural(st.files, "file"))
+  local ns = vim.api.nvim_create_namespace("sepal.review")
+  for i, l in ipairs(st.list) do
+    for c, d in l:gmatch("()%+%d+()") do vim.api.nvim_buf_set_extmark(list, ns, i - 1, c - 1, { end_col = d - 1, hl_group = "SepalAdded" }) end
+    for c, d in l:gmatch("()−%d+()") do vim.api.nvim_buf_set_extmark(list, ns, i - 1, c - 1, { end_col = d - 1, hl_group = "SepalRemoved" }) end
+  end
+  local shown, open
+  local function step(d) -- ]f [f: the list's cursor goes along
+    if not vim.api.nvim_win_is_valid(lw) then return end
+    local row = math.max(1, math.min(#st.list, shown + d))
+    vim.api.nvim_win_set_cursor(lw, { row, 0 })
+    open(row)
+  end
+  open = function(i)
+    if i == shown or not (vim.api.nvim_win_is_valid(old) and vim.api.nvim_win_is_valid(new)) then return end
+    shown = i
+    local path, bin = st.paths[i], st.list[i]:match(" binary$")
+    for _, side in ipairs({ { old, a, "before" }, { new, z, "after" } }) do
+      local w, rev = side[1], side[2]
+      local text = bin and "binary file" or git.file(e.root, rev, path):gsub("\n$", "")
+      local b = scratch(vim.split(text, "\n"), ("sepal://%s/%s/%s"):format(e.id, side[3], path),
+        not bin and vim.filetype.match({ filename = path }) or nil)
+      vim.keymap.set("n", "]f", function() step(1) end, { buffer = b, desc = "Next file" })
+      vim.keymap.set("n", "[f", function() step(-1) end, { buffer = b, desc = "Previous file" })
+      vim.api.nvim_win_call(w, function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(w, b); vim.cmd("diffthis") end)
+      vim.wo[w].winbar = side[3] .. ": " .. path
+    end
+    vim.api.nvim_win_call(new, function() pcall(vim.cmd, "normal! gg]c") end) -- to the first change
+  end
+  vim.api.nvim_create_autocmd("CursorMoved", { buffer = list, callback = function() open(vim.fn.line(".")) end })
+  vim.keymap.set("n", "<CR>", function() open(vim.fn.line(".")); vim.api.nvim_set_current_win(new) end, { buffer = list, desc = "Into the file's diff" })
+  open(1)
 end
-
 -- b in a full-screen float, the size its terminal started at whatever tabs, splits or statusline there
 -- are: no resize, no redraw. Leaving it (<c-w>w…) hides it. w: the loading float to show it in
 show = function(b, w)

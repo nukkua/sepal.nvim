@@ -143,6 +143,24 @@ test("a task runs in a worktree and lands as unstaged changes, with what the age
   eq({ e.status, e.session, e.assumptions }, { "landed", "s1", { "kept the old API", "no new deps" } })
 end)
 
+test("<CR> shows the task's files, and each one before | after in diff mode", function()
+  local e = newest() -- the one above: a.txt changed, b.txt added
+  agent.show(e)
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  local function names() return vim.tbl_map(function(w) return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match("[^/]+/[^/]+$") or "" end, wins) end
+  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[1]), 0, -1, false), { "a.txt +1 −1", "b.txt +1 −0" })
+  eq(names(), { "", "before/a.txt", "after/a.txt" })
+  eq({ vim.wo[wins[2]].diff, vim.wo[wins[3]].diff }, { true, true })
+  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[3]), 0, -1, false), { "one", "TWO", "three" })
+  vim.api.nvim_set_current_win(wins[3])
+  vim.api.nvim_feedkeys("]f", "x", false)
+  eq(names(), { "", "before/b.txt", "after/b.txt" })
+  eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[2]), 0, -1, false), { "" }) -- added: nothing before
+  local tabs = vim.fn.tabpagenr("$")
+  vim.api.nvim_feedkeys("q", "x", false)
+  eq(vim.fn.tabpagenr("$"), tabs - 1)
+end)
+
 test("your edits since the task started are kept; u takes the task back out", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'one\ntwo\nTHREE\n' > a.txt]]

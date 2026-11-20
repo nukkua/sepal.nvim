@@ -120,18 +120,23 @@ function M.result(root, wt, base, ref, exclude, on_done)
   end)
 end
 
--- files and lines changed from a to b: { files, add, del, list = { "path +1 −3", ... } }
+-- files and lines changed from a to b: { files, add, del, list = { "path +1 −3", ... }, paths = { "path", ... } }
 function M.stat(root, a, b)
-  local s = { files = 0, add = 0, del = 0, list = {} }
+  local s = { files = 0, add = 0, del = 0, list = {}, paths = {} }
   for line in (out(root, { "diff", "--numstat", "--no-renames", a, b }) or ""):gmatch("[^\n]+") do
     local add, del, path = line:match("^(%S+)%s+(%S+)%s+(.*)$")
     s.list[#s.list + 1] = path .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
+    s.paths[#s.paths + 1] = path
     s.files, s.add, s.del = s.files + 1, s.add + (tonumber(add) or 0), s.del + (tonumber(del) or 0)
   end
   return s
 end
 
-function M.diff(root, a, b) return out(root, { "diff", "--no-renames", a, b }) or "" end
+-- path's content at rev, "" if it isn't there (added or deleted)
+function M.file(root, rev, path)
+  local r = M.run(root, { "show", rev .. ":" .. path })
+  return r.code == 0 and r.stdout or ""
+end
 
 function M.delete_refs(root, prefix)
   local refs = out(root, { "for-each-ref", "--format=delete %(refname)", prefix }) or ""

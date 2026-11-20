@@ -116,7 +116,12 @@ local function card(e, w)
     end
   end
   if e.status == "running" and e.activity then para(e.activity, "SepalInfo", "→ ", 2) end
-  if e.status == "running" and e.subagents and #e.subagents > 0 then row({ "subagents: " .. #e.subagents, "SepalDim" }) end
+  local subs = e.status == "running" and e.subagents or {}
+  if #subs > 0 then -- in their own color: work fanned out is easy to miss among the dim rows
+    local t = ("↳ %d subagent%s: %s"):format(#subs, #subs == 1 and "" or "s",
+      table.concat(vim.tbl_map(function(a) return a.name end, subs), ", "))
+    row({ (inbox.fit(t, inner):gsub("%s+$", "")), "SepalAgent" })
+  end
   if e.why then para(e.why, "SepalWarn", "", 3) end
   if e.error then para(e.error, "SepalError", "", 3) end
   if e.summary then para(e.summary, "Normal", "", 3)

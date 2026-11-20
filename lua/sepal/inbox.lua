@@ -107,7 +107,7 @@ local function facts(e)
     f[#f + 1] = e.check .. mark
   end
   if e.status == "running" and e.activity then f[#f + 1] = e.activity end
-  if e.status == "running" and e.subagents and #e.subagents > 0 then f[#f + 1] = "subagents: " .. #e.subagents end
+  if e.status == "running" and e.subagents and #e.subagents > 0 then f[#f + 1] = ("↳ %d subagent%s"):format(#e.subagents, #e.subagents == 1 and "" or "s") end
   return { s and ("%d file%s"):format(s.files, s.files == 1 and "" or "s") or "", s and "+" .. s.add or "",
     s and "−" .. s.del or "", table.concat(f, "  ") }
 end
@@ -164,7 +164,7 @@ render = function()
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not w then return end
   if vim.bo[b].modified then return end -- your edits wait for :w (or u): a redraw would throw them away
-  local lines, rows, marks, spans, spins = { HELP, "" }, {}, {}, {}, {}
+  local lines, rows, marks, spans, spins, agents = { HELP, "" }, {}, {}, {}, {}, {}
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   -- every column padded to its widest value in the list, so every line is the same width
   local cols, wid = {}, { 0, 0, 0, 0 }
@@ -186,7 +186,11 @@ render = function()
     spans[#spans + 1] = { #lines, #head, #head + 3, "SepalDim" }
     for a, z in f:gmatch("()%+%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAdded" } end
     for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalRemoved" } end
-    for _, d in ipairs(details(e)) do lines[#lines + 1] = "    " .. d; rows[#lines] = e.id end
+    for a, z in f:gmatch("()↳ %d+ subagents?()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAgent" } end
+    for _, d in ipairs(details(e)) do
+      lines[#lines + 1] = "    " .. d; rows[#lines] = e.id
+      if d:match("^↳ ") then agents[#lines] = true end -- not dimmed: these are what's running
+    end
   end
   local key = { w }
   for row, l in ipairs(lines) do key[#key + 1] = tostring(rows[row]) .. "\0" .. l end
@@ -215,7 +219,8 @@ render = function()
   for row, m in pairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { end_col = m[2], hl_group = m[1] }) end
   for _, sp in ipairs(spans) do vim.api.nvim_buf_set_extmark(b, NS, sp[1] - 1, sp[2], { end_col = sp[3], hl_group = sp[4] }) end
   for row = 3, #lines do
-    if not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalDim" }) end
+    if agents[row] then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalAgent" })
+    elseif not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalDim" }) end
   end
   vim.b[b].sepal_rows = rows
   heads = {}

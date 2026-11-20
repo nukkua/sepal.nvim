@@ -30,7 +30,7 @@ function M.config() return C end
 local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = "DiagnosticOk",
   SepalWarn = "DiagnosticWarn", SepalError = "DiagnosticError", SepalDim = "Comment", SepalAdded = "Added",
   SepalRemoved = "Removed", SepalInboxFolded = false, SepalPanelTitle = "@markup.strong",
-  SepalClaude = false }
+  SepalClaude = false, SepalAgent = "SepalClaude" }
 -- groups with a color of their own instead of a link
 local FG = { SepalClaude = "#d97757" }
 -- sakura: { on a dark background, on a light one }. Warnings and errors keep your theme's: they must read as such

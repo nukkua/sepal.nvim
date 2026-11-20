@@ -96,7 +96,8 @@ files, fidget.nvim for a spinner.
              (DiagnosticOk), SepalWarn (DiagnosticWarn), SepalError
              (DiagnosticError), SepalDim (Comment), SepalAdded (Added),
              SepalRemoved (Removed), SepalInboxFolded (empty), SepalPanelTitle
-             (@markup.strong). A colorscheme
+             (@markup.strong), SepalAgent (SepalClaude: running subagents).
+             A colorscheme
              that defines one wins over the links and sakura.
 `icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,

@@ -79,7 +79,7 @@ cases.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  U undo  dd/D drop  yyp copy  :w apply  u revert  r reply  c continue  o chat  x stop  C clean  za fold  q close
+<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o chat  x stop  C clean  za fold  q close
 
 ✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
     · shutdown() blocks until the queue is empty
@@ -89,7 +89,7 @@ cases.
     it overlaps your edits in src/config.rs: L lands it with conflict markers
 ```
 
-The inbox is edited like a buffer, as in oil.nvim: `dd` (or `D`) a task's line and `:w` drops it,
+The inbox is edited like a buffer, as in oil.nvim: `dd` a task's line and `:w` drops it,
 `u` before `:w` takes it back. Copy a line (`yyp`) and `:w` opens a new task with that task's text,
 to add to and send.
 

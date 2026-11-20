@@ -478,7 +478,7 @@ test("j/k in the inbox go task to task, past the lines under each", function()
   vim.cmd("close")
 end)
 
-test("the inbox is edited like oil: dd/D drop on :w, u takes it back, yyp opens a copy to add to", function()
+test("the inbox is edited like oil: dd drops on :w, u takes it back, yyp opens a copy to add to", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
   run({ "Goal: first" })
@@ -486,7 +486,7 @@ test("the inbox is edited like oil: dd/D drop on :w, u takes it back, yyp opens 
   vim.cmd("Sepal inbox")
   local b = vim.api.nvim_get_current_buf()
   vim.api.nvim_win_set_cursor(0, { 3, 0 })
-  vim.cmd("normal D") -- second's closed fold: its line and the lines under it
+  vim.cmd("normal dd") -- second's closed fold: its line and the lines under it
   assert(vim.bo[b].modified)
   vim.cmd("normal u")
   eq(vim.bo[b].modified, false)
@@ -499,8 +499,10 @@ test("the inbox is edited like oil: dd/D drop on :w, u takes it back, yyp opens 
   vim.api.nvim_win_set_cursor(0, { 3, 0 })
   vim.cmd("normal yyp")
   vim.cmd("write")
+  assert(vim.wait(1000, function() return task_buf() ~= nil end, 10), "no draft opened")
   eq(#inbox.list(work), 1) -- the copy is a draft, not a task yet
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), vim.split(newest().task, "\n"))
+  eq(vim.api.nvim_get_current_buf(), task_buf()) -- focused, to change it
   vim.api.nvim_buf_delete(task_buf(), { force = true })
   vim.cmd("close")
 end)

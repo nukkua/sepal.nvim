@@ -142,7 +142,7 @@ files, fidget.nvim for a spinner.
                           starts over
                     o     watch it (running) or open its chat (done)
                     x     stop it
-                    dd D  drop it, once you :w (u before :w takes it
+                    dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim
                     yyp   a copied line opens, on :w, a new task with
                           that task's text, to add to and send

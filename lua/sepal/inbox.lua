@@ -83,7 +83,7 @@ local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  U undo  dd/D drop  yyp copy  :w apply  u revert  r reply  c continue  o watch/chat  x stop  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  C clean  za fold  q close"
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -273,7 +273,8 @@ function M.write(b)
   render()
   local e = copies[1] and M.find(root, copies[1])
   -- shortcut: one draft at a time (sepal.task), so only the first copy opens; more copies need a draft list
-  if e then require("sepal").task(nil, vim.split(e.task, "\n")) end
+  -- scheduled: :w puts you back in the inbox after BufWriteCmd, the draft should keep focus
+  if e then vim.schedule(function() require("sepal").task(nil, vim.split(e.task, "\n")) end) end
   if #copies > 1 then require("sepal").notify("one task draft at a time: copied only " .. e.title) end
 end
 
@@ -296,7 +297,6 @@ function M.open(root)
     vim.keymap.set("n", "c", on(agent.resume), o("Continue a task that was cut short (quit, stopped, crashed)"))
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
-    vim.keymap.set("n", "D", "dd", o("Drop it (on :w)"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
     -- j/k go task to task, past the detail lines under each

@@ -46,6 +46,7 @@ files, fidget.nvim for a spinner.
     worktrees = vim.fn.stdpath("state") .. "/sepal",
     task_suggest = nil,
     max_running = 2,
+    models = { btw = "sonnet" },
     sakura = true,
     highlights = {},
     icons = {},
@@ -79,6 +80,11 @@ files, fidget.nvim for a spinner.
 `max_running` tasks running at once; the rest wait in the inbox as
              "queued" and start when one is done. nil: no limit. Each
              running task is a Claude Code process.
+                                                             *sepal-models*
+`models`     each task kind's model, passed as `--model` (over one in `args`):
+             `{ implement = "opus", btw = "haiku" }`. `implement` unset:
+             Claude Code's default; `btw` unset: "sonnet". Setting one keeps
+             the other's default.
                                                        *sepal-task_suggest*
 `task_suggest` argv that gets the task buffer on stdin (your idea and
              Files:) and prints the finished task. <c-c><c-s> runs it. For
@@ -101,7 +107,7 @@ files, fidget.nvim for a spinner.
              that defines one wins over the links and sakura.
 `icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
-             failed, error, needs, stopped, interrupted, undone.
+             failed, error, needs, stopped, interrupted, undone, answered.
              Also the panel's model logos: `claude`, `openai`, `gemini`, `opencode`.
 
 ==============================================================================
@@ -109,7 +115,16 @@ files, fidget.nvim for a spinner.
 
                                                                       *:Sepal*
 :[range]Sepal [task]
-                  Write a task in a buffer above the code: Goal,
+                  First pick its kind: `i` implement (below) or `b` btw:
+                  a question about the project, answered on the `btw`
+                  model (|sepal-models|) in your repo itself, read-only
+                  (--permission-mode plan): no worktree, no `prepare`, and
+                  no wait for a |sepal-max_running| slot.
+                  Nothing a btw does lands: <c-c><c-c> asks, the answer's
+                  start is a notification, <CR> in the inbox shows all of
+                  it, r asks a follow-up. Any other key cancels. With a
+                  draft open, it goes to the draft.
+                  Implement: write a task in a buffer above the code: Goal,
                   Constraints, Done when, Files. Fields left
                   empty aren't sent; an empty Goal: sends nothing. In it:
                     <c-c><c-c>  send it and close the buffer; it lands by
@@ -129,7 +144,8 @@ files, fidget.nvim for a spinner.
 :Sepal inbox      Every task of this repo, newest first, with what to read
                   under each (assumptions, why it needs you, the failing
                   check's output). In it:
-                    <CR>  everything the task changed, as a diff (q closes)
+                    <CR>  everything the task changed, as a diff (q closes);
+                          a btw's answer
                     L     land it (with conflict markers if it overlaps
                           your edits)
                     U     take a landed task back out
@@ -171,8 +187,9 @@ files, fidget.nvim for a spinner.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted.
 
-Lua: `require("sepal").task()`, `.inbox()`, `.land()`, `.undo()`, `.open()`, `.panel()`,
-`.stop()`, `.clean()`.
+Lua: `require("sepal").task(range, lines, kind)` (kind "implement" or "btw", no
+picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
+`.panel()`, `.stop()`, `.clean()`.
 
 ==============================================================================
 5. HOW IT WORKS                                                 *sepal-landing*

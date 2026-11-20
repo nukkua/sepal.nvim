@@ -13,6 +13,7 @@ local COUNTS = {
   { "queued", { queued = true }, "SepalDim" },
   { "need you", { needs = true, failed = true, error = true }, "SepalWarn" },
   { "ready", { ready = true }, "SepalOk" },
+  { "answered", { answered = true }, "SepalOk" },
   { "landed", { landed = true }, "SepalOk" },
 }
 
@@ -30,6 +31,7 @@ local HINT = {
   stopped = "c in :Sepal inbox to continue",
   interrupted = "c in :Sepal inbox to continue",
   undone = "taken back out",
+  answered = "<CR> in :Sepal inbox reads it",
 }
 -- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
 local PROVIDERS = {

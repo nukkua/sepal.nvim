@@ -30,6 +30,8 @@ function M.check()
   if C.max_running == nil then h.info("max_running not set: every task runs at once")
   elseif type(C.max_running) ~= "number" or C.max_running < 1 then h.error("max_running must be a number, 1 or more")
   else h.ok("max_running: " .. C.max_running .. " at once, the rest wait") end
+  if type(C.models) ~= "table" then h.error("models must be a table: { implement = \"opus\", btw = \"sonnet\" }")
+  else h.ok(("models: implement %s, btw %s"):format(C.models.implement or "Claude Code's default", C.models.btw or "Claude Code's default")) end
   h.ok(C.sakura and "sakura: blossom pinks for sepal's accents" or "sakura off: your colorscheme's colors")
   if type(C.highlights) ~= "table" then h.error("highlights must be a table: { SepalOk = { fg = \"#a3be8c\" } }") end
   if type(C.icons) ~= "table" then h.error("icons must be a table: { landed = \"✓\" }") end

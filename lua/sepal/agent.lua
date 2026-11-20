@@ -12,19 +12,34 @@ local function sepal() return require("sepal") end
 local function C() return require("sepal").config() end
 local function notify(...) return sepal().notify(...) end
 local WARN, ERROR = vim.log.levels.WARN, vim.log.levels.ERROR
--- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args
-local function cmd(extra)
+-- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args;
+-- mode: that permission mode instead of either (a btw's read-only "plan")
+local function cmd(extra, mode)
   local a = vim.list_extend({}, extra)
-  if C().auto_mode then
+  mode = mode or C().auto_mode and "auto"
+  if mode then
     for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
-    vim.list_extend(a, { "--permission-mode", "auto" })
+    vim.list_extend(a, { "--permission-mode", mode })
   end
   return vim.list_extend(vim.list_extend({}, C().cmd), a)
 end
+-- the model for e's kind (models option), after args: it wins over a --model there
+local function model(e)
+  local m = (C().models or {})[e.kind or "implement"]
+  return m and { "--model", m } or {}
+end
+-- a btw reads your repo itself: Claude Code's plan mode, so it can't change a file
+local function mode(e) return e.kind == "btw" and "plan" or nil end
 
 -- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update }
 local jobs = {}
 local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
+-- every slot taken: a btw doesn't take one (no worktree, read-only)
+local function full()
+  local n = 0
+  for _, j in pairs(jobs) do if not j.btw then n = n + 1 end end
+  return C().max_running and n >= C().max_running
+end
 local chats = {} -- task id → its chat's terminal (claude --resume): hidden, it goes on until stopped
 -- e's chat, while claude runs in it
 local function chat(e)
@@ -66,6 +81,11 @@ end
 
 -- what sepal tells the agent besides the task
 local function notes(e)
+  if e.kind == "btw" then
+    return table.concat({ "", "---", "How to answer this (from sepal, not part of the question):",
+      "- This is a question about the project, not a change: answer it from the code as it is now.",
+      "- Read what you need; don't edit files or ask to." }, "\n")
+  end
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
     "- You're in a git worktree of the project. Work on your own: decide instead of asking questions."
       .. " Edit the files here. Don't commit, push or switch branches." }
@@ -135,7 +155,7 @@ end
 local function finish(e, wt, status, extra)
   local j = jobs[e.id]
   jobs[e.id] = nil
-  if wt then git.remove_worktree(e.root, wt) end
+  if wt and wt ~= e.root then git.remove_worktree(e.root, wt) end -- a btw runs in your repo: never that
   e.status, e.activity, e.subagents = status, nil, nil
   for k, v in pairs(extra or {}) do e[k] = v end
   inbox.changed(e)
@@ -146,6 +166,7 @@ local function finish(e, wt, status, extra)
     local tries = (e.attempts or 0) + 1
     notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
+  elseif status == "answered" then notify("● " .. e.title .. ": " .. tostring(e.summary) .. " · <CR> in :Sepal inbox reads it")
   end
   -- watched to its end: its chat in the same float (or the float goes, with nothing to show)
   local w = j and watching(j)
@@ -223,9 +244,9 @@ local function termwin(w) vim.wo[w].number, vim.wo[w].relativenumber = false, fa
 -- at the Stop hook; then it's closed, and sepal checks and lands what it did
 agent = function(e, prompt, wt)
   local j = jobs[e.id]
-  local events = wt .. ".events"
+  local events = wtdir(e) .. ".events" -- beside its worktree: a btw has none, and runs in your repo
   os.remove(events)
-  local argv = cmd(C().args or {})
+  local argv = vim.list_extend(cmd(C().args or {}, mode(e)), model(e))
   if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
   -- files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those ("//" is an absolute path)
   for l in vim.gsplit(e.task, "\n") do
@@ -265,6 +286,11 @@ agent = function(e, prompt, wt)
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
     local reply = reply_of(ev)
+    if e.kind == "btw" then -- its answer is what it did: kept whole, nothing to land
+      e.answer, e.summary = reply or e.answer, first(reply, 100) or e.summary
+      return finish(e, wt, j.stopped and "stopped" or reply and "answered" or "error",
+        not reply and not j.stopped and { error = "the agent ended its turn without an answer" } or nil)
+    end
     git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
       e.result = result or e.result
       e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
@@ -404,7 +430,15 @@ end
 -- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
 -- with max_running tasks already running it waits in the queue
 local function launch(e, prompt, from)
-  if C().max_running and vim.tbl_count(jobs) >= C().max_running then
+  if e.kind == "btw" then -- a question: in your repo, read-only, at once; no worktree, prepare or slot
+    local done_, update = sepal().progress(e.title .. ": answering")
+    jobs[e.id] = { done = done_, update = update, btw = true }
+    e.status = "running"
+    inbox.changed(e)
+    vim.fn.mkdir(vim.fs.dirname(wtdir(e)), "p") -- for its events file
+    return agent(e, prompt, e.root)
+  end
+  if full() then
     e.status = "queued"
     queue[#queue + 1] = { e, prompt, from }
     return inbox.changed(e)
@@ -451,7 +485,7 @@ end
 
 -- a slot is free: the oldest queued task starts
 function M._next()
-  if C().max_running and vim.tbl_count(jobs) >= C().max_running then return end
+  if full() then return end
   local q = table.remove(queue, 1)
   if q then launch(q[1], q[2], q[3]) end
 end
@@ -462,14 +496,18 @@ end
 -- run a new task from cwd; nil, why when it can't. Your work tree is saved in the background, then
 -- it starts (or waits its turn); on_fail(why) if saving fails (the task is gone from the inbox then)
 -- land: "auto" / "manual" for this task, nil: the land option
-function M.start(text, cwd, land, on_fail)
+-- kind: "btw" for a question (see sepal.task), nil/"implement" for a change
+function M.start(text, cwd, land, on_fail, kind)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
-  local full = C().max_running and vim.tbl_count(jobs) >= C().max_running
+  local btw = kind == "btw"
+  if btw then check = nil end -- a question has nothing to check (nor the check option)
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
-    task = text, check = check or C().check, time = os.time(), status = full and "queued" or "running", attempts = 0, land = land }
+    task = text, check = not btw and (check or C().check) or nil, time = os.time(), status = not btw and full() and "queued" or "running",
+    attempts = 0, land = land, kind = btw and "btw" or nil }
   inbox.add(e)
+  if btw then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
   jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
   git.snapshot(root, ref(e, "base"), function(base)
     local j = jobs[e.id]
@@ -509,13 +547,14 @@ function M.resume(e)
   if not vim.tbl_contains({ "interrupted", "stopped", "error" }, e.status) then
     return notify("it wasn't cut short: r replies to it")
   end
-  if not e.base then return notify("it never started (your work tree wasn't saved): send it again") end
+  if not e.base and e.kind ~= "btw" then return notify("it never started (your work tree wasn't saved): send it again") end
   local function go()
     M.continue(e, e.session and "You were interrupted. Carry on with the task from where you left off." or e.task)
   end
   local wt = wtdir(e)
-  -- no session: quit before the agent started, the checkout may be half made (it'd read as deletions)
-  if not (e.session and vim.uv.fs_stat(wt)) then return go() end
+  -- no session: quit before the agent started, the checkout may be half made (it'd read as deletions);
+  -- a btw's worktree has nothing to save
+  if e.kind == "btw" or not (e.session and vim.uv.fs_stat(wt)) then return go() end
   jobs[e.id] = {} -- saving it: counts as running, x stops it
   git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
     local j = jobs[e.id]
@@ -627,13 +666,15 @@ function M.drop(e)
   inbox.remove(e)
 end
 
--- everything the task changed, as a diff in a new tab
+-- everything the task changed, as a diff in a new tab; a btw's answer
 function M.show(e)
-  if not e.result then return notify("no changes yet") end
+  local btw = e.kind == "btw"
+  if btw and not e.answer then return notify("no answer yet") end
+  if not btw and not e.result then return notify("no changes yet") end
   local b = vim.api.nvim_create_buf(false, true)
   vim.bo[b].bufhidden = "wipe"
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, vim.split(git.diff(e.root, e.base0 or e.base, e.result), "\n"))
-  vim.bo[b].modifiable, vim.bo[b].filetype = false, "diff"
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, vim.split(btw and e.answer or git.diff(e.root, e.base0 or e.base, e.result), "\n"))
+  vim.bo[b].modifiable, vim.bo[b].filetype = false, btw and "markdown" or "diff"
   vim.cmd.tabnew()
   vim.api.nvim_win_set_buf(0, b)
   vim.keymap.set("n", "q", function() sepal().close() end, { buffer = b, desc = "Close the diff" })
@@ -718,7 +759,7 @@ function M.open(e, w, kept)
   local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
   termwin(hidden)
   local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
-    return vim.fn.jobstart(vim.list_extend(cmd({}), { "--resume", e.session }), { term = true, cwd = e.root,
+    return vim.fn.jobstart(vim.list_extend(vim.list_extend(cmd({}, mode(e)), model(e)), { "--resume", e.session }), { term = true, cwd = e.root,
       env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   end)
   pcall(vim.api.nvim_win_close, hidden, true)

@@ -102,6 +102,8 @@ local function notified(fn)
   return got
 end
 local function msgs(got) return vim.tbl_map(function(g) return g[1] end, got) end
+-- the key :Sepal task's picker reads (getcharstr reads stdin under nvim -l)
+local function key(k) local g = vim.fn.getcharstr; vim.fn.getcharstr = function() vim.fn.getcharstr = g; return k end end
 local function task_buf()
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return b end end
 end
@@ -893,6 +895,7 @@ test(":'<,'>Sepal task puts the selected lines in the task and lists the file", 
   vim.cmd.edit("tests/pool.lua")
   vim.bo.filetype = "lua"
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })
+  key("i")
   vim.cmd("2,3Sepal task")
   local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Constraints:", "- ", "",
@@ -996,6 +999,51 @@ test("c starts over a task that never got its agent going; x keeps what the agen
   eq(vim.endswith(args()[1], "--resume s1"), false)
   assert(vim.startswith(prompts(), "Goal: never went\n"), prompts())
   eq({ e.status, e.stat and e.stat.list }, { "stopped", { "d.txt +1 −0" } })
+end)
+
+test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its model; i implements", function()
+  clean(); reset()
+  sepal.setup({ max_running = 1 })
+  vim.env.SEPAL_SLEEP = "0.5"
+  send({ "Goal: hogs the slot" }) -- a btw doesn't wait for it
+  vim.env.SEPAL_SLEEP = nil
+  local got = msgs(notified(function()
+    key("b")
+    sepal.pick()
+    local b = task_buf()
+    eq(vim.b[b].sepal_kind, "btw")
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "how does landing work?" })
+    vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+    idle()
+  end))
+  local e = newest()
+  eq({ e.kind, e.status, e.answer, e.check }, { "btw", "answered", "Did it.\n\nAssumptions:\n- kept the old API\n- no new deps", nil })
+  eq(got[1], "asking: how does landing work? · :Sepal open watches")
+  assert(vim.tbl_contains(got, "● how does landing work?: Did it. · <CR> in :Sepal inbox reads it"), vim.inspect(got))
+  -- plan: Claude Code's read-only mode; it started first: the other was still making its worktree
+  eq(args()[1], "--permission-mode plan --model sonnet")
+  eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work) -- your repo itself, no worktree
+  eq(vim.uv.fs_stat(work) ~= nil and file("a.txt"), "one\ntwo\nthree\n")
+  sepal.setup({ max_running = 2 })
+  assert(prompts():find("not a change", 1, true), prompts())
+  agent.show(e)
+  eq({ vim.bo.filetype, vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] }, { "markdown", "Did it." })
+  vim.cmd("tabclose")
+  clean(); reset()
+  sepal.setup({ models = { implement = "opus" } })
+  eq(sepal.config().models.btw, "sonnet") -- setting one keeps the other's default
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  notified(function()
+    key("i")
+    sepal.pick()
+    vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: implemented" })
+    vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+    idle()
+  end)
+  eq({ newest().status, args() }, { "landed", { "--permission-mode acceptEdits --model opus" } })
+  sepal.setup({ models = {} })
+  notified(function() key("x"); sepal.pick() end) -- any other key: no draft
+  eq(task_buf(), nil)
 end)
 
 print(("%d/%d passed"):format(n - fails, n))

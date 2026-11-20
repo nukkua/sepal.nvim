@@ -17,12 +17,19 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
+  models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw
   sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
 }
+local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
+C.models = vim.tbl_extend("force", {}, MODELS)
 local highlight -- below
-function M.setup(opts) C = vim.tbl_extend("force", C, opts or {}); highlight() end
+function M.setup(opts)
+  C = vim.tbl_extend("force", C, opts or {})
+  C.models = vim.tbl_extend("force", MODELS, (opts or {}).models or {}) -- models = { implement = "opus" } keeps btw's
+  highlight()
+end
 function M.config() return C end
 
 -- sepal's colors are its own groups, linked to your colorscheme's by default: a colorscheme (or
@@ -132,7 +139,7 @@ function M.close()
 end
 
 -- a task that didn't run goes back to the task buffer (below the open draft, if there is one)
-local function giveback(text)
+local function giveback(text, kind)
   local lines = vim.split(text, "\n")
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.b[b].sepal_task then
@@ -140,7 +147,7 @@ local function giveback(text)
       return M.task()
     end
   end
-  M.task(nil, lines)
+  M.task(nil, lines, kind)
 end
 
 
@@ -188,11 +195,11 @@ function M.stop()
   for _, e in ipairs(entries() or {}) do if agent.running(e) or agent.chatting(e) then agent.stop(e); n = n + 1 end end
   if n == 0 then M.notify("no task is running") end
 end
--- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted)
+-- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted, answered)
 function M.clean()
   local agent, n = require("sepal.agent"), 0
   for _, e in ipairs(vim.list_slice(entries() or {}, 1)) do
-    if vim.tbl_contains({ "landed", "nochange", "undone", "stopped", "interrupted" }, e.status) then agent.drop(e); n = n + 1 end
+    if vim.tbl_contains({ "landed", "nochange", "undone", "stopped", "interrupted", "answered" }, e.status) then agent.drop(e); n = n + 1 end
   end
   M.notify("dropped " .. n .. " task" .. (n == 1 and "" or "s"))
 end
@@ -225,8 +232,9 @@ end
 local function template()
   return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (C.check or ""), "", "Files:" }
 end
-local IDEA = { "", "", "Files:" } -- with task_suggest: the idea goes on top, <c-c><c-s> writes the task
-local HINT = "what to change, where and why; <c-c><c-s> writes the task"
+local IDEA = { "", "", "Files:" } -- with task_suggest (or for btw): the idea goes on top, <c-c><c-s> writes the task
+local HINT = { implement = "what to change, where and why; <c-c><c-s> writes the task",
+  btw = "ask anything about the project; it answers, nothing changes" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 
 -- add "- @path" at the end of the Files: list (once)
@@ -267,8 +275,9 @@ end
 local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
 local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
-  local help = "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
-    .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
+  local help = vim.b[buf].sepal_kind == "btw" and "btw  <c-c><c-c> ask  "
+    or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
+  help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
   vim.api.nvim_buf_clear_namespace(buf, KEYS_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
   vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = { { { help, "SepalDim" } }, { { "" } } }, virt_lines_above = true })
   for _, w in ipairs(vim.fn.win_findbuf(buf)) do
@@ -283,8 +292,11 @@ end
 -- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
+-- kind: "implement" (nil) changes the code; "btw" asks about the project: it answers, nothing lands
 -- ponytail: a range is whole lines; a charwise selection brings its full lines
-function M.task(range, lines)
+function M.task(range, lines, kind)
+  kind = kind or "implement"
+  local btw = kind == "btw"
   local block, path
   if range then block, path = selection(range[1], range[2]) end
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -296,10 +308,10 @@ function M.task(range, lines)
     end
   end
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.b[buf].sepal_task = true
+  vim.b[buf].sepal_task, vim.b[buf].sepal_kind = true, kind
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].bufhidden = "wipe" -- closing the window drops the draft: :Sepal task always starts a new one
-  local template = C.task_suggest and IDEA or template()
+  local template = (btw or C.task_suggest) and IDEA or template()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
@@ -309,13 +321,13 @@ function M.task(range, lines)
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.schedule(function() vim.cmd.startinsert({ bang = true }) end) -- after keys already typed (see sepal.resume)
   end
-  if C.task_suggest then
+  if btw or C.task_suggest then
     -- placeholder on an empty idea line: an extmark, so it's never sent or piped (and changedtick stays)
     local function hint()
       if not vim.api.nvim_buf_is_valid(buf) then return end
       vim.api.nvim_buf_clear_namespace(buf, HINT_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
       if (vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or "") ~= "" then return end
-      vim.api.nvim_buf_set_extmark(buf, HINT_NS, 0, 0, { virt_text = { { HINT, "SepalDim" } }, virt_text_pos = "overlay" })
+      vim.api.nvim_buf_set_extmark(buf, HINT_NS, 0, 0, { virt_text = { { HINT[kind], "SepalDim" } }, virt_text_pos = "overlay" })
     end
     vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = hint })
     hint()
@@ -331,17 +343,20 @@ function M.task(range, lines)
     local text = table.concat(lines, "\n")
     local function back(why)
       M.notify(why .. "\nthe task is back in its buffer", vim.log.levels.ERROR)
-      giveback(text)
+      giveback(text, kind)
     end
-    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land, back)
+    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land, back, kind)
     if not e then return back(why) end
     if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running task is done") end
+    if btw then return M.notify("asking: " .. e.title .. " · :Sepal open watches") end
     M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
   end
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function() send("auto") end,
     vim.tbl_extend("force", o, { desc = "Run the task, it lands by itself" }))
-  vim.keymap.set({ "n", "i" }, "<c-c><c-w>", function() send("manual") end,
-    vim.tbl_extend("force", o, { desc = "Run the task, it waits in the inbox" }))
+  if not btw then -- a question doesn't land, nor is it a task to write
+    vim.keymap.set({ "n", "i" }, "<c-c><c-w>", function() send("manual") end,
+      vim.tbl_extend("force", o, { desc = "Run the task, it waits in the inbox" }))
+  end
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
     vim.cmd.stopinsert()
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -351,6 +366,7 @@ function M.task(range, lines)
     if job then pcall(job.kill, job, 15) end -- sent or discarded before it answered: don't leave it running
   end })
   vim.keymap.set({ "n", "i" }, "<c-c><c-s>", function()
+    if btw then return M.notify("a btw is sent as you wrote it: <c-c><c-c> asks") end
     if not C.task_suggest then return M.notify("set task_suggest to have <c-c><c-s> write the task, see :h sepal-task_suggest", vim.log.levels.WARN) end
     if job then return M.notify("still writing the task") end
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
@@ -405,5 +421,15 @@ function M.task(range, lines)
   end, vim.tbl_extend("force", o, { desc = "Paste the clipboard's image into the task" }))
 end
 
+-- :Sepal task: pick its kind first, i implement or b btw (any other key cancels); an open draft just
+-- gets the focus (and the range), whatever its kind
+local KINDS = { i = "implement", b = "btw" }
+function M.pick(range)
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return M.task(range) end end
+  vim.api.nvim_echo({ { "sepal ", "SepalTitle" }, { "i", "SepalAccent" }, { " implement  " }, { "b", "SepalAccent" }, { " btw" } }, false, {})
+  local ok, c = pcall(vim.fn.getcharstr)
+  vim.api.nvim_echo({ { "" } }, false, {})
+  if ok and KINDS[c] then M.task(range, nil, KINDS[c]) end
+end
 
 return M

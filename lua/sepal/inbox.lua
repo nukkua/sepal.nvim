@@ -76,6 +76,7 @@ local STATUS = {
   stopped = { "○", "stopped", "SepalDim" },
   interrupted = { "○", "interrupted", "SepalDim" },
   undone = { "↺", "undone", "SepalDim" },
+  answered = { "◆", "answered", "SepalOk" }, -- a btw
 }
 M.STATUS = STATUS
 M.LIVE = { running = true, checking = true } -- these spin in the inbox and the panel
@@ -285,7 +286,7 @@ function M.write(b)
   local e = copies[1] and M.find(root, copies[1])
   -- shortcut: one draft at a time (sepal.task), so only the first copy opens; more copies need a draft list
   -- scheduled: :w puts you back in the inbox after BufWriteCmd, the draft should keep focus
-  if e then vim.schedule(function() require("sepal").task(nil, vim.split(e.task, "\n")) end) end
+  if e then vim.schedule(function() require("sepal").task(nil, vim.split(e.task, "\n"), e.kind) end) end
   if #copies > 1 then require("sepal").notify("one task draft at a time: copied only " .. e.title) end
 end
 

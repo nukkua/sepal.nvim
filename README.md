@@ -35,7 +35,8 @@ vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal task<cr>", { desc = "Agent: n
 vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox" })
 ```
 
-**2. Write a task.** Select the code you mean (or don't) and press `<leader>as`. A buffer opens
+**2. Write a task.** Select the code you mean (or don't) and press `<leader>as`, then pick what
+kind of task it is: `i` implement (a change, below) or `b` btw (a question, see Btw). A buffer opens
 above your code:
 
 ```
@@ -103,6 +104,14 @@ to add to and send.
 
 That's all of it: write, send, keep working, read the `·` lines.
 
+### Btw
+
+`b` instead of `i` asks the agent something about the project ("where are retries configured?").
+Write the question and send it with `<c-c><c-c>`. It runs on a cheaper model (sonnet by default, see
+`models`) in your repo itself, read-only (Claude Code's plan mode), so it starts at once: no worktree,
+and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
+`<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat.
+
 ## Setup
 
 `setup()` is optional. These are the defaults:
@@ -119,6 +128,7 @@ require("sepal").setup({
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
+  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args')
   sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }

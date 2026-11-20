@@ -232,6 +232,7 @@ agent = function(e, prompt, wt)
     local f = l:match("^%s*%- @(/.-)%s*$")
     if f then vim.list_extend(argv, { "--allowedTools", "Read(/" .. f .. ")" }) end
   end
+  for i, a in ipairs(argv) do if a == "--model" and argv[i + 1] then e.model = argv[i + 1] end end -- till SessionStart says
   if e.session then vim.list_extend(argv, { "--resume", e.session }) end
   vim.list_extend(argv, { "--settings", SETTINGS, prompt })
   local b = vim.api.nvim_create_buf(false, true)
@@ -313,6 +314,7 @@ agent = function(e, prompt, wt)
       e.session = ev.session_id
       inbox.save(e.root) -- now, not when it finishes: a quit mid-run keeps the chat for o and r
     end
+    if type(ev.model) == "string" and ev.model ~= e.model then e.model = ev.model; inbox.render() end -- SessionStart says it
     local name = ev.hook_event_name
     if name == "PreToolUse" then
       e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)

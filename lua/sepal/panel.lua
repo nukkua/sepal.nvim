@@ -16,6 +16,27 @@ local COUNTS = {
   { "landed", { landed = true }, "SepalOk" },
 }
 
+-- what each status means for you, next to it: the label alone didn't say what to do
+local HINT = {
+  queued = "waits for a free agent",
+  running = "working · <CR> to watch",
+  checking = "running the check",
+  ready = "done · review and L in :Sepal inbox",
+  landed = "in your work tree",
+  nochange = "done, nothing changed",
+  failed = "r in :Sepal inbox to fix it",
+  error = "c in :Sepal inbox to retry",
+  needs = "waiting on you · <CR> to answer",
+  stopped = "c in :Sepal inbox to continue",
+  interrupted = "c in :Sepal inbox to continue",
+  undone = "taken back out",
+}
+-- "claude-opus-5-5[1m]" -> "opus 5.5", "claude-sonnet-4-5-20250929" -> "sonnet 4.5"
+local function model(m)
+  m = m:gsub("%[.-%]$", ""):gsub("^claude%-", ""):gsub("%-%d%d%d%d%d%d%d%d$", "")
+  return (m:gsub("%-(%d+)%-(%d+)$", " %1.%2"):gsub("%-(%d+)$", " %1"))
+end
+
 local panel_buf
 local rows = {} -- row -> task id
 local function buf() return panel_buf and vim.api.nvim_buf_is_valid(panel_buf) and panel_buf or nil end
@@ -48,7 +69,8 @@ local function card(e, w)
   }
   local function row(...) out[#out + 1] = { rail, ... } end
   -- status · try · check
-  local meta = { { st[2], st[3] } }
+  local meta = { { st[2]:upper(), st[3] } }
+  if HINT[e.status] then meta[#meta + 1] = { "  " .. HINT[e.status], "SepalDim" } end
   local function add(t, hl) meta[#meta + 1] = { " · ", "SepalDim" }; meta[#meta + 1] = { t, hl or "SepalDim" } end
   if (e.attempts or 0) > 0 then add(("try %d/%d"):format(e.attempts + 1, (require("sepal").config().retries or 0) + 1)) end
   if e.check then
@@ -76,6 +98,10 @@ local function card(e, w)
   end
   local n = #(e.assumptions or {})
   if n > 0 then row({ ("· %d decision%s to read"):format(n, n == 1 and "" or "s"), "SepalDim" }) end
+  if e.model then -- subtle, at the right of the card's last row
+    local tag = "✻ " .. model(e.model)
+    row({ string.rep(" ", math.max(inner - dw(tag), 0)), "SepalDim" }, { tag, "SepalDim" })
+  end
   return out
 end
 
@@ -121,6 +147,7 @@ function M.render()
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
   for _, m in ipairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, m[1], m[2], { end_col = m[3], hl_group = m[4] }) end
+  return vim.iter(list):any(function(e) return inbox.LIVE[e.status] end)
 end
 
 -- :Sepal panel: shows the board of root's tasks at the right, or hides it

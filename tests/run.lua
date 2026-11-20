@@ -37,7 +37,7 @@ if [ -n "$SEPAL_TRUST" ]; then echo "Quick safety check: Is this a project you t
 ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
 t="$SEPAL_EVENTS.jsonl"
 : > "$t"
-ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"transcript_path\":\"$t\"}"
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"model\":\"claude-opus-5-5[1m]\",\"transcript_path\":\"$t\"}"
 ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/a.txt\"}}"
 if [ -n "$SEPAL_SLEEP" ]; then sleep "$SEPAL_SLEEP"; fi
 if [ -n "$resumed" ] && [ -n "$SEPAL_FIX" ]; then sh -c "$SEPAL_FIX"; elif [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
@@ -407,10 +407,11 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   assert(lines[2]:match("1 landed"), lines[2])
   assert(lines[5]:match("^ ▎ ❀ carded%s+now$"), lines[5])
-  eq(lines[6], " ▎ landed")
+  eq(lines[6], " ▎ LANDED  in your work tree")
   eq(lines[7], " ▎ 1 file +1 −3")
   eq(lines[8], " ▎ Did it.")
   eq(lines[9], " ▎ · 2 decisions to read")
+  assert(lines[10]:match("^ ▎ %s+✻ opus 5%.5$"), lines[10]) -- the model, subtle at the card's bottom
   local e = newest()
   e.status, e.activity, e.summary = "running", "Edit a.txt", nil
   inbox.changed(e)
@@ -418,11 +419,14 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   assert(lines[2]:match("1 running"), lines[2])
   assert(vim.tbl_contains(lines, " ▎ → Edit a.txt"), vim.inspect(lines))
   assert(lines[5]:match("^ ▎ ⠋ carded"), lines[5]) -- it spins, and so does the inbox
+  vim.wait(350, function() return not vim.api.nvim_buf_get_lines(b, 4, 5, false)[1]:match("⠋") end)
+  assert(not vim.api.nvim_buf_get_lines(b, 4, 5, false)[1]:match("⠋"), "the panel's spinner moves on its own")
   vim.cmd("Sepal inbox")
   local ib = vim.api.nvim_get_current_buf()
-  assert(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^⠋ running"))
-  vim.wait(350, function() return vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^⠋") == nil end)
-  assert(not vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^⠋"), "the inbox's spinner moves")
+  local f0 = inbox.spin()
+  assert(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^" .. f0 .. " running"))
+  vim.wait(350, function() return not vim.startswith(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1], f0) end)
+  assert(not vim.startswith(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1], f0), "the inbox's spinner moves")
   vim.cmd("close")
   e.status = "landed"; inbox.changed(e)
   vim.cmd("Sepal panel") -- a toggle

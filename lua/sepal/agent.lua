@@ -750,6 +750,10 @@ function M.show(e)
       if w == old then vim.api.nvim_set_current_win(new) end
       busy = false
     end })
+    -- a hidden buffer stays in the diff (unless 'diffopt' has hiddenoff): every line would look changed
+    vim.api.nvim_create_autocmd("BufWinLeave", { buffer = b, callback = function()
+      for _, w in ipairs(vim.fn.win_findbuf(b)) do vim.api.nvim_win_call(w, function() vim.cmd("diffoff") end) end
+    end })
   end
   vim.api.nvim_create_autocmd("TabClosed", { callback = function()
     if vim.api.nvim_tabpage_is_valid(tab) then return end

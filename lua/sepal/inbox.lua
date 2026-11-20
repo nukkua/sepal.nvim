@@ -116,6 +116,7 @@ local function details(e)
   end
   for _, a in ipairs(e.assumptions or {}) do d[#d + 1] = "· " .. a end
   for _, c in ipairs(e.conflicts or {}) do d[#d + 1] = "conflict markers in " .. c end
+  for _, f in ipairs(e.stat and e.stat.list or {}) do d[#d + 1] = "  " .. f end
   return d
 end
 

@@ -35,13 +35,21 @@ case "$logged" in *--resume*) resumed=1; echo "the chat so far";; esac
 if [ "$SEPAL_FAIL" = start ]; then echo boom; exit 1; fi
 if [ -n "$SEPAL_TRUST" ]; then echo "Quick safety check: Is this a project you trust?"; read _; fi
 ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
-ev '{"hook_event_name":"SessionStart","session_id":"s1"}'
+t="$SEPAL_EVENTS.jsonl"
+: > "$t"
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"transcript_path\":\"$t\"}"
 ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/a.txt\"}}"
 if [ -n "$SEPAL_SLEEP" ]; then sleep "$SEPAL_SLEEP"; fi
 if [ -n "$resumed" ] && [ -n "$SEPAL_FIX" ]; then sh -c "$SEPAL_FIX"; elif [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
 if [ "$SEPAL_FAIL" = quit ]; then exit 1; fi
+if [ -n "$SEPAL_INTERRUPT" ]; then # Esc: no Stop hook, it waits at its prompt
+  sleep 0.2
+  printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","content":"[Request interrupted by user"}]}}' >> "$t"
+  sleep 0.3
+  printf '%s\n' '{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}' >> "$t"
+  while :; do sleep 1; done
+fi
 if [ -n "$SEPAL_ASK" ]; then ev '{"hook_event_name":"Notification","session_id":"s1","message":"Claude needs your permission to use Bash"}'; fi
-t="$SEPAL_EVENTS.jsonl"
 printf '%s\n' '{"type":"user","message":{"content":"go"}}' '{"type":"assistant","message":{"content":[{"type":"text","text":"Did it.\n\nAssumptions:\n- kept the old API\n- no new deps"}]}}' > "$t"
 ev "{\"hook_event_name\":\"Stop\",\"session_id\":\"s1\",\"transcript_path\":\"$t\"}"
 while :; do sleep 1; done]]
@@ -70,7 +78,7 @@ local function args() return vim.split(vim.trim(read(T .. "/args") or ""), "\n")
 local function prompts() return read(T .. "/prompts") or "" end
 local function reset()
   for _, f in ipairs({ "args", "prompts", "cwd" }) do os.remove(T .. "/" .. f) end
-  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST" }) do vim.env[k] = nil end
+  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT" }) do vim.env[k] = nil end
 end
 local function idle()
   assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the task never finished")
@@ -325,6 +333,22 @@ test(":Sepal stop stops a running task", function()
   eq(file("a.txt"), "one\ntwo\nthree\n")
 end)
 
+test("Esc in the agent (no Stop hook) stops the task and keeps what it did", function()
+  clean(); reset()
+  vim.env.SEPAL_INTERRUPT, vim.env.SEPAL_EDIT = "1", [[echo half > a.txt]]
+  local got
+  got = notified(function()
+    send({ "Goal: esc" })
+    vim.wait(400)
+    eq(newest().status, "running", "a tool's output quoting the interrupt counted")
+    idle()
+  end)
+  eq(msgs(got), { "working on it: esc · :Sepal open watches", "stopped: esc" })
+  local e = newest()
+  eq(e.status, "stopped")
+  assert(e.stat and e.stat.files == 1, "what it did was lost")
+end)
+
 test("the inbox lists the tasks and survives a restart", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
@@ -332,7 +356,7 @@ test("the inbox lists the tasks and survives a restart", function()
   vim.cmd("Sepal inbox")
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   assert(lines[3]:match("^❀ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
-  eq(vim.list_slice(lines, 4), { "    · kept the old API", "    · no new deps" })
+  eq(vim.list_slice(lines, 4), { "    · kept the old API", "    · no new deps", "      a.txt +1 −3" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
   eq(inbox.current().title, "listed")
   vim.cmd("close")

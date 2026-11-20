@@ -278,10 +278,37 @@ agent = function(e, prompt, wt)
       done(e, wt)
     end)
   end
+  local transcript, toff = nil, 0
+  -- an Esc in Claude Code ends the turn without a Stop hook: its transcript says so
+  local function interrupted()
+    local f = transcript and io.open(transcript)
+    if not f then return end
+    f:seek("set", toff)
+    local s = f:read("a")
+    f:close()
+    local cut = s:match(".*\n()")
+    if not cut then return end
+    toff = toff + cut - 1
+    for l in s:sub(1, cut - 1):gmatch("[^\n]+") do
+      local ok, t = false, nil
+      if l:find("[Request interrupted by user", 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
+      local c = ok and type(t) == "table" and t.type == "user" and type(t.message) == "table" and t.message.content
+      local b = type(c) == "table" and c[1]
+      -- its own text block, not a tool's output that happens to quote it
+      if type(b) == "table" and b.type == "text" and type(b.text) == "string" and vim.startswith(b.text, "[Request interrupted by user") then
+        return true
+      end
+    end
+  end
   local function event(line)
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
     if over or not ok or type(ev) ~= "table" then return end
     started = true
+    if not transcript and type(ev.transcript_path) == "string" then -- a resumed chat's old turns don't count
+      transcript = ev.transcript_path
+      local st = vim.uv.fs_stat(transcript)
+      toff = st and st.size or 0
+    end
     if type(ev.session_id) == "string" and ev.session_id ~= e.session then
       e.session = ev.session_id
       inbox.save(e.root) -- now, not when it finishes: a quit mid-run keeps the chat for o and r
@@ -347,6 +374,10 @@ agent = function(e, prompt, wt)
   timer:start(100, 100, vim.schedule_wrap(function()
     if over then return end
     poll()
+    if not over and interrupted() then
+      j.stopped = true -- what it did so far is kept, as with x
+      return stopped({ transcript_path = transcript })
+    end
     if started or asked or not vim.api.nvim_buf_is_valid(b) then return end
     -- the prompt is on the first screen: no need to join the scrollback
     if table.concat(vim.api.nvim_buf_get_lines(b, 0, vim.o.lines, false), " "):find("Quick safety check", 1, true) then

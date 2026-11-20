@@ -120,11 +120,12 @@ function M.result(root, wt, base, ref, exclude, on_done)
   end)
 end
 
--- files and lines changed from a to b: { files, add, del }
+-- files and lines changed from a to b: { files, add, del, list = { "path +1 −3", ... } }
 function M.stat(root, a, b)
-  local s = { files = 0, add = 0, del = 0 }
+  local s = { files = 0, add = 0, del = 0, list = {} }
   for line in (out(root, { "diff", "--numstat", "--no-renames", a, b }) or ""):gmatch("[^\n]+") do
-    local add, del = line:match("^(%S+)%s+(%S+)")
+    local add, del, path = line:match("^(%S+)%s+(%S+)%s+(.*)$")
+    s.list[#s.list + 1] = path .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
     s.files, s.add, s.del = s.files + 1, s.add + (tonumber(add) or 0), s.del + (tonumber(del) or 0)
   end
   return s

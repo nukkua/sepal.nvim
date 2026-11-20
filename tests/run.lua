@@ -554,6 +554,18 @@ test("assumptions are read from the end of a reply", function()
   eq(agent.assumptions("no list"), {})
 end)
 
+test("a removed worktree's path is free at once; the checkout and git's record of it go in the background", function()
+  local git, wt = require("sepal.git"), vim.fs.joinpath(T, "wt-rm")
+  local made
+  git.add_worktree(work, wt, "HEAD", function(ok) made = ok end)
+  assert(vim.wait(10000, function() return made ~= nil end, 10) and made, "no worktree")
+  git.remove_worktree(work, wt)
+  eq(vim.uv.fs_stat(wt), nil)
+  assert(vim.wait(5000, function()
+    return #vim.fn.glob(wt .. ".old-*", true, true) == 0 and not sh("git worktree list").stdout:find("wt-rm", 1, true) and true
+  end, 20), "the old checkout or its record is still there")
+end)
+
 test(":Sepal completes subcommands", function()
   eq(vim.fn.getcompletion("Sepal s", "cmdline"), { "stop" })
 end)

@@ -263,17 +263,20 @@ agent = function(e, prompt, wt)
   end
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
-    e.result = git.result(e.root, wt, e.base, ref(e, "result"), j.exclude) or e.result
-    e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
     local reply = reply_of(ev)
-    e.summary = first(reply, 100) -- the reply itself isn't kept: only its summary and assumptions are shown
-    local seen = {}
-    for _, a in ipairs(e.assumptions or {}) do seen[a] = true end
-    for _, a in ipairs(M.assumptions(reply)) do -- a retry adds to them
-      if not seen[a] then e.assumptions = e.assumptions or {}; e.assumptions[#e.assumptions + 1] = a end
-    end
-    if e.check then return check(e, wt) end
-    done(e, wt)
+    git.result(e.root, wt, e.base, ref(e, "result"), j.exclude, function(result)
+      e.result = result or e.result
+      e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
+      e.summary = first(reply, 100) -- the reply itself isn't kept: only its summary and assumptions are shown
+      local seen = {}
+      for _, a in ipairs(e.assumptions or {}) do seen[a] = true end
+      for _, a in ipairs(M.assumptions(reply)) do -- a retry adds to them
+        if not seen[a] then e.assumptions = e.assumptions or {}; e.assumptions[#e.assumptions + 1] = a end
+      end
+      if j.stopped then return finish(e, wt, "stopped") end -- x while its result was saved
+      if e.check then return check(e, wt) end
+      done(e, wt)
+    end)
   end
   local function event(line)
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })

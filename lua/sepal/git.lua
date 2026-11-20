@@ -84,20 +84,40 @@ function M.add_worktree(root, dir, commit, on_done)
     vim.schedule_wrap(function(r) on_done(r.code == 0, vim.trim(r.stderr or "")) end))
 end
 
+-- the path is free at once (renamed aside: a retry or reply reuses it); deleting the checkout, slow
+-- in a big repo, happens in the background, then git drops its record of it
 function M.remove_worktree(root, dir)
+  local trash = ("%s.old-%d"):format(dir, vim.uv.hrtime())
+  if vim.uv.fs_rename(dir, trash) then
+    local ok = pcall(vim.system, { "rm", "-rf", trash }, {}, vim.schedule_wrap(function()
+      pcall(vim.system, { "git", "-C", root, "worktree", "prune" })
+    end))
+    if ok then return end
+    dir = trash
+  end
   if M.run(root, { "worktree", "remove", "--force", dir }).code == 0 then return end
   -- git couldn't (a half-made or already deleted worktree): delete it by hand, then drop git's record of it
   if vim.uv.fs_stat(dir) then vim.fn.delete(dir, "rf") end
   M.run(root, { "worktree", "prune" })
 end
 
--- what the agent left in its worktree, as a commit on top of base; exclude: paths that aren't its
--- work (what prepare made)
-function M.result(root, wt, base, ref, exclude)
-  if M.run(wt, { "add", "-A" }, { env = ENV }).code ~= 0 then return nil end
-  if exclude and #exclude > 0 then M.run(wt, vim.list_extend({ "reset", "-q", "--" }, exclude)) end
-  local tree = out(wt, { "write-tree" })
-  return tree and M.commit(root, tree, base, ref)
+-- git in dir off the main loop: on_done(r) runs on it
+local function bg(dir, args, o, on_done)
+  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = true, env = o and o.env }, vim.schedule_wrap(on_done))
+  if not ok then vim.schedule(function() on_done({ code = -1, stdout = "", stderr = tostring(err) }) end) end
+end
+
+-- what the agent left in its worktree, as a commit on top of base (nil if git failed), to on_done;
+-- exclude: paths that aren't its work (what prepare made). In the background: add -A and the first
+-- write-tree of a big checkout take a while
+function M.result(root, wt, base, ref, exclude, on_done)
+  bg(wt, { "add", "-A" }, { env = ENV }, function(r)
+    if r.code ~= 0 then return on_done(nil) end
+    if exclude and #exclude > 0 then M.run(wt, vim.list_extend({ "reset", "-q", "--" }, exclude)) end
+    bg(wt, { "write-tree" }, nil, function(w)
+      on_done(w.code == 0 and M.commit(root, vim.trim(w.stdout), base, ref) or nil)
+    end)
+  end)
 end
 
 -- files and lines changed from a to b: { files, add, del }

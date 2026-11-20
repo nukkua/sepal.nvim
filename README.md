@@ -79,7 +79,7 @@ cases.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  za fold  q close
+<CR> diff  L land  u undo  r reply  o chat  x stop  D drop  C clean  za fold  q close
 
 ✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
     · shutdown() blocks until the queue is empty

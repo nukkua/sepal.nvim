@@ -79,7 +79,7 @@ local STATUS = {
 M.STATUS = STATUS
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  za fold  q close"
+local HELP = "<CR> diff  L land  u undo  r reply  o watch/chat  x stop  D drop  C clean  za fold  q close"
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -212,6 +212,7 @@ function M.open(root)
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "D", on(agent.drop), o("Drop it"))
+    vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
     -- j/k go task to task, past the detail lines under each
     local function step(dir)

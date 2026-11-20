@@ -136,6 +136,7 @@ files, fidget.nvim for a spinner.
                     o     watch it (running) or open its chat (done)
                     x     stop it
                     D     drop it
+                    C     drop the tasks that are over (:Sepal clean)
                     q     close the inbox
 :Sepal land       Land the newest task that's waiting.
                                                                 *:Sepal-undo*

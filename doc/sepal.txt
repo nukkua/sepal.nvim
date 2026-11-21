@@ -87,8 +87,9 @@ files, fidget.nvim for a spinner.
              the other's default.
                                                              *sepal-agents*
 `agents`     the agents :Sepal task asks you to pick from after the kind
-             (1, 2…), each `{ cmd = "claude" | argv, model = "…", args = {…},
-             name = "…" }`. Its model wins over `models`, its args replace
+             by its `key` (unset: 1, 2… its place in the list), each
+             `{ cmd = "claude" | argv, model = "…", args = {…}, name = "…",
+             key = "s" }`. Its model wins over `models`, its args replace
              `args`. Unset: `cmd`. One: used without asking. A `cmd` named
              devin runs the Devin CLI like Claude Code: sepal's hooks and
              the check's allow rule go in a copy of your
@@ -96,8 +97,8 @@ files, fidget.nvim for a spinner.
              a permission prompt warns you, and ctrl-c stops the task. Its
              mode: accept-edits (auto for a btw, smart with `auto_mode`). >lua
                agents = {
-                 { cmd = "claude", model = "claude-opus-5-5" },
-                 { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", name = "devin" },
+                 { cmd = "claude", model = "claude-opus-5-5", key = "c" },
+                 { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", name = "devin", key = "d" },
                }
 <                                                      *sepal-task_suggest*
 `task_suggest` argv that gets the task buffer on stdin (your idea and

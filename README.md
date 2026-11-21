@@ -140,7 +140,8 @@ require("sepal").setup({
 
 ### Devin
 
-With `agents`, `:Sepal task` asks which agent after the kind (`1`, `2`…). A `cmd` named `devin`
+With `agents`, `:Sepal task` asks which agent after the kind: by its `key`, or `1`, `2`… (its place
+in the list) without one. A `cmd` named `devin`
 runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code, the same way: sepal adds its hooks
 and the check's allow rule to a copy of your `~/.config/devin/config.json`, so the panel shows what it
 does, a permission prompt warns you, and ctrl-c in it stops the task (what it did is kept). It runs
@@ -149,8 +150,8 @@ in `accept-edits` (`auto` for a btw, `smart` with `auto_mode`). An agent's `mode
 
 ```lua
 agents = {
-  { cmd = "claude", model = "claude-opus-5-5" },
-  { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
+  { cmd = "claude", model = "claude-opus-5-5", key = "c" },
+  { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", key = "d" },
 },
 ```
 

@@ -1112,16 +1112,16 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   key("b"); sepal.pick()
   local btw = draft()
   sepal.setup({ agents = { { cmd = "claude", name = "claude" }, { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
-    { cmd = "codex", model = "gpt-5" }, { cmd = "devin" } } })
+    { cmd = "codex", model = "gpt-5", key = "t" }, { cmd = "devin" } } })
   local g = vim.fn.getcharstr
-  vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("3"); return "i" end
+  vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("t"); return "i" end
   sepal.pick()
   local codex = draft()
   vim.api.nvim_echo = echo
   sepal.setup({ models = {}, agents = nil })
   eq(shown, { "sepal i implement ✻ opus 5.5   b btw ✻ sonnet   ",
     "sepal i implement   b btw   ",
-    "sepal 1 ✻ claude  2 ❖ devin · opus 5.5 medium + swe 2 high  3 ֎ codex · gpt 5  4 ❖ devin  " })
+    "sepal 1 ✻ claude  2 ❖ devin · opus 5.5 medium + swe 2 high  t ֎ codex · gpt 5  4 ❖ devin  " })
   eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet  " }, { "֎", "SepalDim", " gpt 5  " } })
 end)
 

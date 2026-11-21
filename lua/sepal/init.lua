@@ -18,7 +18,7 @@ local C = {
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
   models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw
-  agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin" }; nil: cmd
+  agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
@@ -462,16 +462,19 @@ function M.pick(range)
   vim.api.nvim_echo({ { "" } }, false, {})
   if not (ok and KINDS[c]) then return end
   if #agents < 2 then return M.task(range, nil, KINDS[c]) end
-  -- then which agent: 1, 2… as listed in the agents option (any other key cancels), each with its logo
+  -- then which agent: its key, else 1, 2… as listed in the agents option (any other key cancels), each with its logo
   chunks = { { "sepal ", "SepalTitle" } }
+  local by = {}
   for i, a in ipairs(agents) do
+    local k = a.key or tostring(i)
+    by[k] = by[k] or a
     local l, m, name = who(KINDS[c], a)
-    vim.list_extend(chunks, { { tostring(i), "SepalAccent" }, { " " }, l, { " " .. name .. (m and " · " .. m or "") .. "  " } })
+    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " }, l, { " " .. name .. (m and " · " .. m or "") .. "  " } })
   end
   vim.api.nvim_echo(chunks, false, {})
   local ok2, n = pcall(vim.fn.getcharstr)
   vim.api.nvim_echo({ { "" } }, false, {})
-  local a = ok2 and agents[tonumber(n) or 0]
+  local a = ok2 and by[n]
   if a then M.task(range, nil, KINDS[c], a) end
 end
 

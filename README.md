@@ -114,6 +114,14 @@ Write the question and send it with `<c-c><c-c>`. It runs on a cheaper model (so
 and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
 `<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat.
 
+### Race
+
+`<c-c><c-r>` runs the task on several agents at once, each in its own worktree: the first one
+whose check passes lands, the others are stopped. It needs a check — the task's `Done when:` or
+the `check` option — it's what picks the winner. With two or more entries in `agents` every one
+of them races; otherwise `race` copies of the agent run. A loser stays in the inbox as stopped
+with its result kept, so `L` can still land it. The winner's line says `won the race of N`.
+
 ## Setup
 
 `setup()` is optional. These are the defaults:
@@ -130,6 +138,7 @@ require("sepal").setup({
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
+  race = 2,            -- <c-c><c-r> runs this many copies of the agent when agents lists fewer than 2
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args')
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
@@ -202,6 +211,7 @@ and the `highlights` option wins over everything.
 | ------------ | ---------------------------------------------------------------------- |
 | `<c-c><c-c>` | send the task and close the buffer; it lands by itself once it passes  |
 | `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
+| `<c-c><c-r>` | race it on several agents at once; the first to pass the check lands  |
 | `<c-c><c-s>` | have `task_suggest` write the task from what's there (`u` undoes it)  |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |

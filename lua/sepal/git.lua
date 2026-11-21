@@ -38,19 +38,29 @@ function M.root(cwd)
   return root
 end
 
+-- git in dir off the main loop: on_done(r) runs on it
+local function bg(dir, args, o, on_done)
+  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = true, env = o and o.env }, vim.schedule_wrap(on_done))
+  if not ok then vim.schedule(function() on_done({ code = -1, stdout = "", stderr = tostring(err) }) end) end
+end
+
+-- a commit of tree (with parent, if any) kept at ref, to cb(commit or nil): same as M.commit,
+-- but git runs off the main loop — a finishing agent doesn't freeze the editor
+function M.commit_bg(root, tree, parent, ref, cb)
+  local args = { "commit-tree", tree, "-m", "sepal" }
+  if parent and parent ~= "" then vim.list_extend(args, { "-p", parent }) end
+  bg(root, args, { env = ENV }, function(r)
+    local c = r.code == 0 and vim.trim(r.stdout) or nil
+    if not (c and ref) then return cb(c) end
+    bg(root, { "update-ref", ref, c }, nil, function() cb(c) end)
+  end)
+end
+
 -- the work tree (untracked files too, ignored ones not) as a commit on top of HEAD, through a copy of
 -- the index, to on_done (nil if git failed); ref: where to keep it. add -A reads the whole work tree,
 -- so it and write-tree run in the background: sending a task answers at once
 function M.snapshot(root, ref, on_done)
   local idx = vim.fn.tempname()
-  -- the index's path and HEAD in one call; a fresh repo has no HEAD (git fails, but prints the path first)
-  local rp = M.run(root, { "rev-parse", "--git-path", "index", "--verify", "-q", "HEAD" })
-  local lines = vim.split(vim.trim(rp.stdout or ""), "\n")
-  local real, head = lines[1], rp.code == 0 and lines[2] or nil
-  if real and real ~= "" then
-    if not real:match("^/") then real = vim.fs.joinpath(root, real) end
-    vim.uv.fs_copyfile(real, idx) -- no index yet (fresh repo): start empty
-  end
   local env = vim.tbl_extend("force", ENV, { GIT_INDEX_FILE = idx })
   local function fail() os.remove(idx); on_done(nil) end
   local function step(args, cb)
@@ -58,11 +68,22 @@ function M.snapshot(root, ref, on_done)
       vim.schedule(fail)
     end
   end
-  step({ "add", "-A" }, function(r)
-    if r.code ~= 0 then return fail() end
-    step({ "write-tree" }, function(w)
-      os.remove(idx)
-      on_done(w.code == 0 and M.commit(root, vim.trim(w.stdout), head, ref) or nil)
+  -- the index's path and HEAD in one call (no GIT_INDEX_FILE: it must name yours); a fresh repo
+  -- has no HEAD (git fails, but prints the path first)
+  bg(root, { "rev-parse", "--git-path", "index", "--verify", "-q", "HEAD" }, nil, function(rp)
+    local lines = vim.split(vim.trim(rp.stdout or ""), "\n")
+    local real, head = lines[1], rp.code == 0 and lines[2] or nil
+    if real and real ~= "" then
+      if not real:match("^/") then real = vim.fs.joinpath(root, real) end
+      vim.uv.fs_copyfile(real, idx) -- no index yet (fresh repo): start empty
+    end
+    step({ "add", "-A" }, function(r)
+      if r.code ~= 0 then return fail() end
+      step({ "write-tree" }, function(w)
+        os.remove(idx)
+        if w.code ~= 0 then return on_done(nil) end
+        M.commit_bg(root, vim.trim(w.stdout), head, ref, on_done)
+      end)
     end)
   end)
 end
@@ -101,47 +122,83 @@ function M.remove_worktree(root, dir)
   M.run(root, { "worktree", "prune" })
 end
 
--- git in dir off the main loop: on_done(r) runs on it
-local function bg(dir, args, o, on_done)
-  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = true, env = o and o.env }, vim.schedule_wrap(on_done))
-  if not ok then vim.schedule(function() on_done({ code = -1, stdout = "", stderr = tostring(err) }) end) end
-end
-
 -- what the agent left in its worktree, as a commit on top of base (nil if git failed), to on_done;
 -- exclude: paths that aren't its work (what prepare made). In the background: add -A and the first
 -- write-tree of a big checkout take a while
 function M.result(root, wt, base, ref, exclude, on_done)
   bg(wt, { "add", "-A" }, { env = ENV }, function(r)
     if r.code ~= 0 then return on_done(nil) end
-    if exclude and #exclude > 0 then M.run(wt, vim.list_extend({ "reset", "-q", "--" }, exclude)) end
-    bg(wt, { "write-tree" }, nil, function(w)
-      on_done(w.code == 0 and M.commit(root, vim.trim(w.stdout), base, ref) or nil)
-    end)
+    local function tree()
+      bg(wt, { "write-tree" }, nil, function(w)
+        if w.code ~= 0 then return on_done(nil) end
+        M.commit_bg(root, vim.trim(w.stdout), base, ref, on_done)
+      end)
+    end
+    if exclude and #exclude > 0 then bg(wt, vim.list_extend({ "reset", "-q", "--" }, exclude), nil, tree)
+    else tree() end
   end)
 end
 
--- files and lines changed from a to b: { files, add, del, list = { "path +1 −3", ... }, paths = { "path", ... } }
-function M.stat(root, a, b)
-  local s = { files = 0, add = 0, del = 0, list = {}, paths = {} }
-  for line in (out(root, { "diff", "--numstat", "--no-renames", a, b }) or ""):gmatch("[^\n]+") do
+-- the numstat of a -> b parsed: { files, add, del, list = { "path +1 −3", ... }, paths = { "path", ... } }
+local function stat_of(s)
+  local st = { files = 0, add = 0, del = 0, list = {}, paths = {} }
+  for line in s:gmatch("[^\n]+") do
     local add, del, path = line:match("^(%S+)%s+(%S+)%s+(.*)$")
-    s.list[#s.list + 1] = path .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
-    s.paths[#s.paths + 1] = path
-    s.files, s.add, s.del = s.files + 1, s.add + (tonumber(add) or 0), s.del + (tonumber(del) or 0)
+    st.list[#st.list + 1] = path .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
+    st.paths[#st.paths + 1] = path
+    st.files, st.add, st.del = st.files + 1, st.add + (tonumber(add) or 0), st.del + (tonumber(del) or 0)
   end
-  return s
+  return st
 end
 
--- the line of each file's first change in b: { [path] = line }
+-- the -U0 diff of a -> b parsed: { [path] = line of its first change }
 -- shortcut: paths git quotes (odd characters) aren't found, they start at line 1
-function M.firsts(root, a, b)
+local function firsts_of(s)
   local t, path = {}, nil
-  for l in (out(root, { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b }) or ""):gmatch("[^\n]+") do
+  for l in s:gmatch("[^\n]+") do
     path = l:match("^diff %-%-git a/.- b/(.*)$") or path
     local n = l:match("^@@ %-%S+ %+(%d+)")
     if n and path and not t[path] then t[path] = math.max(1, tonumber(n)) end
   end
   return t
+end
+
+local NUMSTAT = function(a, b) return { "diff", "--numstat", "--no-renames", a, b } end
+local FIRSTS = function(a, b) return { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b } end
+
+-- files and lines changed from a to b: stat_of's table
+function M.stat(root, a, b)
+  return stat_of(out(root, NUMSTAT(a, b)) or "")
+end
+
+-- M.stat to cb(st): the diff runs off the main loop
+function M.stat_bg(root, a, b, cb)
+  bg(root, NUMSTAT(a, b), nil, function(r) cb(stat_of(r.code == 0 and r.stdout or "")) end)
+end
+
+-- the line of each file's first change in b: { [path] = line }
+function M.firsts(root, a, b)
+  return firsts_of(out(root, FIRSTS(a, b)) or "")
+end
+
+-- a git process started, not waited: { p } or nil when it couldn't start
+local function start(root, args, o)
+  local ok, p = pcall(vim.system, vim.list_extend({ "git", "-C", root }, args), o or { text = true })
+  return ok and p or nil
+end
+local function text(p)
+  local r = p and p:wait() or { code = -1, stdout = "" }
+  return r.code == 0 and r.stdout or ""
+end
+
+-- stat and firsts of a -> b at once: the two diffs run concurrently. on_stat(st), if given, runs
+-- once the numstat is in, while the -U0 diff may still run — for work that only needs the paths;
+-- its return value is this call's third
+function M.review(root, a, b, on_stat)
+  local num, uni = start(root, NUMSTAT(a, b)), start(root, FIRSTS(a, b))
+  local st = stat_of(text(num))
+  local extra = on_stat and on_stat(st)
+  return st, firsts_of(text(uni)), extra
 end
 
 -- path's content at rev, "" if it isn't there (added or deleted)
@@ -150,8 +207,10 @@ function M.file(root, rev, path)
   return r.code == 0 and r.stdout or ""
 end
 
-function M.delete_refs(root, prefix)
-  local refs = out(root, { "for-each-ref", "--format=delete %(refname)", prefix }) or ""
+-- delete every ref under prefixes (one prefix string, or a list of them): one for-each-ref + one update-ref
+function M.delete_refs(root, prefixes)
+  local refs = out(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" },
+    type(prefixes) == "table" and prefixes or { prefixes })) or ""
   if refs ~= "" then M.run(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }) end -- all of them in one go
 end
 
@@ -168,31 +227,57 @@ local function writeb(path, s)
   f:write(s)
   f:close()
 end
--- the contents of many blobs with one git process: { [oid] = content }; an object that isn't a blob
--- (a submodule's commit) or isn't there is left out
-local function blobs(root, oids)
-  if #oids == 0 then return {} end
-  local r = M.run(root, { "cat-file", "--batch" }, { binary = true, stdin = table.concat(oids, "\n") .. "\n" })
-  local got, s, pos = {}, r.code == 0 and r.stdout or "", 1
-  while pos <= #s do
+-- cat-file --batch's stdout parsed as a list in the specs' order: content, or nil where the
+-- record's header was "<name> missing"/"<name> ambiguous" or the object isn't a blob
+local function batch_of(s, n)
+  local got, pos = {}, 1
+  for i = 1, n do
     local eol = s:find("\n", pos, true)
     if not eol then break end
-    local oid, kind, size = s:sub(pos, eol - 1):match("^(%x+) (%S+) (%d+)$")
-    if not oid then pos = eol + 1 -- "<oid> missing"
+    local kind, size = s:sub(pos, eol - 1):match("^%x+ (%S+) (%d+)$")
+    if not kind then pos = eol + 1 -- "<name> missing" / "<name> ambiguous"
     else
       size = tonumber(size)
-      if kind == "blob" then got[oid] = s:sub(eol + 1, eol + size) end
+      if kind == "blob" then got[i] = s:sub(eol + 1, eol + size) end
       pos = eol + size + 2 -- the content, then its "\n"
     end
   end
   return got
 end
+
+-- cat-file --batch for specs, started not waited; files_wait's handle
+function M.files_start(root, specs)
+  if #specs == 0 then return nil end
+  local p = start(root, { "cat-file", "--batch" }, { stdin = table.concat(specs, "\n") .. "\n" })
+  return p and { p = p, n = #specs } or nil
+end
+
+-- what files_start's process read: the parsed list (see batch_of)
+function M.files_wait(h)
+  local r = h and h.p:wait() or { code = -1, stdout = "" }
+  return batch_of(h and r.code == 0 and r.stdout or "", h and h.n or 0)
+end
+
+-- the contents of many objects with one git process, in specs' order (specs: oids or names like
+-- rev:path); nil where an object is missing or not a blob (a submodule's commit)
+function M.files(root, specs)
+  return M.files_wait(M.files_start(root, specs))
+end
+
+-- the contents of many blobs with one git process: { [oid] = content }; an object that isn't a blob
+-- (a submodule's commit) or isn't there is left out
+local function blobs(root, oids)
+  local list, got = M.files(root, oids), {}
+  for i, oid in ipairs(oids) do if list[i] then got[oid] = list[i] end end
+  return got
+end
 local function merge3(root, cur, base, theirs)
   local t = { vim.fn.tempname(), vim.fn.tempname(), vim.fn.tempname() }
   writeb(t[1], cur); writeb(t[2], base); writeb(t[3], theirs)
-  local r = M.run(root, { "merge-file", "-p", "-L", "yours", "-L", "base", "-L", "sepal", t[1], t[2], t[3] }, { binary = true })
-  for _, p in ipairs(t) do os.remove(p) end
-  return r.code >= 0 and r.code < 128 and r.stdout or nil, r.code ~= 0
+  -- no wait: every file's merge runs at once (see plan); its temp files go after it's waited
+  local ok, p = pcall(vim.system, vim.list_extend({ "git", "-C", root },
+    { "merge-file", "-p", "-L", "yours", "-L", "base", "-L", "sepal", t[1], t[2], t[3] }), { text = false })
+  return { p = ok and p or nil, t = t, cur = cur }
 end
 
 -- what applying a -> b to the work tree would do: { { rel, path, content (nil: delete), conflict } }
@@ -219,11 +304,18 @@ function M.plan(root, a, b)
     elseif cur == old then c.content = new -- you didn't touch it: take theirs (or delete)
     elseif new == nil or cur == nil then c.conflict, c.content = true, cur -- deleted on one side, changed on the other
     elseif (old or ""):find("\0", 1, true) or new:find("\0", 1, true) or cur:find("\0", 1, true) then c.conflict, c.content = true, cur -- binary
-    else
-      local merged, conflict = merge3(root, cur, old or "", new)
-      c.content, c.conflict = merged or cur, conflict or not merged
-    end
+    else c.merge = merge3(root, cur, old or "", new) end
     if not c.skip then changes[#changes + 1] = c end
+  end
+  for _, c in ipairs(changes) do -- the merges all run by now: wait each, then clean its temp files
+    local m = c.merge
+    if m then
+      c.merge = nil
+      local r = m.p and m.p:wait() or { code = -1, stdout = "" }
+      for _, p in ipairs(m.t) do os.remove(p) end
+      local merged = r.code >= 0 and r.code < 128 and r.stdout or nil
+      c.content, c.conflict = merged or m.cur, r.code ~= 0 or not merged
+    end
   end
   return changes
 end

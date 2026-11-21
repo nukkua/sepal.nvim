@@ -335,6 +335,63 @@ test("max_running: the tasks past it wait in a queue and start when one is done"
   eq({ inbox.list(work)[1].status, inbox.list(work)[2].status }, { "landed", "landed" })
 end)
 
+test("a race: the first run to pass lands, the others are stopped", function()
+  clean(); reset()
+  os.remove(T .. "/lock")
+  -- whoever runs first takes the lock and is done at once; the other sleeps and loses
+  vim.env.SEPAL_EDIT = [[if mkdir "$SEPAL_T/lock" 2>/dev/null; then echo fast > a.txt; else sleep 3; echo slow > a.txt; fi]]
+  local t0 = vim.uv.hrtime()
+  local got = run({ "Goal: race me", "Done when: true" }, "<c-c><c-r>")
+  assert(vim.uv.hrtime() - t0 < 3e9, "the slow run was waited for, not stopped")
+  eq(file("a.txt"), "fast\n")
+  eq(got, { "racing 2: race me · the first to pass `true` lands · :Sepal panel watches",
+    "landed: race me · 1 file +1 −3 · true ✓ · won the race of 2\n· kept the old API\n· no new deps" }) -- no "stopped:" for the loser
+  local list = inbox.list(work)
+  local winner = list[1].won and list[1] or list[2]
+  local loser = list[1].lost and list[1] or list[2]
+  eq({ winner.status, winner.won, winner.race }, { "landed", 2, nil })
+  eq({ loser.status, loser.lost, loser.why, loser.race }, { "stopped", true, "lost the race: another run passed first", nil })
+end)
+
+test("a race needs a check", function()
+  clean(); reset()
+  local check = sepal.config().check
+  sepal.config().check = nil
+  local got = notified(function() send({ "Goal: no check" }, "<c-c><c-r>") end)
+  sepal.config().check = check
+  eq(got, { { "a race needs a check to pick its winner: fill in Done when:", vim.log.levels.WARN } })
+  eq(#inbox.list(work), 0)
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), { "Goal: no check" }) -- the draft stayed
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
+end)
+
+test("a race runs every agent in agents", function()
+  clean(); reset()
+  sepal.setup({ agents = { { cmd = { "sh", "-c", fake, "sh" }, model = "m1" }, { cmd = { "sh", "-c", fake, "sh" }, model = "m2" } } })
+  vim.env.SEPAL_EDIT = [[echo raced > a.txt]]
+  local got = run({ "Goal: two agents", "Done when: true" }, "<c-c><c-r>")
+  sepal.setup({ agents = false }) -- setup({ agents = nil }) is a no-op: nil keys vanish
+  eq(got[1], "racing 2: two agents · the first to pass `true` lands · :Sepal panel watches")
+  local a = args()
+  assert(vim.iter(a):any(function(l) return l:find("--model m1", 1, true) end), vim.inspect(a))
+  assert(vim.iter(a):any(function(l) return l:find("--model m2", 1, true) end), vim.inspect(a))
+  eq(#vim.tbl_filter(function(e) return e.won end, inbox.list(work)), 1)
+end)
+
+test("a racer whose check fails says nothing while another still runs", function()
+  clean(); reset()
+  os.remove(T .. "/lock")
+  sepal.setup({ retries = 0 })
+  vim.env.SEPAL_EDIT = [[if mkdir "$SEPAL_T/lock" 2>/dev/null; then echo broken > a.txt; else sleep 1; echo good > a.txt; fi]]
+  local got = notified(function() send({ "Goal: quiet loser", "Done when: grep -q good a.txt" }, "<c-c><c-r>"); idle() end)
+  sepal.setup({ retries = 1 })
+  eq(file("a.txt"), "good\n")
+  for _, g in ipairs(got) do assert(g[2] < vim.log.levels.WARN, "warned: " .. g[1]) end
+  local st = {}
+  for _, e in ipairs(inbox.list(work)) do st[e.status] = (st[e.status] or 0) + 1 end
+  eq(st, { landed = 1, failed = 1 })
+end)
+
 test("outside a git repo the task comes back in its buffer", function()
   local other = vim.fs.joinpath(T, "plain")
   vim.fn.mkdir(other, "p")
@@ -730,6 +787,29 @@ test("assumptions are read from the end of a reply", function()
   eq(agent.assumptions("no list"), {})
 end)
 
+test("a reply is read from the transcript's end, past a line that spans a read chunk", function()
+  local reply_of = agent._t.reply_of
+  local early = '{"type":"assistant","message":{"content":[{"type":"text","text":"early"}]}}'
+  local function user() return '{"type":"user","message":{"content":"' .. string.rep("u", 1024) .. '"}}' end
+  local function tr(lines)
+    local p = vim.fn.tempname()
+    local f = assert(io.open(p, "w"))
+    f:write(table.concat(lines, "\n") .. "\n")
+    f:close()
+    return p
+  end
+  local big = string.rep("b", 100 * 1024) -- wider than a read chunk: it takes a retry to see it whole
+  local lines = { early }
+  for _ = 1, 200 do lines[#lines + 1] = user() end
+  lines[#lines + 1] = '{"type":"assistant","message":{"content":[{"type":"text","text":"' .. big .. '"}]}}'
+  lines[#lines + 1] = user()
+  eq(reply_of({ transcript_path = tr(lines) }), big)
+  table.remove(lines, #lines - 1) -- only the early assistant line, ~200KB of user lines before the end
+  table.remove(lines, #lines)
+  eq(reply_of({ transcript_path = tr(lines) }), "early")
+  eq(reply_of({ last_assistant_message = "from the hook", transcript_path = tr(lines) }), "from the hook")
+end)
+
 test("a removed worktree's path is free at once; the checkout and git's record of it go in the background", function()
   local git, wt = require("sepal.git"), vim.fs.joinpath(T, "wt-rm")
   local made
@@ -884,8 +964,8 @@ test("a task shows its keys on top, like the inbox", function()
   local b = help()
   sepal.config().task_suggest = nil
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 },
-    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> write  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
+  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-r> race  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 },
+    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-r> race  <c-c><c-s> write  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
 end)
 
 test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", function()

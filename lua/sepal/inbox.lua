@@ -27,7 +27,10 @@ function M.list(root)
   return list
 end
 
+local batching, pending = 0, { roots = {}, render = false } -- >0: saves and renders wait (see M.batch)
+
 local function save(root)
+  if batching > 0 then pending.roots[root] = true return end
   vim.fn.mkdir(cfg().worktrees, "p")
   local keep = vim.tbl_map(function(e) -- a shallow copy is enough: it's only encoded
     local c = {}
@@ -40,7 +43,26 @@ end
 
 M.save = save
 
-local render -- below
+local draw -- below
+local function render() -- in a batch only flagged, drawn once at its end
+  if batching > 0 then pending.render = true return end
+  draw()
+end
+
+-- run fn with saves and renders deferred: each pending root is saved once and the inbox redrawn
+-- once, when the outermost batch ends (also when fn errors, before it's rethrown)
+function M.batch(fn)
+  batching = batching + 1
+  local ok, err = pcall(fn)
+  batching = batching - 1
+  if batching == 0 then
+    local p = pending
+    pending = { roots = {}, render = false }
+    for root in pairs(p.roots) do save(root) end
+    if p.render then render() end
+  end
+  if not ok then error(err, 0) end
+end
 
 -- after any change to an entry: save, and redraw the inbox if it's open
 function M.changed(e)
@@ -93,9 +115,17 @@ local function ago(t)
   end
   return "now"
 end
+local fit_c, fit_n = {}, 0 -- render calls it per entry per column: memoized by w.."\0"..s
 local function fit(s, w)
-  if vim.api.nvim_strwidth(s) > w then s = vim.fn.strcharpart(s, 0, w - 1) .. "…" end
-  return s .. string.rep(" ", w - vim.api.nvim_strwidth(s))
+  local k = w .. "\0" .. s
+  local v = fit_c[k]
+  if not v then
+    if fit_n > 4096 then fit_c, fit_n = {}, 0 end
+    if vim.api.nvim_strwidth(s) > w then s = vim.fn.strcharpart(s, 0, w - 1) .. "…" end
+    v = s .. string.rep(" ", w - vim.api.nvim_strwidth(s))
+    fit_c[k], fit_n = v, fit_n + 1
+  end
+  return v
 end
 
 M.ago, M.fit = ago, fit
@@ -116,6 +146,8 @@ end
 -- the lines under an entry: what you should read
 local function details(e)
   local d = {}
+  if e.won then d[#d + 1] = "⚑ won the race of " .. e.won end
+  if e.race and (M.LIVE[e.status] or e.status == "queued") then d[#d + 1] = "⚑ racing " .. e.racers .. ": the first to pass lands" end
   if e.why then d[#d + 1] = e.why end
   if e.error then d[#d + 1] = e.error end
   if e.status == "running" then
@@ -133,6 +165,7 @@ end
 local opened = {} -- task id -> true when you opened its fold: tasks start folded
 local heads = {} -- row -> true for each task's first line, where its fold starts
 local drawn -- what the inbox shows, its spinners blanked: a redraw that only moves them rewrites just those
+local clocked -- clock()'s value at the last draw: a tick redraws for the ages only when it moved
 local spun = {} -- the rows drawn with a spinner
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
@@ -154,7 +187,16 @@ local function spin(b)
   end)
 end
 
-render = function()
+-- what the ages say now, all of them: changes to entries already redraw, so between redraws this
+-- only moves when an age rolls over — that's when a tick still wants a full draw
+local function clock()
+  local t = {}
+  for _, list in pairs(cache) do for _, e in ipairs(list) do t[#t + 1] = ago(e.time) end end
+  return table.concat(t)
+end
+
+draw = function()
+  clocked = clock() -- the ages as drawn (by the panel too): a tick redraws only when this moves
   local panel = package.loaded["sepal.panel"] -- the side panel shows the same tasks: it redraws with the inbox
   local live = panel and panel.render() or false
   local b = buf()
@@ -167,8 +209,9 @@ render = function()
     timer = assert(vim.uv.new_timer())
     timer:start(100, 100, vim.schedule_wrap(function()
       frame = frame % #SPIN + 1
-      -- every change redraws at once, so a tick only moves the spinners; a whole redraw once a turn (1s) moves the ages
-      if frame == 1 then return render() end
+      -- every change redraws at once, so a tick only moves the spinners; once a turn (1s) a whole
+      -- redraw moves the ages — only when one actually rolled over since the last draw
+      if frame == 1 and clock() ~= clocked then return render() end
       if package.loaded["sepal.panel"] then package.loaded["sepal.panel"].spin() end
       local b = buf()
       if drawn and b and vim.fn.win_findbuf(b)[1] and not vim.bo[b].modified then spin(b) end
@@ -279,8 +322,9 @@ function M.write(b)
     for i = (seen[k] or 0) + 1, #list do gone[#gone + 1] = list[i] end
   end
   vim.bo[b].modified = false
-  local agent = require("sepal.agent")
-  for _, id in ipairs(gone) do local e = M.find(root, id); if e then agent.drop(e) end end -- a running one stays
+  local agent, dropping = require("sepal.agent"), {}
+  for _, id in ipairs(gone) do local e = M.find(root, id); if e then dropping[#dropping + 1] = e end end
+  agent.drop_many(dropping) -- a running one stays
   drawn = nil
   render()
   local e = copies[1] and M.find(root, copies[1])

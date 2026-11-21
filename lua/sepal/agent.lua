@@ -146,6 +146,7 @@ local function facts(e)
   local f = {}
   if e.stat and e.stat.files > 0 then f[#f + 1] = ("%s +%d −%d"):format(plural(e.stat.files, "file"), e.stat.add, e.stat.del) end
   if e.check and e.checked ~= nil then f[#f + 1] = e.check .. (e.checked and " ✓" or " ✗") end
+  if e.won then f[#f + 1] = "won the race of " .. e.won end
   return #f > 0 and " · " .. table.concat(f, " · ") or ""
 end
 local function with_assumptions(msg, e)
@@ -169,11 +170,18 @@ local function finish(e, wt, status, extra)
   for k, v in pairs(extra or {}) do e[k] = v end
   inbox.changed(e)
   if j and j.done then j.done(true) end
-  if status == "stopped" then notify("stopped: " .. e.title)
-  elseif status == "error" then notify("✗ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
-  elseif status == "failed" then
-    local tries = (e.attempts or 0) + 1
-    notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
+  if status == "stopped" then
+    if not e.lost then notify("stopped: " .. e.title) end -- a race loser says nothing: the winner's message covers it
+  elseif status == "error" or status == "failed" then
+    -- a racer down while the race still runs says nothing either; the last one out notifies as usual
+    local racing = e.race and vim.iter(inbox.list(e.root)):any(function(x) return x ~= e and x.race == e.race and M.running(x) end)
+    if not racing then
+      if status == "error" then notify("✗ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
+      else
+        local tries = (e.attempts or 0) + 1
+        notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
+      end
+    end
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   elseif status == "answered" then notify("● " .. e.title .. ": " .. tostring(e.summary) .. " · <CR> in :Sepal inbox reads it")
   end
@@ -188,6 +196,21 @@ end
 local agent, show, loading -- below
 
 local function done(e, wt)
+  if e.race then -- it passed first (nochange counts): every other run is over, whatever it was doing
+    local race = e.race
+    inbox.batch(function()
+      for _, x in ipairs(inbox.list(e.root)) do
+        if x.race == race then
+          x.race = nil
+          if x ~= e and M.running(x) then
+            x.lost, x.why = true, "lost the race: another run passed first"
+            M.stop(x)
+          end
+        end
+      end
+    end)
+    e.won = e.racers
+  end
   if not e.stat or e.stat.files == 0 then return finish(e, wt, "nochange") end
   finish(e, wt, "ready")
   if (e.land or C().land) == "auto" then return M.land(e, true) end
@@ -237,25 +260,38 @@ local function devin_config(path, allow)
   w:close()
 end
 
--- the agent's last reply: from the Stop hook, else the end of its transcript
+-- the agent's last reply: from the Stop hook, else the end of its transcript (read backwards:
+-- a transcript can be MBs of tool output, the reply is its last assistant line with text)
 local function reply_of(ev)
   if type(ev.last_assistant_message) == "string" then return ev.last_assistant_message end
   local f = type(ev.transcript_path) == "string" and io.open(ev.transcript_path)
   if not f then return nil end
-  local last
-  for l in f:lines() do
-    -- decode only the agent's lines: a transcript can be MBs of tool output
-    local ok, t = false, nil
-    if l:find('"assistant"', 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
-    local c = ok and type(t) == "table" and t.type == "assistant" and type(t.message) == "table" and t.message.content
-    local text = {}
-    for _, b in ipairs(type(c) == "table" and c or {}) do
-      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then text[#text + 1] = b.text end
+  local size = f:seek("end") or 0
+  local chunk = 65536
+  while true do
+    local off = math.max(size - chunk, 0)
+    f:seek("set", off)
+    local s = f:read("a") or ""
+    if off > 0 then s = s:sub((s:find("\n") or #s + 1) + 1) end -- the first line may be partial
+    local lines = {}
+    for l in s:gmatch("[^\n]+") do lines[#lines + 1] = l end
+    for i = #lines, 1, -1 do
+      local l = lines[i]
+      -- decode only the agent's lines: a transcript can be MBs of tool output
+      local ok, t = false, nil
+      if l:find('"assistant"', 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
+      local c = ok and type(t) == "table" and t.type == "assistant" and type(t.message) == "table" and t.message.content
+      local text = {}
+      for _, b in ipairs(type(c) == "table" and c or {}) do
+        if type(b) == "table" and b.type == "text" and type(b.text) == "string" then text[#text + 1] = b.text end
+      end
+      if #text > 0 then f:close() return table.concat(text, "\n") end
     end
-    if #text > 0 then last = table.concat(text, "\n") end
+    if off == 0 then break end
+    chunk = math.min(chunk * 2, size) -- not found yet: a bigger share of the file, up to all of it
   end
   f:close()
-  return last
+  return nil
 end
 
 -- the whole editor: the agent's terminal is this size from its start to every :Sepal open
@@ -337,16 +373,19 @@ agent = function(e, prompt, wt)
     end
     git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
       e.result = result or e.result
-      e.stat = e.result and git.stat(e.root, e.base, e.result) or e.stat
-      e.summary = first(reply, 100) -- the reply itself isn't kept: only its summary and assumptions are shown
-      local seen = {}
-      for _, a in ipairs(e.assumptions or {}) do seen[a] = true end
-      for _, a in ipairs(M.assumptions(reply)) do -- a retry adds to them
-        if not seen[a] then e.assumptions = e.assumptions or {}; e.assumptions[#e.assumptions + 1] = a end
+      local function rest()
+        e.summary = first(reply, 100) -- the reply itself isn't kept: only its summary and assumptions are shown
+        local seen = {}
+        for _, a in ipairs(e.assumptions or {}) do seen[a] = true end
+        for _, a in ipairs(M.assumptions(reply)) do -- a retry adds to them
+          if not seen[a] then e.assumptions = e.assumptions or {}; e.assumptions[#e.assumptions + 1] = a end
+        end
+        if j.stopped then return finish(e, wt, "stopped") end -- x while its result was saved
+        if e.check then return check(e, wt) end
+        done(e, wt)
       end
-      if j.stopped then return finish(e, wt, "stopped") end -- x while its result was saved
-      if e.check then return check(e, wt) end
-      done(e, wt)
+      if e.result then return git.stat_bg(e.root, e.base, e.result, function(st) e.stat = st; rest() end) end
+      rest()
     end)
   end
   local transcript, toff = nil, 0
@@ -372,6 +411,7 @@ agent = function(e, prompt, wt)
       end
     end
   end
+  local off, dirty = 0, false -- dirty: an event changed what the inbox shows; poll renders once
   local function event(line)
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
     if over or not ok or type(ev) ~= "table" then return end
@@ -385,31 +425,30 @@ agent = function(e, prompt, wt)
       e.session = ev.session_id
       inbox.save(e.root) -- now, not when it finishes: a quit mid-run keeps the chat for o and r
     end
-    if type(ev.model) == "string" and ev.model ~= e.model then e.model = ev.model; inbox.render() end -- SessionStart says it
+    if type(ev.model) == "string" and ev.model ~= e.model then e.model = ev.model; dirty = true end -- SessionStart says it
     local name = ev.hook_event_name
     if name == "PreToolUse" then
       e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)
       j.update(e.title .. ": " .. e.activity)
-      inbox.render()
+      dirty = true
     elseif name == "Notification" or name == "PermissionRequest" then -- Devin asks for a tool with the latter
       e.activity = "needs you"
-      inbox.render()
+      dirty = true
       local msg = ev.message or name == "PermissionRequest" and "asks to run " .. about({ name = ev.tool_name, input = ev.tool_input }, wt)
       notify("▲ " .. e.title .. ": " .. tostring(msg or "it needs you") .. " · :Sepal open", WARN)
     elseif name == "SubagentStart" then -- running subagents, in the order they started
       e.subagents = e.subagents or {}
       table.insert(e.subagents, { id = ev.agent_id, name = tostring(ev.agent_type or "agent") })
-      inbox.render()
+      dirty = true
     elseif name == "SubagentStop" then
       for i, a in ipairs(e.subagents or {}) do
         if a.id == ev.agent_id then table.remove(e.subagents, i); break end
       end
-      inbox.render()
+      dirty = true
     elseif name == "Stop" then
       stopped(ev)
     end
   end
-  local off = 0
   local function poll()
     local st = vim.uv.fs_stat(events)
     local f = st and st.size > off and io.open(events)
@@ -421,6 +460,7 @@ agent = function(e, prompt, wt)
     if not cut then return end
     off = off + cut - 1
     for l in s:sub(1, cut - 1):gmatch("[^\n]+") do event(l) end
+    if dirty then dirty = false; if not over then inbox.render() end end -- one render per read, not per line
   end
   local function exited(_, code)
     if over then return end
@@ -470,7 +510,7 @@ agent = function(e, prompt, wt)
   j.buf, j.job = b, { kill = function() vim.fn.jobstop(chan) end }
   if watching(j) then show(b, j.watch.win) end -- a retry, watched
   j.watch = nil
-  local asked -- Claude Code asks to trust each new folder before it starts (no hook runs before that)
+  local asked, btick -- Claude Code asks to trust each new folder before it starts (no hook runs before that)
   timer:start(100, 100, vim.schedule_wrap(function()
     if over then return end
     poll()
@@ -479,7 +519,11 @@ agent = function(e, prompt, wt)
       return stopped({ transcript_path = transcript })
     end
     if started or asked or not vim.api.nvim_buf_is_valid(b) then return end
-    -- the prompt is on the first screen: no need to join the scrollback
+    -- the prompt is on the first screen: no need to join the scrollback, and it's read
+    -- only when something was printed since last time, not every tick
+    local t = vim.api.nvim_buf_get_changedtick(b)
+    if t == btick then return end
+    btick = t
     if table.concat(vim.api.nvim_buf_get_lines(b, 0, vim.o.lines, false), " "):find("Quick safety check", 1, true) then
       asked, e.activity = true, "needs you"
       inbox.render()
@@ -559,7 +603,8 @@ end
 -- land: "auto" / "manual" for this task, nil: the land option
 -- kind: "btw" for a question (see sepal.task), nil/"implement" for a change
 -- agent: { cmd, model } from the agents option (nil: its first, or cmd and models when it's not set)
-function M.start(text, cwd, land, on_fail, kind, agent)
+-- race: { id, n }: this run is one of n racing the same task, id their shared name (see M.race)
+function M.start(text, cwd, land, on_fail, kind, agent, race)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
@@ -570,6 +615,7 @@ function M.start(text, cwd, land, on_fail, kind, agent)
     attempts = 0, land = land, kind = btw and "btw" or nil }
   agent = agent or (C().agents or {})[1]
   if agent then e.agent = { cmd = agent.cmd, model = agent.model, args = agent.args } end -- kept with the task: r and c use it again
+  if race then e.race, e.racers = race.id or e.id, race.n end -- the first racer's id names the race
   inbox.add(e)
   if btw then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
   jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
@@ -585,7 +631,7 @@ function M.start(text, cwd, land, on_fail, kind, agent)
     if j.stopped then
       e.status = "stopped"
       inbox.changed(e)
-      notify("stopped: " .. e.title)
+      if not e.lost then notify("stopped: " .. e.title) end -- a race loser says nothing
       return M._next()
     end
     queue[#queue + 1] = { e, text .. "\n" .. notes(e), base } -- behind the tasks queued before it
@@ -595,11 +641,36 @@ function M.start(text, cwd, land, on_fail, kind, agent)
   return e
 end
 
+-- the same task on several agents at once (each in its own worktree): the first run whose check
+-- passes lands, the rest are stopped (see done). agents with 2+ entries races all of them, in
+-- order (the agent arg is ignored then); else race copies of agent (nil: the default). The
+-- entries started, or nil, why — the task needs a check to pick its winner by
+function M.race(text, cwd, land, on_fail, agent)
+  if not git.root(cwd) then return nil, "not in a git repository: a task runs in a git worktree" end
+  if not (M.parse(text) or C().check) then return nil, "a race needs a check to pick its winner: fill in Done when:" end
+  local agents = C().agents or {}
+  local every = #agents >= 2 and agents or nil
+  local n = every and #every or C().race or 2
+  local failed -- each racer's save could fail: the way back fires once
+  local function back(why)
+    if failed then return end
+    failed = true
+    if on_fail then return on_fail(why) end
+    notify(why, ERROR)
+  end
+  local es, rid = {}, nil -- the first racer's id names them all
+  for i = 1, n do
+    local e = M.start(text, cwd, land, back, nil, every and every[i] or agent or agents[1], { id = rid, n = n })
+    if e then es[#es + 1] = e; rid = rid or e.id end
+  end
+  return es
+end
+
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
 function M.continue(e, text)
   if M.running(e) then return notify("it's still running") end
   endchat(e) -- the agent goes on with the same chat
-  e.attempts, e.checked, e.why, e.error, e.check_out = 0, nil, nil, nil, nil
+  e.attempts, e.checked, e.why, e.error, e.check_out, e.race, e.lost = 0 -- won stays: it did win its race
   e.time = os.time()
   launch(e, text .. "\n" .. notes(e), e.result or e.base)
 end
@@ -621,11 +692,17 @@ function M.resume(e)
   if e.kind == "btw" or not (e.session and vim.uv.fs_stat(wt)) then return go() end
   jobs[e.id] = {} -- saving it: counts as running, x stops it
   git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
-    local j = jobs[e.id]
-    jobs[e.id] = nil
-    if result then e.result, e.stat = result, git.stat(e.root, e.base, result) end
-    if j.stopped then e.status = "stopped"; inbox.changed(e); M._next(); return notify("stopped: " .. e.title) end
-    go()
+    local j = jobs[e.id] -- kept through the stat: a stop in between is caught, the slot stays taken
+    local function rest()
+      jobs[e.id] = nil
+      if j.stopped then e.status = "stopped"; inbox.changed(e); M._next(); return notify("stopped: " .. e.title) end
+      go()
+    end
+    if result then
+      e.result = result
+      return git.stat_bg(e.root, e.base, result, function(st) e.stat = st; rest() end)
+    end
+    rest()
   end)
 end
 
@@ -691,6 +768,7 @@ function M.stop(e)
     table.remove(queue, i)
     e.status = "stopped"
     inbox.changed(e)
+    if e.lost then return end -- a race loser says nothing
     return notify("stopped: " .. e.title)
   end
   local j = jobs[e.id]
@@ -720,27 +798,54 @@ function M.sweep_pastes()
   end
 end
 
--- Claude Code's record of a chat: <config>/projects/<cwd>/<session>.jsonl, and a <session>/ dir beside it
-local function rm_session(id)
-  if not (id and id:match("^[%w-]+$")) then return end -- it goes in a glob
+-- Claude Code's record of each chat: <config>/projects/<cwd>/<session>.jsonl, and a <session>/ dir
+-- beside it; one pass of the project dirs for all ids, an fs_stat per id in each
+local function rm_sessions(ids)
+  local want = {}
+  for _, id in pairs(ids) do if id and id:match("^[%w-]+$") then want[id] = true end end -- it goes in a path
+  if not next(want) then return end
   local dir = vim.fs.joinpath(vim.env.CLAUDE_CONFIG_DIR or vim.fs.joinpath(vim.uv.os_homedir(), ".claude"), "projects")
-  for _, p in ipairs(vim.fn.glob(dir .. "/*/" .. id .. ".jsonl", true, true)) do
-    os.remove(p)
-    vim.fn.delete(vim.fs.joinpath(vim.fs.dirname(p), id), "rf")
-    vim.uv.fs_rmdir(vim.fs.dirname(p)) -- a worktree's project dir, now empty; fails (kept) if not
+  if not vim.uv.fs_stat(dir) then return end
+  for name in vim.fs.dir(dir) do
+    local p = vim.fs.joinpath(dir, name)
+    for id in pairs(want) do
+      if vim.uv.fs_stat(vim.fs.joinpath(p, id .. ".jsonl")) then
+        os.remove(vim.fs.joinpath(p, id .. ".jsonl"))
+        vim.fn.delete(vim.fs.joinpath(p, id), "rf")
+        vim.uv.fs_rmdir(p) -- a worktree's project dir, now empty; fails (kept) if not
+      end
+    end
   end
 end
 
--- forget e: its commits, its chat, its pasted images and its line in the inbox
-function M.drop(e)
-  if M.running(e) then return notify("it's running: x stops it first") end
-  endchat(e)
-  if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
-  git.delete_refs(e.root, "refs/sepal/" .. e.id)
-  rm_session(e.session)
-  for p in e.task:gmatch("@(" .. vim.pesc(M.PASTES) .. "/paste%-%d+%.png)") do os.remove(p) end
-  inbox.remove(e)
+-- forget each entry of list: what drop does per task, but the git work is batched — one
+-- for-each-ref + update-ref per repo for all its dropped tasks, one pass for all chats,
+-- and one inbox save + render at the end
+function M.drop_many(list)
+  local dropped = {}
+  inbox.batch(function()
+    for _, e in ipairs(list) do
+      if M.running(e) then notify("it's running: x stops it first")
+      else
+        endchat(e)
+        if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
+        dropped[#dropped + 1] = e
+        for p in e.task:gmatch("@(" .. vim.pesc(M.PASTES) .. "/paste%-%d+%.png)") do os.remove(p) end
+        inbox.remove(e)
+      end
+    end
+  end)
+  local by_root = {}
+  for _, e in ipairs(dropped) do
+    by_root[e.root] = by_root[e.root] or {}
+    table.insert(by_root[e.root], "refs/sepal/" .. e.id)
+  end
+  for root, prefixes in pairs(by_root) do git.delete_refs(root, prefixes) end
+  rm_sessions(vim.tbl_map(function(e) return e.session end, dropped))
 end
+
+-- forget e: its commits, its chat, its pasted images and its line in the inbox
+function M.drop(e) M.drop_many({ e }) end
 
 -- a read-only scratch buffer with lines; q closes the tab it's in
 local function scratch(lines, name, ft)
@@ -766,9 +871,14 @@ function M.show(e)
     return vim.api.nvim_win_set_buf(0, scratch(vim.split(e.answer, "\n"), nil, "markdown"))
   end
   local a, z = e.base0 or e.base, e.result
-  local st = git.stat(e.root, a, z)
+  -- the two diffs run concurrently; once the file list is in, one cat-file starts for every
+  -- file's before and after contents, overlapping the -U0 diff and the window setup below
+  local st, first, cat = git.review(e.root, a, z, function(s)
+    local specs = {}
+    for _, rev in ipairs({ z, a }) do for _, p in ipairs(s.paths) do specs[#specs + 1] = rev .. ":" .. p end end
+    return git.files_start(e.root, specs)
+  end)
   if st.files == 0 then return notify("no changes") end
-  local first = git.firsts(e.root, a, z)
   vim.cmd.tabnew()
   local tab, new = vim.api.nvim_get_current_tabpage(), vim.api.nvim_get_current_win()
   vim.cmd("leftabove vsplit")
@@ -786,12 +896,13 @@ function M.show(e)
       vim.keymap.set("n", k, function() vim.api.nvim_win_call(new, function() pcall(vim.cmd, vim.v.count1 .. d) end) end, { buffer = b })
     end
   end
+  local all = git.files_wait(cat) -- a missing side reads as ""
   local function content(rev, i)
     if st.list[i]:match(" binary$") then return { "binary file" } end
-    return vim.split((git.file(e.root, rev, st.paths[i]):gsub("\n$", "")), "\n")
+    return vim.split(((all[(rev == a and #st.paths or 0) + i] or ""):gsub("\n$", "")), "\n")
   end
   -- the after side of each file, for the quickfix list to point at. Filled now: filling it later
-  -- would move the list's line numbers. shortcut: a git process per file, batch them if it's slow
+  -- would move the list's line numbers; the before buffers are made lazily, from the same batch
   local after, busy = {}, false
   for i, path in ipairs(st.paths) do
     local b = scratch(content(z, i), ("sepal://%s/after/%s"):format(e.id, path))
@@ -951,15 +1062,18 @@ function M.open(e, w, kept)
     local t = vim.api.nvim_buf_get_changedtick(b)
     if t ~= tick then
       tick, quiet = t, 0
-      -- the buffer is only read when it changed: not every 50ms while it's quiet
-      local text = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false))
-      if dv and not asked and text:find("Resume this session from which directory?", 1, true) then
-        -- devin asks where to resume (its worktree is gone): here, this once
-        asked, tick, quiet, t0 = true, -1, 0, vim.uv.now()
-        vim.api.nvim_chan_send(chan, "2\r")
-        return
+      -- the buffer is only read when it changed (not every 50ms while it's quiet), and only
+      -- until it printed — after that it's the pause and the clock that matter
+      if not printed or (dv and not asked) then
+        local text = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false))
+        if dv and not asked and text:find("Resume this session from which directory?", 1, true) then
+          -- devin asks where to resume (its worktree is gone): here, this once
+          asked, tick, quiet, t0 = true, -1, 0, vim.uv.now()
+          vim.api.nvim_chan_send(chan, "2\r")
+          return
+        end
+        printed = (dv and text:gsub("Resume this session from which directory%?", "") or text):find("%S")
       end
-      printed = (dv and text:gsub("Resume this session from which directory%?", "") or text):find("%S")
     else quiet = quiet + 50 end
     if not (printed and quiet >= 200) and vim.uv.now() - t0 < 3000 then return end
     timer:stop(); timer:close()
@@ -1002,6 +1116,6 @@ vim.api.nvim_create_autocmd("VimLeavePre", { group = vim.api.nvim_create_augroup
   for _, j in pairs(jobs) do if j.job then pcall(j.job.kill, j.job, 15) end end
 end })
 
-M._t = { jobs = jobs, queue = queue }
+M._t = { jobs = jobs, queue = queue, reply_of = reply_of }
 
 return M

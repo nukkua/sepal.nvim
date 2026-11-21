@@ -75,29 +75,66 @@ local function win()
   return w ~= -1 and w or nil
 end
 
-local function dw(s) return vim.api.nvim_strwidth(s) end
+function M.shown() return win() ~= nil end -- sepal.fidget checks on every BufEnter/WinClosed
+
+local memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} -- card() measures a lot of text per redraw: memoized
+local function dw(s)
+  local v = dw_c[s]
+  if not v then
+    if memo_n > 4096 then memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} end
+    dw_c[s], memo_n = vim.api.nvim_strwidth(s), memo_n + 1
+    v = dw_c[s]
+  end
+  return v
+end
 local function wrap(s, w)
-  local out, line = {}, ""
+  local k = w .. "\0" .. s
+  local out = wrap_c[k]
+  if out then return out end
+  if memo_n > 4096 then memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} end
+  out, memo_n = {}, memo_n + 1
+  local line = ""
   for word in s:gmatch("%S+") do
     local cand = line == "" and word or line .. " " .. word
     if dw(cand) > w and line ~= "" then out[#out + 1], line = line, word else line = cand end
   end
   if line ~= "" then out[#out + 1] = line end
+  wrap_c[k] = out
   return out
 end
 
--- a task as rows of { text, hl } chunks, behind a rail in its status's color
+-- everything card reads of e, as a string: the cache key for its rows
+local function card_sig(e, w)
+  local s, subs, C = e.stat, {}, require("sepal").config()
+  for _, a in ipairs(e.subagents or {}) do subs[#subs + 1] = tostring(a.name) end
+  return table.concat({ tostring(e.status), inbox.ago(e.time), tostring(e.title), w, tostring(e.attempts),
+    tostring(e.check), tostring(e.checked), tostring(s and s.files), tostring(s and s.add), tostring(s and s.del),
+    tostring(e.activity), table.concat(subs, "\1"), tostring(e.why), tostring(e.error), tostring(e.summary),
+    tostring(not e.summary and e.task), #(e.assumptions or {}), tostring(e.model),
+    tostring(e.agent and e.agent.cmd), tostring(require("sepal").icon(e.status, "?")),
+    tostring(C.retries), tostring(C.sakura), tostring(e.race), tostring(e.racers), tostring(e.won), tostring(e.lost),
+    tostring(inbox.LIVE[e.status] and inbox.spin()) }, "\0")
+end
+
+-- a task as rows of { text, hl } chunks, behind a rail in its status's color (each row starts
+-- with the " " margin chunk: rows are cached whole by card_sig)
 local function card(e, w)
+  -- with custom icons the sig can't tell a provider's logo apart: don't cache then
+  local sig = not next(require("sepal").config().icons or {}) and card_sig(e, w)
+  local cached = sig and card_c[sig]
+  if cached then return cached end
+  if memo_n > 4096 then memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} end
   local st = inbox.STATUS[e.status] or { "?", e.status, "Normal" }
   local live = inbox.LIVE[e.status]
   local icon = live and inbox.spin() or require("sepal").icon(e.status, st[1])
   local rail, age = { "▎ ", st[3] }, inbox.ago(e.time)
   local inner = w - 2
+  local pad = { " ", "Normal" }
   local out = {
-    { rail, { icon .. " ", st[3], spin = live }, { inbox.fit(e.title or "", inner - dw(icon) - 2 - dw(age)), "SepalPanelTitle" },
+    { pad, rail, { icon .. " ", st[3], spin = live }, { inbox.fit(e.title or "", inner - dw(icon) - 2 - dw(age)), "SepalPanelTitle" },
       { " " .. age, "SepalDim" } },
   }
-  local function row(...) out[#out + 1] = { rail, ... } end
+  local function row(...) out[#out + 1] = { pad, rail, ... } end
   -- who works on it, under its name: its model's provider logo, else ❖ for a devin agent
   if e.model then
     local l, hl = logo(e.model)
@@ -118,6 +155,8 @@ local function card(e, w)
     add(e.check .. (e.checked == true and " ✓" or e.checked == false and " ✗" or ""),
       e.checked == true and "SepalOk" or e.checked == false and "SepalError" or "SepalDim")
   end
+  if e.race and (inbox.LIVE[e.status] or e.status == "queued") then add("⚑ race", "SepalAccent") end
+  if e.won then add("⚑ won", "SepalAccent") end
   row(unpack(meta))
   local s = e.stat
   if s and s.files > 0 then
@@ -145,6 +184,7 @@ local function card(e, w)
   end
   local n = #(e.assumptions or {})
   if n > 0 then row({ ("· %d decision%s to read"):format(n, n == 1 and "" or "s"), "SepalDim" }) end
+  if sig then card_c[sig], memo_n = out, memo_n + 1 end
   return out
 end
 
@@ -177,8 +217,7 @@ function M.render()
   end
   for _, e in ipairs(list) do
     out[#out + 1] = {}
-    for _, r in ipairs(card(e, width - 1)) do
-      table.insert(r, 1, { " ", "Normal" })
+    for _, r in ipairs(card(e, width - 1)) do -- its margin chunk is part of the row: never mutated, card may return it cached
       out[#out + 1] = r
       rows[#out] = e.id
     end

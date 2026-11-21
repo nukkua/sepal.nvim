@@ -1083,6 +1083,45 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(task_buf(), nil)
 end)
 
+test(":Sepal task asks which agent with agents set: devin runs in print mode, its export says how it went", function()
+  clean(); reset()
+  -- a fake Devin CLI: logs its arguments (without the export path and the prompt), writes the export, edits, exits
+  local dv = vim.fs.joinpath(T, "bin", "devin")
+  vim.fn.mkdir(vim.fs.dirname(dv), "p")
+  local f = assert(io.open(dv, "w"))
+  f:write([[#!/bin/sh
+logged=; skip=; ex=
+for a; do
+  if [ -n "$skip" ]; then skip=; ex=$a
+  elif [ "$a" = --export ]; then skip=1
+  elif [ "$a" = -- ]; then break
+  else logged="$logged${logged:+ }$a"; fi
+done
+printf '%s\n' "$logged" >> "$SEPAL_T/args"
+if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
+printf '%s' '{"session_id":"dv1","steps":[{"source":"user","message":"go"},{"source":"agent","message":"Did it.\n\nAssumptions:\n- used devin"},{"source":"agent","message":""}]}' > "$ex"
+echo "Did it."
+]])
+  f:close()
+  vim.uv.fs_chmod(dv, 493)
+  sepal.setup({ agents = { { cmd = { "sh", "-c", fake, "sh" }, name = "claude" }, { cmd = { dv }, model = "fusion-x" } } })
+  vim.env.SEPAL_EDIT = [[echo dv > a.txt]]
+  local got = msgs(notified(function()
+    key("i")
+    local g = vim.fn.getcharstr
+    vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("2"); return "i" end
+    sepal.pick()
+    vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: by devin" })
+    vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+    idle()
+  end))
+  local e = newest()
+  eq({ e.status, e.session, e.model, e.agent, file("a.txt") }, { "landed", "dv1", "fusion-x", { cmd = { dv }, model = "fusion-x" }, "dv\n" })
+  eq(args(), { "--permission-mode accept-edits --respect-workspace-trust false --model fusion-x -p" })
+  assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3\n· used devin"), vim.inspect(got))
+  sepal.setup({ agents = false })
+end)
+
 print(("%d/%d passed"):format(n - fails, n))
 vim.fn.delete(T, "rf")
 os.exit(fails == 0 and 0 or 1)

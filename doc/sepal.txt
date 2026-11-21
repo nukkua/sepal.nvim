@@ -85,7 +85,19 @@ files, fidget.nvim for a spinner.
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
              the other's default.
-                                                       *sepal-task_suggest*
+                                                             *sepal-agents*
+`agents`     the agents :Sepal task asks you to pick from after the kind
+             (1, 2…), each `{ cmd = "claude" | argv, model = "…", name = "…" }`.
+             Its model wins over `models`. Unset: `cmd`. One: used without
+             asking. A `cmd` named devin runs the Devin CLI in print mode
+             (-p, permission mode accept-edits, auto for a btw, smart with
+             `auto_mode`); `args` and Claude Code's hooks don't apply, so
+             there's no live activity, and `o` opens `devin -r <session>`. >lua
+               agents = {
+                 { cmd = "claude", model = "claude-opus-5-5" },
+                 { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-medium", name = "devin" },
+               }
+<                                                      *sepal-task_suggest*
 `task_suggest` argv that gets the task buffer on stdin (your idea and
              Files:) and prints the finished task. <c-c><c-s> runs it. For
              Claude Code, pass -p and --no-session-persistence.

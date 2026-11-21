@@ -32,6 +32,15 @@ function M.check()
   else h.ok("max_running: " .. C.max_running .. " at once, the rest wait") end
   if type(C.models) ~= "table" then h.error("models must be a table: { implement = \"opus\", btw = \"sonnet\" }")
   else h.ok(("models: implement %s, btw %s"):format(C.models.implement or "Claude Code's default", C.models.btw or "Claude Code's default")) end
+  if C.agents then
+    if type(C.agents) ~= "table" then h.error("agents must be a list: { { cmd = \"devin\", model = \"...\" } }") end
+    for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do
+      local c = type(a) == "table" and (type(a.cmd) == "table" and a.cmd[1] or a.cmd)
+      if type(c) ~= "string" then h.error("agents: each one needs a cmd, e.g. { cmd = \"devin\" }")
+      elseif vim.fn.executable(c) == 0 then h.error("agents: " .. c .. " is not executable")
+      else h.ok("agent: " .. c .. (a.model and " · " .. a.model or "")) end
+    end
+  end
   h.ok(C.sakura and "sakura: blossom pinks for sepal's accents" or "sakura off: your colorscheme's colors")
   if type(C.highlights) ~= "table" then h.error("highlights must be a table: { SepalOk = { fg = \"#a3be8c\" } }") end
   if type(C.icons) ~= "table" then h.error("icons must be a table: { landed = \"✓\" }") end

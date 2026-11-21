@@ -14,18 +14,25 @@ local function notify(...) return sepal().notify(...) end
 local WARN, ERROR = vim.log.levels.WARN, vim.log.levels.ERROR
 -- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args;
 -- mode: that permission mode instead of either (a btw's read-only "plan")
-local function cmd(extra, mode)
+-- e's agent argv: the one picked for it (agents option), else cmd
+local function base(e)
+  local c = e and e.agent and e.agent.cmd or C().cmd
+  return vim.list_extend({}, type(c) == "string" and { c } or c)
+end
+-- Devin CLI instead of Claude Code: no hooks, so it runs in print mode and its --export says how it went
+local function devin(e) return vim.fs.basename(base(e)[1] or ""):match("^devin") ~= nil end
+local function cmd(extra, mode, e)
   local a = vim.list_extend({}, extra)
   mode = mode or C().auto_mode and "auto"
   if mode then
     for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
     vim.list_extend(a, { "--permission-mode", mode })
   end
-  return vim.list_extend(vim.list_extend({}, C().cmd), a)
+  return vim.list_extend(base(e), a)
 end
 -- the model for e's kind (models option), after args: it wins over a --model there
 local function model(e)
-  local m = (C().models or {})[e.kind or "implement"]
+  local m = e.agent and e.agent.model or (C().models or {})[e.kind or "implement"]
   return m and { "--model", m } or {}
 end
 -- a btw reads your repo itself: Claude Code's plan mode, so it can't change a file
@@ -246,22 +253,32 @@ agent = function(e, prompt, wt)
   local j = jobs[e.id]
   local events = wtdir(e) .. ".events" -- beside its worktree: a btw has none, and runs in your repo
   os.remove(events)
-  local argv = vim.list_extend(cmd(C().args or {}, mode(e)), model(e))
-  if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
-  -- files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those ("//" is an absolute path)
-  for l in vim.gsplit(e.task, "\n") do
-    local f = l:match("^%s*%- @(/.-)%s*$")
-    if f then vim.list_extend(argv, { "--allowedTools", "Read(/" .. f .. ")" }) end
+  local dv, export = devin(e), events .. ".json"
+  local argv
+  if dv then
+    os.remove(export)
+    argv = vim.list_extend(base(e), { "--permission-mode", e.kind == "btw" and "auto" or C().auto_mode and "smart" or "accept-edits",
+      "--respect-workspace-trust", "false", "--export", export }) -- print mode can't ask to trust the new worktree
+    vim.list_extend(argv, model(e))
+  else
+    argv = vim.list_extend(cmd(C().args or {}, mode(e), e), model(e))
+    if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
+    -- files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those ("//" is an absolute path)
+    for l in vim.gsplit(e.task, "\n") do
+      local f = l:match("^%s*%- @(/.-)%s*$")
+      if f then vim.list_extend(argv, { "--allowedTools", "Read(/" .. f .. ")" }) end
+    end
   end
   for i, a in ipairs(argv) do if a == "--model" and argv[i + 1] then e.model = argv[i + 1] end end -- till SessionStart says
-  if e.session then vim.list_extend(argv, { "--resume", e.session }) end
-  vim.list_extend(argv, { "--settings", SETTINGS, prompt })
+  if e.session then vim.list_extend(argv, { dv and "-r" or "--resume", e.session }) end
+  vim.list_extend(argv, dv and { "-p", "--", prompt } or { "--settings", SETTINGS, prompt })
   local b = vim.api.nvim_create_buf(false, true)
   local started, over, timer = false, false, vim.uv.new_timer()
   local function close()
     over = true
     timer:stop(); timer:close()
     os.remove(events)
+    os.remove(export)
     if not vim.api.nvim_buf_is_valid(b) then return end
     local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
     -- watched: you stay in its float. The check gets a spinner; else its last screen stays (claude
@@ -381,6 +398,19 @@ agent = function(e, prompt, wt)
     if over then return end
     poll()
     if over then return end
+    if dv then -- its turn is over when it exits: the export has its session and last reply
+      local f = io.open(export)
+      local ok, d = pcall(vim.json.decode, f and f:read("a") or "", { luanil = { object = true, array = true } })
+      if f then f:close() end
+      local reply
+      if ok and type(d) == "table" then
+        if type(d.session_id) == "string" and d.session_id ~= e.session then e.session = d.session_id; inbox.save(e.root) end
+        for _, s in ipairs(type(d.steps) == "table" and d.steps or {}) do
+          if type(s) == "table" and s.source == "agent" and type(s.message) == "string" and s.message ~= "" then reply = s.message end
+        end
+      end
+      if j.stopped or code == 0 then return stopped({ last_assistant_message = reply }) end
+    end
     if j.stopped then return stopped({ transcript_path = transcript }) end -- x: what it did so far is kept, as with Esc
     local last = close()
     finish(e, wt, "error", { error = started and "the agent quit before it was done (exit " .. code .. ")"
@@ -497,7 +527,8 @@ end
 -- it starts (or waits its turn); on_fail(why) if saving fails (the task is gone from the inbox then)
 -- land: "auto" / "manual" for this task, nil: the land option
 -- kind: "btw" for a question (see sepal.task), nil/"implement" for a change
-function M.start(text, cwd, land, on_fail, kind)
+-- agent: { cmd, model } from the agents option (nil: its first, or cmd and models when it's not set)
+function M.start(text, cwd, land, on_fail, kind, agent)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
@@ -506,6 +537,8 @@ function M.start(text, cwd, land, on_fail, kind)
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
     task = text, check = not btw and (check or C().check) or nil, time = os.time(), status = not btw and full() and "queued" or "running",
     attempts = 0, land = land, kind = btw and "btw" or nil }
+  agent = agent or (C().agents or {})[1]
+  if agent then e.agent = { cmd = agent.cmd, model = agent.model } end -- kept with the task: r and c use it again
   inbox.add(e)
   if btw then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
   jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
@@ -858,13 +891,15 @@ function M.open(e, w, kept)
   local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
   termwin(hidden)
   local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
-    return vim.fn.jobstart(vim.list_extend(vim.list_extend(cmd({}, mode(e)), model(e)), { "--resume", e.session }), { term = true, cwd = e.root,
+    local argv = devin(e) and vim.list_extend(vim.list_extend(base(e), model(e)), { "-r", e.session })
+      or vim.list_extend(vim.list_extend(cmd({}, mode(e), e), model(e)), { "--resume", e.session })
+    return vim.fn.jobstart(argv, { term = true, cwd = e.root,
       env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })
   end)
   pcall(vim.api.nvim_win_close, hidden, true)
   if not ok or chan <= 0 then
     pcall(vim.api.nvim_buf_delete, b, { force = true })
-    return notify("could not run " .. tostring(C().cmd[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")), WARN)
+    return notify("could not run " .. tostring(base(e)[1]) .. (ok and "" or ": " .. tostring(chan):match("[^\n]*")), WARN)
   end
   chats[e.id] = b
   vim.b[b].sepal_agent = true

@@ -18,6 +18,7 @@ local C = {
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
   models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw
+  agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", name = "devin" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
@@ -139,7 +140,7 @@ function M.close()
 end
 
 -- a task that didn't run goes back to the task buffer (below the open draft, if there is one)
-local function giveback(text, kind)
+local function giveback(text, kind, agent)
   local lines = vim.split(text, "\n")
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.b[b].sepal_task then
@@ -147,7 +148,7 @@ local function giveback(text, kind)
       return M.task()
     end
   end
-  M.task(nil, lines, kind)
+  M.task(nil, lines, kind, agent)
 end
 
 
@@ -294,7 +295,8 @@ end
 -- lines: the text to start from (a task that could not be sent comes back with it)
 -- kind: "implement" (nil) changes the code; "btw" asks about the project: it answers, nothing lands
 -- ponytail: a range is whole lines; a charwise selection brings its full lines
-function M.task(range, lines, kind)
+-- agent: one of the agents option's (nil: its first)
+function M.task(range, lines, kind, agent)
   kind = kind or "implement"
   local btw = kind == "btw"
   local block, path
@@ -343,9 +345,9 @@ function M.task(range, lines, kind)
     local text = table.concat(lines, "\n")
     local function back(why)
       M.notify(why .. "\nthe task is back in its buffer", vim.log.levels.ERROR)
-      giveback(text, kind)
+      giveback(text, kind, agent)
     end
-    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land, back, kind)
+    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land, back, kind, agent)
     if not e then return back(why) end
     if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running task is done") end
     if btw then return M.notify("asking: " .. e.title .. " · :Sepal open watches") end
@@ -429,7 +431,20 @@ function M.pick(range)
   vim.api.nvim_echo({ { "sepal ", "SepalTitle" }, { "i", "SepalAccent" }, { " implement  " }, { "b", "SepalAccent" }, { " btw" } }, false, {})
   local ok, c = pcall(vim.fn.getcharstr)
   vim.api.nvim_echo({ { "" } }, false, {})
-  if ok and KINDS[c] then M.task(range, nil, KINDS[c]) end
+  if not (ok and KINDS[c]) then return end
+  local agents = C.agents or {}
+  if #agents < 2 then return M.task(range, nil, KINDS[c]) end
+  -- then which agent: 1, 2… as listed in the agents option (any other key cancels)
+  local chunks = { { "sepal ", "SepalTitle" } }
+  for i, a in ipairs(agents) do
+    local cm = type(a.cmd) == "table" and a.cmd[1] or a.cmd
+    vim.list_extend(chunks, { { tostring(i), "SepalAccent" }, { " " .. (a.name or vim.fs.basename(tostring(cm))) .. (a.model and " · " .. a.model or "") .. "  " } })
+  end
+  vim.api.nvim_echo(chunks, false, {})
+  local ok2, n = pcall(vim.fn.getcharstr)
+  vim.api.nvim_echo({ { "" } }, false, {})
+  local a = ok2 and agents[tonumber(n) or 0]
+  if a then M.task(range, nil, KINDS[c], a) end
 end
 
 return M

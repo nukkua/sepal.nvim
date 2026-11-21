@@ -131,10 +131,24 @@ require("sepal").setup({
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args')
+  agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
 })
+```
+
+### Devin
+
+With `agents`, `:Sepal task` asks which agent after the kind (`1`, `2`…). A `cmd` named `devin`
+runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code: in print mode, so there's no live
+activity in the panel, and `o` opens `devin -r <session>`. An agent's `model` wins over `models`.
+
+```lua
+agents = {
+  { cmd = "claude", model = "claude-opus-5-5" },
+  { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-medium" },
+},
 ```
 
 ### Colors

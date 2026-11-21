@@ -97,7 +97,7 @@ files, fidget.nvim for a spinner.
              mode: accept-edits (auto for a btw, smart with `auto_mode`). >lua
                agents = {
                  { cmd = "claude", model = "claude-opus-5-5" },
-                 { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-medium", name = "devin" },
+                 { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", name = "devin" },
                }
 <                                                      *sepal-task_suggest*
 `task_suggest` argv that gets the task buffer on stdin (your idea and
@@ -122,7 +122,7 @@ files, fidget.nvim for a spinner.
 `icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
              failed, error, needs, stopped, interrupted, undone, answered.
-             Also the panel's model logos: `claude`, `openai`, `gemini`, `opencode`.
+             Also the panel's model logos: `devin`, `claude`, `openai`, `gemini`, `opencode`.
 
 ==============================================================================
 4. COMMANDS                                                    *sepal-commands*

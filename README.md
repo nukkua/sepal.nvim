@@ -150,7 +150,7 @@ in `accept-edits` (`auto` for a btw, `smart` with `auto_mode`). An agent's `mode
 ```lua
 agents = {
   { cmd = "claude", model = "claude-opus-5-5" },
-  { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-medium" },
+  { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
 },
 ```
 

@@ -35,6 +35,7 @@ local HINT = {
 }
 -- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
 local PROVIDERS = {
+  { "devin", "❖", { "fusion", "devin", "swe" } }, -- first: fusion names contain "claude"/"opus"
   { "claude", "✻", { "claude", "opus", "sonnet", "haiku", "fable" } },
   { "openai", "֎", { "gpt", "chatgpt", "codex", "openai", "^o%d" } },
   { "gemini", "✦", { "gemini" } },
@@ -50,14 +51,17 @@ local function logo(m)
   end
   return "◇", "SepalDim"
 end
--- "claude-opus-5-5[1m]" -> "opus 5.5", "claude-sonnet-4-5-20250929" -> "sonnet 4.5", "openai/gpt-5" -> "gpt-5"
+-- "claude-opus-5-5[1m]" -> "opus 5.5", "claude-sonnet-4-5-20250929" -> "sonnet 4.5", "openai/gpt-5" -> "gpt-5",
+-- "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" -> "opus 5.5 medium + swe 2 high"
 local function model(m)
+  local lead, sidekick = m:match("^fusion%-(.-)%-sidekick%-(.+)$")
+  if lead then
+    local function part(s) return (s:gsub("^claude%-", ""):gsub("(%d+)%-(%d+)", "%1.%2"):gsub("%-", " ")) end
+    return part(lead) .. " + " .. part(sidekick)
+  end
   m = m:gsub("%[.-%]$", ""):gsub("^.*/", ""):gsub("^claude%-", ""):gsub("%-%d%d%d%d%d%d%d%d$", "")
   return (m:gsub("%-(%d+)%-(%d+)$", " %1.%2"):gsub("%-(%d+)$", " %1"))
 end
-
--- the Claude Code mascot, as its banner draws it: once, in the header, not on every card
-local MASCOT = { "  ▐▛███▜▌  ", " ▝▜█████▛▘ ", "   ▘▘ ▝▝   " }
 
 local panel_buf
 local drawn -- what it shows, spinners blanked: see render
@@ -93,10 +97,17 @@ local function card(e, w)
       { " " .. age, "SepalDim" } },
   }
   local function row(...) out[#out + 1] = { rail, ... } end
+  -- who works on it, under its name: its model's provider logo, else ❖ for a devin agent
   if e.model then
     local l, hl = logo(e.model)
-    row({ l, hl }, { " " .. model(e.model), "SepalDim" })
-  end -- who works on it, under its name
+    row({ l, hl }, { (inbox.fit(" " .. model(e.model), inner - dw(l)):gsub("%s+$", "")), "SepalDim" })
+  elseif e.agent then
+    local c = e.agent.cmd
+    if vim.fs.basename((type(c) == "string" and c:match("^%S+") or c and c[1] or "")):match("^devin") then
+      local l = require("sepal").icon("devin", "❖")
+      row({ l, "SepalDim" }, { " devin", "SepalDim" })
+    end
+  end
   -- status · try · check
   local meta = { { st[2]:upper(), st[3] } }
   if HINT[e.status] then meta[#meta + 1] = { "  " .. HINT[e.status], "SepalDim" } end
@@ -143,9 +154,9 @@ function M.render()
   local list = inbox.list(vim.b[buf()].sepal_panel)
   local width = vim.api.nvim_win_get_width(w) - 1
   local root = vim.b[buf()].sepal_panel
-  local out = { { { MASCOT[1], "SepalClaude" }, { require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" },
+  local out = { { { " ", "Normal" }, { require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" },
     { "  " .. vim.fs.basename(root), "SepalDim" } } }
-  local counts = { { MASCOT[2], "SepalClaude" } }
+  local counts = { { " ", "Normal" } }
   for _, c in ipairs(COUNTS) do
     local k = #vim.tbl_filter(function(e) return c[2][e.status] end, list)
     if k > 0 then
@@ -154,7 +165,7 @@ function M.render()
     end
   end
   out[#out + 1] = counts
-  out[#out + 1] = { { MASCOT[3], "SepalClaude" }, { "o watch · q close", "SepalDim" } }
+  out[#out + 1] = { { " ", "Normal" }, { "o watch · q close", "SepalDim" } }
   out[#out + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
   rows = {}
   if #list == 0 then -- the empty state: centered under the divider, saying how to start

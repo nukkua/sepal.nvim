@@ -454,7 +454,7 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   local b = vim.fn.bufnr("sepal://panel")
   local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   assert(lines[2]:match("1 landed"), lines[2])
-  assert(lines[1]:match("^  ▐▛███▜▌  "), lines[1]) -- the Claude Code mascot, once, in the header
+  assert(not lines[1]:find("▐", 1, true) and lines[1]:match("^ %S+ sepal"), lines[1]) -- no mascot: the title at the cards' indent
   assert(lines[6]:match("^ ▎ ❀ carded%s+now$"), lines[6])
   eq(lines[7], " ▎ ✻ opus 5.5") -- the model and its provider's logo, between the name and the status
   eq(lines[8], " ▎ LANDED  in your work tree")
@@ -462,6 +462,17 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   eq(lines[10], " ▎ Did it.")
   eq(lines[11], " ▎ · 2 decisions to read")
   local e = newest()
+  local m0, a0 = e.model, e.agent
+  e.model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" -- devin's logo, lead + sidekick
+  inbox.changed(e)
+  lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  eq(lines[7], " ▎ ❖ opus 5.5 medium + swe 2 high")
+  e.model, e.agent = nil, { cmd = "devin" } -- devin reports no model: its agent's logo instead
+  inbox.changed(e)
+  lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  eq(lines[7], " ▎ ❖ devin")
+  e.model, e.agent = m0, a0
+  inbox.changed(e)
   e.status, e.activity, e.summary = "running", "Edit a.txt", nil
   inbox.changed(e)
   lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
@@ -1091,14 +1102,22 @@ test(":Sepal task asks which agent with agents set: devin runs with sepal's hook
   vim.fn.mkdir(vim.fs.dirname(dv), "p")
   local f = assert(io.open(dv, "w"))
   f:write([[#!/bin/sh
-logged=; skip=
+logged=; skip=; resumed=
 for a; do
   if [ -n "$skip" ]; then skip=; cp "$a" "$SEPAL_T/devin.json"
   elif [ "$a" = --config ]; then skip=1
   elif [ "$a" = -- ]; then break
+  elif [ "$a" = -r ]; then resumed=1; logged="$logged${logged:+ }$a"
   else logged="$logged${logged:+ }$a"; fi
 done
 printf '%s\n' "$logged" >> "$SEPAL_T/args"
+if [ -n "$resumed" ]; then
+  printf 'Resume this session from which directory?\n'
+  read ans
+  printf '%s\n' "$ans" >> "$SEPAL_T/resume_answer"
+  printf 'the chat so far\n'
+  while :; do sleep 1; done
+fi
 ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
 ev '{"hook_event_name":"SessionStart","source":"startup","session_id":"dv1"}'
 printf '\033]7501;state=working:app=devin\007'
@@ -1130,6 +1149,19 @@ while :; do sleep 1; done
   eq({ c.permissions.allow, c.hooks.Stop ~= nil, c.hooks.PermissionRequest ~= nil }, { { "Exec(true)" }, true, true })
   assert(vim.tbl_contains(got, "▲ by devin: asks to run exec rm -rf x · :Sepal open"), vim.inspect(got))
   assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3 · true ✓\n· used devin"), vim.inspect(got))
+  -- its chat: devin's "resume where?" prompt (the worktree's gone) is answered: here, this once
+  vim.cmd("Sepal open")
+  vim.wait(4000, function() return vim.uv.fs_stat(T .. "/resume_answer") ~= nil end)
+  eq(vim.trim(read(T .. "/resume_answer") or ""), "2")
+  vim.wait(4000, function() return vim.bo.buftype == "terminal" end)
+  eq(vim.bo.buftype, "terminal", "the chat didn't show")
+  local chat = vim.api.nvim_get_current_buf()
+  vim.wait(4000, function()
+    return table.concat(vim.api.nvim_buf_get_lines(chat, 0, -1, false)):find("the chat so far", 1, true) ~= nil
+  end)
+  assert(table.concat(vim.api.nvim_buf_get_lines(chat, 0, -1, false)):find("the chat so far", 1, true), "no chat text")
+  vim.cmd.stopinsert()
+  vim.cmd("bwipeout!")
   clean(); reset()
   vim.env.SEPAL_INTERRUPT = "1"
   notified(function() agent.start("Goal: cut short", work, "auto", nil, nil, { cmd = { dv } }); idle() end)

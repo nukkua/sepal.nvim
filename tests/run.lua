@@ -874,7 +874,8 @@ end)
 test("a task shows its keys on top, like the inbox", function()
   local function help()
     local m = vim.api.nvim_buf_get_extmarks(0, -1, 0, 0, { details = true, type = "virt_lines" })[1]
-    return { m[2], m[4].virt_lines[1][1][1], vim.fn.winsaveview().topfill }
+    local l = m[4].virt_lines[1]
+    return { m[2], l[#l][1], vim.fn.winsaveview().topfill } -- after who works on it
   end
   sepal.task()
   local a = help()
@@ -1092,6 +1093,36 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   sepal.setup({ models = {} })
   notified(function() key("x"); sepal.pick() end) -- any other key: no draft
   eq(task_buf(), nil)
+end)
+
+test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()
+  clean(); reset()
+  local echo, shown = vim.api.nvim_echo, {}
+  vim.api.nvim_echo = function(chunks, ...)
+    if #chunks > 1 then shown[#shown + 1] = table.concat(vim.tbl_map(function(c) return c[1] end, chunks)) end
+    return echo(chunks, ...)
+  end
+  local function draft()
+    local m = vim.api.nvim_buf_get_extmarks(task_buf(), -1, 0, 0, { details = true, type = "virt_lines" })[1]
+    local l = m[4].virt_lines[1]
+    vim.api.nvim_buf_delete(task_buf(), { force = true })
+    return { l[1][1], l[1][2], l[2][1] }
+  end
+  sepal.setup({ models = { implement = "claude-opus-5-5" } })
+  key("b"); sepal.pick()
+  local btw = draft()
+  sepal.setup({ agents = { { cmd = "claude", name = "claude" }, { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
+    { cmd = "codex", model = "gpt-5" }, { cmd = "devin" } } })
+  local g = vim.fn.getcharstr
+  vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("3"); return "i" end
+  sepal.pick()
+  local codex = draft()
+  vim.api.nvim_echo = echo
+  sepal.setup({ models = {}, agents = nil })
+  eq(shown, { "sepal i implement ✻ opus 5.5   b btw ✻ sonnet   ",
+    "sepal i implement   b btw   ",
+    "sepal 1 ✻ claude  2 ❖ devin · opus 5.5 medium + swe 2 high  3 ֎ codex · gpt 5  4 ❖ devin  " })
+  eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet  " }, { "֎", "SepalDim", " gpt 5  " } })
 end)
 
 test(":Sepal task asks which agent with agents set: devin runs with sepal's hooks in its config; ctrl-c is caught", function()

@@ -62,6 +62,7 @@ local function model(m)
   m = m:gsub("%[.-%]$", ""):gsub("^.*/", ""):gsub("^claude%-", ""):gsub("%-%d%d%d%d%d%d%d%d$", "")
   return (m:gsub("%-(%d+)%-(%d+)$", " %1.%2"):gsub("%-(%d+)$", " %1"))
 end
+M.logo, M.model = logo, model -- :Sepal task's picker and draft show them too
 
 local panel_buf
 local drawn -- what it shows, spinners blanked: see render

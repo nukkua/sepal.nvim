@@ -272,15 +272,31 @@ local function add_selection(buf, block, path)
   add_file(buf, path)
 end
 
--- the task's keys, a dim line and a blank on top of it like the inbox's: virtual lines, so never sent
+-- who a task of kind would run with (as sepal.agent picks it): its provider's logo and hl, and its
+-- model's short name (nil: the agent's own default) and the agent's name (its command's)
+local function who(kind, agent)
+  local panel = require("sepal.panel")
+  agent = agent or (C.agents or {})[1]
+  local m = agent and agent.model or (C.models or {})[kind or "implement"]
+  local c = agent and agent.cmd or C.cmd
+  c = vim.fs.basename(tostring(type(c) == "table" and c[1] or type(c) == "string" and c:match("^%S+") or ""))
+  local l, hl = panel.logo(m or c)
+  return { l, hl }, m and panel.model(m), agent and agent.name or c
+end
+
+-- the task's keys, a dim line and a blank on top of it like the inbox's: virtual lines, so never sent;
+-- the provider's logo and model first, so you see who'll work on it
 local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
 local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
   local help = vim.b[buf].sepal_kind == "btw" and "btw  <c-c><c-c> ask  "
     or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
   help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
+  local line = { { help, "SepalDim" } }
+  local w = vim.b[buf].sepal_who
+  if w then line = { { w[1], w[2] }, { " " .. w[3] .. "  ", "SepalDim" }, line[1] } end
   vim.api.nvim_buf_clear_namespace(buf, KEYS_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
-  vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = { { { help, "SepalDim" } }, { { "" } } }, virt_lines_above = true })
+  vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = { line, { { "" } } }, virt_lines_above = true })
   for _, w in ipairs(vim.fn.win_findbuf(buf)) do
     -- lines above line 1 only show with topfill
     vim.api.nvim_win_call(w, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = 2 }) end end)
@@ -311,6 +327,8 @@ function M.task(range, lines, kind, agent)
   end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.b[buf].sepal_task, vim.b[buf].sepal_kind = true, kind
+  local l, m, name = who(kind, agent)
+  vim.b[buf].sepal_who = { l[1], l[2], m or name }
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].bufhidden = "wipe" -- closing the window drops the draft: :Sepal task always starts a new one
   local template = (btw or C.task_suggest) and IDEA or template()
@@ -428,17 +446,27 @@ end
 local KINDS = { i = "implement", b = "btw" }
 function M.pick(range)
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return M.task(range) end end
-  vim.api.nvim_echo({ { "sepal ", "SepalTitle" }, { "i", "SepalAccent" }, { " implement  " }, { "b", "SepalAccent" }, { " btw" } }, false, {})
+  -- each kind with its provider's logo and model, unless the agent is picked next
+  local agents = C.agents or {}
+  local chunks = { { "sepal ", "SepalTitle" } }
+  for _, k in ipairs({ "i", "b" }) do
+    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. KINDS[k] } })
+    if #agents < 2 then
+      local l, m, name = who(KINDS[k])
+      vim.list_extend(chunks, { { " " }, l, { " " .. (m or name), "SepalDim" } })
+    end
+    vim.list_extend(chunks, { { "   " } })
+  end
+  vim.api.nvim_echo(chunks, false, {})
   local ok, c = pcall(vim.fn.getcharstr)
   vim.api.nvim_echo({ { "" } }, false, {})
   if not (ok and KINDS[c]) then return end
-  local agents = C.agents or {}
   if #agents < 2 then return M.task(range, nil, KINDS[c]) end
-  -- then which agent: 1, 2… as listed in the agents option (any other key cancels)
-  local chunks = { { "sepal ", "SepalTitle" } }
+  -- then which agent: 1, 2… as listed in the agents option (any other key cancels), each with its logo
+  chunks = { { "sepal ", "SepalTitle" } }
   for i, a in ipairs(agents) do
-    local cm = type(a.cmd) == "table" and a.cmd[1] or a.cmd
-    vim.list_extend(chunks, { { tostring(i), "SepalAccent" }, { " " .. (a.name or vim.fs.basename(tostring(cm))) .. (a.model and " · " .. a.model or "") .. "  " } })
+    local l, m, name = who(KINDS[c], a)
+    vim.list_extend(chunks, { { tostring(i), "SepalAccent" }, { " " }, l, { " " .. name .. (m and " · " .. m or "") .. "  " } })
   end
   vim.api.nvim_echo(chunks, false, {})
   local ok2, n = pcall(vim.fn.getcharstr)

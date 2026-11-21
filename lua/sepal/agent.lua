@@ -940,23 +940,27 @@ function M.open(e, w, kept)
   local l, lw
   if kept then l, lw = vim.api.nvim_win_get_buf(w), w else l, lw = loading(w, "Loading agent") end
   -- printed: 200ms without output once there's text (its longest pause mid-chat is ~160ms); 3s at most
-  local tick, quiet, t0, asked, timer = -1, 0, vim.uv.now(), false, vim.uv.new_timer()
+  local tick, quiet, t0, asked, printed, timer = -1, 0, vim.uv.now(), false, nil, vim.uv.new_timer()
+  local dv = devin(e)
   timer:start(50, 50, vim.schedule_wrap(function()
     local gone = not vim.api.nvim_win_is_valid(lw) or vim.api.nvim_win_get_buf(lw) ~= l
     if gone or not vim.api.nvim_buf_is_valid(b) then
       timer:stop(); timer:close()
       return pcall(vim.api.nvim_win_close, lw, true)
     end
-    local text = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false))
-    if devin(e) and not asked and text:find("Resume this session from which directory?", 1, true) then
-      -- devin asks where to resume (its worktree is gone): here, this once
-      asked, tick, quiet, t0 = true, -1, 0, vim.uv.now()
-      vim.api.nvim_chan_send(chan, "2\r")
-      return
-    end
     local t = vim.api.nvim_buf_get_changedtick(b)
-    if t ~= tick then tick, quiet = t, 0 else quiet = quiet + 50 end
-    local printed = text:gsub("Resume this session from which directory%?", ""):find("%S")
+    if t ~= tick then
+      tick, quiet = t, 0
+      -- the buffer is only read when it changed: not every 50ms while it's quiet
+      local text = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false))
+      if dv and not asked and text:find("Resume this session from which directory?", 1, true) then
+        -- devin asks where to resume (its worktree is gone): here, this once
+        asked, tick, quiet, t0 = true, -1, 0, vim.uv.now()
+        vim.api.nvim_chan_send(chan, "2\r")
+        return
+      end
+      printed = (dv and text:gsub("Resume this session from which directory%?", "") or text):find("%S")
+    else quiet = quiet + 50 end
     if not (printed and quiet >= 200) and vim.uv.now() - t0 < 3000 then return end
     timer:stop(); timer:close()
     show(b, lw)

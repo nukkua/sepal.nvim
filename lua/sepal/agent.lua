@@ -12,15 +12,17 @@ local function sepal() return require("sepal") end
 local function C() return require("sepal").config() end
 local function notify(...) return sepal().notify(...) end
 local WARN, ERROR = vim.log.levels.WARN, vim.log.levels.ERROR
--- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args;
--- mode: that permission mode instead of either (a btw's read-only "plan")
 -- e's agent argv: the one picked for it (agents option), else cmd
 local function base(e)
   local c = e and e.agent and e.agent.cmd or C().cmd
   return vim.list_extend({}, type(c) == "string" and { c } or c)
 end
--- Devin CLI instead of Claude Code: no hooks, so it runs in print mode and its --export says how it went
+-- the Devin CLI instead of Claude Code: same hooks, through a --config of its own (see devin_config)
 local function devin(e) return vim.fs.basename(base(e)[1] or ""):match("^devin") ~= nil end
+-- added to each run: the agent's own args; Claude Code's (args option) aren't Devin's flags
+local function args(e) return e.agent and e.agent.args or not devin(e) and C().args or {} end
+-- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args;
+-- mode: that permission mode instead of either (a btw's read-only "plan")
 local function cmd(extra, mode, e)
   local a = vim.list_extend({}, extra)
   mode = mode or C().auto_mode and "auto"
@@ -218,6 +220,23 @@ local HOOK = { { hooks = { { type = "command", command = [[{ tr -d '\n'; echo; }
 local SETTINGS = vim.json.encode({ hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
   Notification = HOOK, Stop = HOOK, SubagentStart = HOOK, SubagentStop = HOOK } })
 
+-- Devin reads hooks and permissions from its config file only: yours plus sepal's hooks and allow rules, at path
+-- shortcut: a config.json with comments (JSONC) doesn't decode and is replaced, not merged; strip them if that bites
+local function devin_config(path, allow)
+  local dir = vim.env.XDG_CONFIG_HOME or vim.fs.joinpath(vim.uv.os_homedir(), ".config")
+  local f = io.open(vim.fs.joinpath(dir, "devin", "config.json"))
+  local ok, c = pcall(vim.json.decode, f and f:read("a") or "{}")
+  if f then f:close() end
+  c = ok and type(c) == "table" and c or {}
+  c.hooks = vim.tbl_extend("force", type(c.hooks) == "table" and c.hooks or {}, { SessionStart = HOOK,
+    PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } }, Notification = HOOK, PermissionRequest = HOOK, Stop = HOOK })
+  c.permissions = type(c.permissions) == "table" and c.permissions or {}
+  c.permissions.allow = vim.list_extend(type(c.permissions.allow) == "table" and c.permissions.allow or {}, allow)
+  local w = assert(io.open(path, "w"))
+  w:write(vim.json.encode(c))
+  w:close()
+end
+
 -- the agent's last reply: from the Stop hook, else the end of its transcript
 local function reply_of(ev)
   if type(ev.last_assistant_message) == "string" then return ev.last_assistant_message end
@@ -253,32 +272,40 @@ agent = function(e, prompt, wt)
   local j = jobs[e.id]
   local events = wtdir(e) .. ".events" -- beside its worktree: a btw has none, and runs in your repo
   os.remove(events)
-  local dv, export = devin(e), events .. ".json"
+  local dv, conf = devin(e), events .. ".config.json"
+  -- it has to run the check; files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those
+  local allow = e.check and { (dv and "Exec(%s)" or "Bash(%s)"):format(e.check) } or {}
+  for l in vim.gsplit(e.task, "\n") do
+    local f = l:match("^%s*%- @(/.-)%s*$")
+    if f then allow[#allow + 1] = "Read(" .. (dv and "" or "/") .. f .. ")" end -- Claude Code's "//" is an absolute path
+  end
   local argv
   if dv then
-    os.remove(export)
-    argv = vim.list_extend(base(e), { "--permission-mode", e.kind == "btw" and "auto" or C().auto_mode and "smart" or "accept-edits",
-      "--respect-workspace-trust", "false", "--export", export }) -- print mode can't ask to trust the new worktree
+    devin_config(conf, allow)
+    local a = vim.list_extend({}, args(e))
+    -- its modes: auto (read-only tools), accept-edits (and edits), smart (and what a fast model judges safe)
+    local m = e.kind == "btw" and "auto" or C().auto_mode and "smart" or not vim.tbl_contains(a, "--permission-mode") and "accept-edits"
+    if m then
+      for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
+      vim.list_extend(a, { "--permission-mode", m })
+    end
+    -- the trust prompt would hold up each new worktree
+    argv = vim.list_extend(vim.list_extend(base(e), a), { "--config", conf, "--respect-workspace-trust", "false" })
     vim.list_extend(argv, model(e))
   else
-    argv = vim.list_extend(cmd(C().args or {}, mode(e), e), model(e))
-    if e.check then vim.list_extend(argv, { "--allowedTools", "Bash(" .. e.check .. ")" }) end -- it has to run the check
-    -- files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those ("//" is an absolute path)
-    for l in vim.gsplit(e.task, "\n") do
-      local f = l:match("^%s*%- @(/.-)%s*$")
-      if f then vim.list_extend(argv, { "--allowedTools", "Read(/" .. f .. ")" }) end
-    end
+    argv = vim.list_extend(cmd(args(e), mode(e), e), model(e))
+    for _, r in ipairs(allow) do vim.list_extend(argv, { "--allowedTools", r }) end
   end
   for i, a in ipairs(argv) do if a == "--model" and argv[i + 1] then e.model = argv[i + 1] end end -- till SessionStart says
   if e.session then vim.list_extend(argv, { dv and "-r" or "--resume", e.session }) end
-  vim.list_extend(argv, dv and { "-p", "--", prompt } or { "--settings", SETTINGS, prompt })
+  vim.list_extend(argv, dv and { "--", prompt } or { "--settings", SETTINGS, prompt })
   local b = vim.api.nvim_create_buf(false, true)
   local started, over, timer = false, false, vim.uv.new_timer()
   local function close()
     over = true
     timer:stop(); timer:close()
     os.remove(events)
-    os.remove(export)
+    os.remove(conf)
     if not vim.api.nvim_buf_is_valid(b) then return end
     local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
     -- watched: you stay in its float. The check gets a spinner; else its last screen stays (claude
@@ -364,10 +391,11 @@ agent = function(e, prompt, wt)
       e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)
       j.update(e.title .. ": " .. e.activity)
       inbox.render()
-    elseif name == "Notification" then
+    elseif name == "Notification" or name == "PermissionRequest" then -- Devin asks for a tool with the latter
       e.activity = "needs you"
       inbox.render()
-      notify("▲ " .. e.title .. ": " .. tostring(ev.message or "it needs you") .. " · :Sepal open", WARN)
+      local msg = ev.message or name == "PermissionRequest" and "asks to run " .. about({ name = ev.tool_name, input = ev.tool_input }, wt)
+      notify("▲ " .. e.title .. ": " .. tostring(msg or "it needs you") .. " · :Sepal open", WARN)
     elseif name == "SubagentStart" then -- running subagents, in the order they started
       e.subagents = e.subagents or {}
       table.insert(e.subagents, { id = ev.agent_id, name = tostring(ev.agent_type or "agent") })
@@ -398,19 +426,6 @@ agent = function(e, prompt, wt)
     if over then return end
     poll()
     if over then return end
-    if dv then -- its turn is over when it exits: the export has its session and last reply
-      local f = io.open(export)
-      local ok, d = pcall(vim.json.decode, f and f:read("a") or "", { luanil = { object = true, array = true } })
-      if f then f:close() end
-      local reply
-      if ok and type(d) == "table" then
-        if type(d.session_id) == "string" and d.session_id ~= e.session then e.session = d.session_id; inbox.save(e.root) end
-        for _, s in ipairs(type(d.steps) == "table" and d.steps or {}) do
-          if type(s) == "table" and s.source == "agent" and type(s.message) == "string" and s.message ~= "" then reply = s.message end
-        end
-      end
-      if j.stopped or code == 0 then return stopped({ last_assistant_message = reply }) end
-    end
     if j.stopped then return stopped({ transcript_path = transcript }) end -- x: what it did so far is kept, as with Esc
     local last = close()
     finish(e, wt, "error", { error = started and "the agent quit before it was done (exit " .. code .. ")"
@@ -430,6 +445,22 @@ agent = function(e, prompt, wt)
   end
   vim.bo[b].bufhidden, vim.bo[b].scrollback = "hide", 10000
   vim.b[b].sepal_agent = true -- :Sepal open from here leaves it
+  if dv then
+    -- an interrupt (ctrl-c) runs no hook: Devin's state escape goes from working to idle (a finished turn says done)
+    local busy = false
+    vim.api.nvim_create_autocmd("TermRequest", { buffer = b, callback = function(ev)
+      local st = type(ev.data) == "table" and tostring(ev.data.sequence or ""):match("^\27%]7501;state=(%a+)")
+      if st == "working" or st == "done" then busy = st == "working" end
+      if st ~= "idle" or not busy then return end
+      vim.schedule(function()
+        if over then return end
+        poll() -- a Stop the timer hasn't read yet wins
+        if over then return end
+        j.stopped = true -- what it did so far is kept, as with x
+        stopped({})
+      end)
+    end })
+  end
   local term_name = vim.api.nvim_buf_get_name(b)
   pcall(vim.api.nvim_buf_set_name, b, "sepal://" .. e.id)
   for _, x in ipairs(vim.api.nvim_list_bufs()) do -- a rename keeps the old name as a buffer of its own: one per run
@@ -538,7 +569,7 @@ function M.start(text, cwd, land, on_fail, kind, agent)
     task = text, check = not btw and (check or C().check) or nil, time = os.time(), status = not btw and full() and "queued" or "running",
     attempts = 0, land = land, kind = btw and "btw" or nil }
   agent = agent or (C().agents or {})[1]
-  if agent then e.agent = { cmd = agent.cmd, model = agent.model } end -- kept with the task: r and c use it again
+  if agent then e.agent = { cmd = agent.cmd, model = agent.model, args = agent.args } end -- kept with the task: r and c use it again
   inbox.add(e)
   if btw then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
   jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
@@ -891,7 +922,7 @@ function M.open(e, w, kept)
   local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
   termwin(hidden)
   local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
-    local argv = devin(e) and vim.list_extend(vim.list_extend(base(e), model(e)), { "-r", e.session })
+    local argv = devin(e) and vim.list_extend(vim.list_extend(vim.list_extend(base(e), args(e)), model(e)), { "-r", e.session })
       or vim.list_extend(vim.list_extend(cmd({}, mode(e), e), model(e)), { "--resume", e.session })
     return vim.fn.jobstart(argv, { term = true, cwd = e.root,
       env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })

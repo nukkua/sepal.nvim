@@ -141,8 +141,11 @@ require("sepal").setup({
 ### Devin
 
 With `agents`, `:Sepal task` asks which agent after the kind (`1`, `2`…). A `cmd` named `devin`
-runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code: in print mode, so there's no live
-activity in the panel, and `o` opens `devin -r <session>`. An agent's `model` wins over `models`.
+runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code, the same way: sepal adds its hooks
+and the check's allow rule to a copy of your `~/.config/devin/config.json`, so the panel shows what it
+does, a permission prompt warns you, and ctrl-c in it stops the task (what it did is kept). It runs
+in `accept-edits` (`auto` for a btw, `smart` with `auto_mode`). An agent's `model` wins over
+`models`, and its `args` replace `args` (Claude Code's flags aren't Devin's).
 
 ```lua
 agents = {

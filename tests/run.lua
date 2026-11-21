@@ -1083,42 +1083,57 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(task_buf(), nil)
 end)
 
-test(":Sepal task asks which agent with agents set: devin runs in print mode, its export says how it went", function()
+test(":Sepal task asks which agent with agents set: devin runs with sepal's hooks in its config; ctrl-c is caught", function()
   clean(); reset()
-  -- a fake Devin CLI: logs its arguments (without the export path and the prompt), writes the export, edits, exits
+  -- a fake Devin CLI: logs its arguments (without the config path and the prompt), keeps the config,
+  -- reports through the hooks, edits, ends its turn and stays open. $SEPAL_INTERRUPT: ctrl-c (state escapes only)
   local dv = vim.fs.joinpath(T, "bin", "devin")
   vim.fn.mkdir(vim.fs.dirname(dv), "p")
   local f = assert(io.open(dv, "w"))
   f:write([[#!/bin/sh
-logged=; skip=; ex=
+logged=; skip=
 for a; do
-  if [ -n "$skip" ]; then skip=; ex=$a
-  elif [ "$a" = --export ]; then skip=1
+  if [ -n "$skip" ]; then skip=; cp "$a" "$SEPAL_T/devin.json"
+  elif [ "$a" = --config ]; then skip=1
   elif [ "$a" = -- ]; then break
   else logged="$logged${logged:+ }$a"; fi
 done
 printf '%s\n' "$logged" >> "$SEPAL_T/args"
+ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
+ev '{"hook_event_name":"SessionStart","source":"startup","session_id":"dv1"}'
+printf '\033]7501;state=working:app=devin\007'
+if [ -n "$SEPAL_INTERRUPT" ]; then sleep 0.2; printf '\033]7501;state=idle:app=devin\007'; while :; do sleep 1; done; fi
+ev "{\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"exec\",\"tool_input\":{\"command\":\"rm -rf x\"},\"session_id\":\"dv1\"}"
 if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
-printf '%s' '{"session_id":"dv1","steps":[{"source":"user","message":"go"},{"source":"agent","message":"Did it.\n\nAssumptions:\n- used devin"},{"source":"agent","message":""}]}' > "$ex"
-echo "Did it."
+ev '{"hook_event_name":"Stop","last_assistant_message":"Did it.\n\nAssumptions:\n- used devin","session_id":"dv1"}'
+printf '\033]7501;state=done:app=devin\007'
+while :; do sleep 1; done
 ]])
   f:close()
   vim.uv.fs_chmod(dv, 493)
-  sepal.setup({ agents = { { cmd = { "sh", "-c", fake, "sh" }, name = "claude" }, { cmd = { dv }, model = "fusion-x" } } })
+  sepal.setup({ agents = { { cmd = { "sh", "-c", fake, "sh" }, name = "claude" }, { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } } } })
   vim.env.SEPAL_EDIT = [[echo dv > a.txt]]
   local got = msgs(notified(function()
     key("i")
     local g = vim.fn.getcharstr
     vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("2"); return "i" end
     sepal.pick()
-    vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: by devin" })
+    vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: by devin", "", "Done when: true" })
     vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
     idle()
   end))
   local e = newest()
-  eq({ e.status, e.session, e.model, e.agent, file("a.txt") }, { "landed", "dv1", "fusion-x", { cmd = { dv }, model = "fusion-x" }, "dv\n" })
-  eq(args(), { "--permission-mode accept-edits --respect-workspace-trust false --model fusion-x -p" })
-  assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3\n· used devin"), vim.inspect(got))
+  eq({ e.status, e.session, e.model, e.agent, file("a.txt") },
+    { "landed", "dv1", "fusion-x", { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } }, "dv\n" })
+  eq(args(), { "--sandbox --permission-mode accept-edits --respect-workspace-trust false --model fusion-x" })
+  local c = vim.json.decode(read(T .. "/devin.json"))
+  eq({ c.permissions.allow, c.hooks.Stop ~= nil, c.hooks.PermissionRequest ~= nil }, { { "Exec(true)" }, true, true })
+  assert(vim.tbl_contains(got, "▲ by devin: asks to run exec rm -rf x · :Sepal open"), vim.inspect(got))
+  assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3 · true ✓\n· used devin"), vim.inspect(got))
+  clean(); reset()
+  vim.env.SEPAL_INTERRUPT = "1"
+  notified(function() agent.start("Goal: cut short", work, "auto", nil, nil, { cmd = { dv } }); idle() end)
+  eq(newest().status, "stopped")
   sepal.setup({ agents = false })
 end)
 

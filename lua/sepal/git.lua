@@ -40,8 +40,15 @@ end
 
 -- git in dir off the main loop: on_done(r) runs on it
 local function bg(dir, args, o, on_done)
-  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = true, env = o and o.env }, vim.schedule_wrap(on_done))
+  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = true, env = o and o.env, stdin = o and o.stdin }, vim.schedule_wrap(on_done))
   if not ok then vim.schedule(function() on_done({ code = -1, stdout = "", stderr = tostring(err) }) end) end
+end
+
+-- each of refs pointing at commit, in one git process off the main loop, to cb(ok)
+function M.update_refs_bg(root, refs, commit, cb)
+  if #refs == 0 then return vim.schedule(function() cb(true) end) end
+  local stdin = table.concat(vim.tbl_map(function(r) return ("update %s %s\n"):format(r, commit) end, refs))
+  bg(root, { "update-ref", "--stdin" }, { stdin = stdin }, function(r) cb(r.code == 0) end)
 end
 
 -- a commit of tree (with parent, if any) kept at ref, to cb(commit or nil): same as M.commit,

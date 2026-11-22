@@ -37,13 +37,16 @@ local function model(e)
   local m = e.agent and e.agent.model or (C().models or {})[e.kind or "implement"]
   return m and { "--model", m } or {}
 end
--- a btw reads your repo itself: Claude Code's plan mode, so it can't change a file
-local function mode(e) return e.kind == "btw" and "plan" or nil end
+-- a btw (a question) and an orchestrate (a plan) read your repo itself and change nothing
+local function readonly(kind) return kind == "btw" or kind == "orchestrate" end
+M.readonly = readonly
+-- reading your repo itself: Claude Code's plan mode, so it can't change a file
+local function mode(e) return readonly(e.kind) and "plan" or nil end
 
 -- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update }
 local jobs = {}
 local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
--- every slot taken: a btw doesn't take one (no worktree, read-only)
+-- every slot taken: a read-only run doesn't take one (no worktree)
 local function full()
   local n = 0
   for _, j in pairs(jobs) do if not j.btw then n = n + 1 end end
@@ -95,6 +98,21 @@ local function notes(e)
       "- This is a question about the project, not a change: answer it from the code as it is now.",
       "- Read what you need; don't edit files or ask to." }, "\n")
   end
+  if e.kind == "orchestrate" then
+    local models = C().plan_models or {}
+    return table.concat({ "", "---", "How to plan this (from sepal, not part of the task):",
+      "- Don't change anything: read the code and plan the work as tasks for other agents. Each task runs alone in its own git worktree,"
+        .. " in parallel with the others, and can't see their changes: each one has to stand on its own.",
+      "- Decide how many tasks: as few as the work needs. Split only where the parts are independent (other files or areas);"
+        .. " one task when it doesn't split.",
+      #models > 0 and ("- Pick the model for each task, from %s (strongest first): the cheapest one that will do it well.")
+        :format(table.concat(models, ", ")) or "- Pick the model for each task: the cheapest one that will do it well.",
+      "- Each task says what to change and where (Goal), a shell command that proves it (Done when"
+        .. (e.check and (", `%s` if nothing narrower fits"):format(e.check) or "") .. ") and its files.",
+      "- End your reply with the plan in exactly this form, then the decisions a reviewer should know:",
+      "Plan:", "1. [model] short title", "   Goal: ...", "   Done when: <command>", "   Files:", "   - @path",
+      "2. [model] short title", "   ...", "", "Assumptions:\n- <one per line>\n(or \"Assumptions: none\")" }, "\n")
+  end
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
     "- You're in a git worktree of the project. Work on your own: decide instead of asking questions."
       .. " Edit the files here. Don't commit, push or switch branches." }
@@ -118,6 +136,71 @@ function M.assumptions(reply)
     if b then out[#out + 1] = vim.trim(b) elseif vim.trim(lines[i]) ~= "" then break end
   end
   return out
+end
+
+-- a model as written in a plan line: "" and "default" are the agent's own (nil)
+function M.model_of(s)
+  s = vim.trim(s or "")
+  return s ~= "" and s:lower() ~= "default" and s or nil
+end
+
+-- the "Plan:" list at the end of an orchestrate's reply, in order: { { title, model, task } }.
+-- An item is "1. [model] title" (or "- [model] title"), the lines indented under it are its task
+function M.plan(reply)
+  if type(reply) ~= "string" then return {} end
+  local lines, at = vim.split(reply, "\n"), nil
+  for i, l in ipairs(lines) do if l:match("^[%s%*#_]*Plan[%*_]*:[%*_]*%s*$") then at = i end end
+  if not at then return {} end
+  local items, cur = {}, nil
+  for i = at + 1, #lines do
+    local l = lines[i]
+    local ind = #l:match("^%s*")
+    local m, title = l:match("^%s*%d+[.)]%s+%[([^%]]*)%]%s*(.-)%s*$")
+    if not m then m, title = l:match("^%s*[-*]%s+%[([^%]]*)%]%s*(.-)%s*$") end
+    if m and (not cur or ind <= cur.ind) then
+      cur = { model = M.model_of(m), title = (title:gsub("^%*%*(.-)%*%*$", "%1")), body = {}, ind = ind }
+      items[#items + 1] = cur
+    elseif cur and (vim.trim(l) == "" or ind > cur.ind) then cur.body[#cur.body + 1] = l
+    elseif cur then break end -- past the plan: Assumptions:
+  end
+  return vim.tbl_map(function(it)
+    while #it.body > 0 and vim.trim(it.body[#it.body]) == "" do it.body[#it.body] = nil end
+    local cut = math.huge
+    for _, l in ipairs(it.body) do if vim.trim(l) ~= "" then cut = math.min(cut, #l:match("^%s*")) end end
+    local body = vim.tbl_map(function(l)
+      l = l:sub(cut + 1)
+      return (l:gsub("^(%s*Done when:%s*)`(.-)`%s*$", "%1%2")) -- run by sh: backticks would be a substitution
+    end, it.body)
+    local task = table.concat(body, "\n")
+    if not task:match("^%s*Goal:") and not task:match("\n%s*Goal:") then task = "Goal: " .. it.title .. (task ~= "" and "\n" .. task or "") end
+    return { title = it.title ~= "" and it.title or (first(task:gsub("^%s*Goal:%s*", ""), 40) or "task"), model = it.model, task = task }
+  end, items)
+end
+
+-- "3 tasks: 2 opus, 1 sonnet"
+local function plan_summary(plan)
+  local n, order = {}, {}
+  for _, p in ipairs(plan) do
+    local m = p.model or "default"
+    if not n[m] then order[#order + 1] = m end
+    n[m] = (n[m] or 0) + 1
+  end
+  return plural(#plan, "task") .. ": " .. table.concat(vim.tbl_map(function(m) return n[m] .. " " .. m end, order), ", ")
+end
+M.plan_summary = plan_summary
+
+-- the task that item i of e's plan becomes: its own text, e's check when it has none, and the
+-- plan's other tasks, so it sticks to its part
+function M.subtask(e, i)
+  local plan = e.plan
+  local t = plan[i].task
+  if e.check and not ("\n" .. t):match("\n%s*Done when:") then t = t .. "\n\nDone when: " .. e.check end
+  if #plan > 1 then
+    local o = { "", ("Part of a plan, task %d of %d (the others run on their own, in parallel: do only this one):"):format(i, #plan) }
+    for k, p in ipairs(plan) do o[#o + 1] = ("%d. %s"):format(k, p.title) end
+    t = t .. "\n" .. table.concat(o, "\n")
+  end
+  return t
 end
 
 -- what a tool call is about, for the spinner: "Edit src/pool.cpp", "Bash make test"
@@ -176,6 +259,8 @@ local function finish(e, wt, status, extra)
     notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   elseif status == "answered" then notify("● " .. e.title .. ": " .. tostring(e.summary) .. " · <CR> in :Sepal inbox reads it")
+  elseif status == "planned" then
+    notify(("◇ plan ready: %s · %s · s in :Sepal inbox makes the tasks, m sets a model"):format(e.title, plan_summary(e.plan)))
   end
   -- watched to its end: its chat in the same float (or the float goes, with nothing to show)
   local w = j and watching(j)
@@ -297,7 +382,7 @@ agent = function(e, prompt, wt)
     devin_config(conf, allow)
     local a = vim.list_extend({}, args(e))
     -- its modes: auto (read-only tools), accept-edits (and edits), smart (and what a fast model judges safe)
-    local m = e.kind == "btw" and "auto" or C().auto_mode and "smart" or not vim.tbl_contains(a, "--permission-mode") and "accept-edits"
+    local m = readonly(e.kind) and "auto" or C().auto_mode and "smart" or not vim.tbl_contains(a, "--permission-mode") and "accept-edits"
     if m then
       for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
       vim.list_extend(a, { "--permission-mode", m })
@@ -343,10 +428,17 @@ agent = function(e, prompt, wt)
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
     local reply = reply_of(ev)
-    if e.kind == "btw" then -- its answer is what it did: kept whole, nothing to land
+    if readonly(e.kind) then -- its answer is what it did: kept whole, nothing to land
       e.answer, e.summary = reply or e.answer, first(reply, 100) or e.summary
-      return finish(e, wt, j.stopped and "stopped" or reply and "answered" or "error",
-        not reply and not j.stopped and { error = "the agent ended its turn without an answer" } or nil)
+      local status = j.stopped and "stopped" or reply and "answered" or "error"
+      local extra = not reply and not j.stopped and { error = "the agent ended its turn without an answer" } or nil
+      if e.kind == "orchestrate" and status == "answered" then -- a plan: its tasks, to split it into
+        e.assumptions = M.assumptions(reply)
+        local plan = M.plan(reply)
+        if #plan > 0 then e.plan, status = plan, "planned"
+        else status, extra = "error", { error = "its reply has no Plan: list · <CR> reads it, r asks again" } end
+      end
+      return finish(e, wt, status, extra)
     end
     git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
       e.result = result or e.result
@@ -512,8 +604,8 @@ end
 -- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
 -- with max_running tasks already running it waits in the queue
 local function launch(e, prompt, from)
-  if e.kind == "btw" then -- a question: in your repo, read-only, at once; no worktree, prepare or slot
-    local done_, update = sepal().progress(e.title .. ": answering")
+  if readonly(e.kind) then -- a question or a plan: in your repo, read-only, at once; no worktree, prepare or slot
+    local done_, update = sepal().progress(e.title .. (e.kind == "btw" and ": answering" or ": planning"))
     jobs[e.id] = { done = done_, update = update, btw = true }
     e.status = "running"
     inbox.changed(e)
@@ -575,45 +667,111 @@ local function queued(e)
   for i, q in ipairs(queue) do if q[1].id == e.id then return i end end
 end
 
+-- a new entry for text in root's inbox (see M.start for the rest)
+local function entry(text, root, land, kind, agent)
+  local check, title = M.parse(text)
+  local btw = kind == "btw"
+  if btw then check = nil end -- a question has nothing to check (nor the check option); a plan's is its tasks'
+  local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
+    task = text, check = not btw and (check or C().check) or nil, time = os.time(),
+    status = not readonly(kind) and full() and "queued" or "running",
+    attempts = 0, land = land, kind = (btw or kind == "orchestrate") and kind or nil }
+  while inbox.find(root, e.id) do e.id = e.id:sub(1, -5) .. ("%04x"):format((tonumber(e.id:sub(-4), 16) + 1) % 0x10000) end -- several at once
+  agent = agent or (C().agents or {})[1]
+  if agent then e.agent = { cmd = agent.cmd, model = agent.model, args = agent.args } end -- kept with the task: r and c use it again
+  inbox.add(e)
+  return e
+end
+
+-- es are new tasks of root (jobs[e.id] = {} while saving): your work tree is saved once for all of
+-- them, each keeps it at its base ref, then they start (or wait their turn) in order. on_fail(why)
+-- if saving fails: they're gone from the inbox then
+local function snapshot_for(es, root, on_fail)
+  local function fail()
+    inbox.batch(function() for _, e in ipairs(es) do jobs[e.id] = nil; inbox.remove(e) end end)
+    M._next()
+    return (on_fail or function(why) notify(why, ERROR) end)("could not save your work tree (git add / write-tree failed)")
+  end
+  git.snapshot(root, ref(es[1], "base"), function(base)
+    if not base then return fail() end
+    local refs = vim.tbl_map(function(e) return ref(e, "base") end, vim.list_slice(es, 2))
+    git.update_refs_bg(root, refs, base, function(ok)
+      if not ok then return fail() end
+      inbox.batch(function()
+        for _, e in ipairs(es) do
+          local j = jobs[e.id]
+          jobs[e.id] = nil
+          e.base, e.base0 = base, base
+          if j.stopped then
+            e.status = "stopped"
+            inbox.changed(e)
+            notify("stopped: " .. e.title)
+          else
+            queue[#queue + 1] = { e, e.task .. "\n" .. notes(e), base } -- behind the tasks queued before it
+          end
+        end
+        for _ = 1, #es do M._next() end
+        for _, e in ipairs(es) do
+          if queued(e) and e.status ~= "queued" then e.status = "queued"; inbox.changed(e) end
+        end
+      end)
+    end)
+  end)
+end
+
 -- run a new task from cwd; nil, why when it can't. Your work tree is saved in the background, then
 -- it starts (or waits its turn); on_fail(why) if saving fails (the task is gone from the inbox then)
 -- land: "auto" / "manual" for this task, nil: the land option
--- kind: "btw" for a question (see sepal.task), nil/"implement" for a change
+-- kind: "btw" for a question, "orchestrate" for a plan of tasks (see sepal.task), nil/"implement" for a change
 -- agent: { cmd, model } from the agents option (nil: its first, or cmd and models when it's not set)
 function M.start(text, cwd, land, on_fail, kind, agent)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
-  local check, title = M.parse(text)
-  local btw = kind == "btw"
-  if btw then check = nil end -- a question has nothing to check (nor the check option)
-  local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
-    task = text, check = not btw and (check or C().check) or nil, time = os.time(), status = not btw and full() and "queued" or "running",
-    attempts = 0, land = land, kind = btw and "btw" or nil }
-  agent = agent or (C().agents or {})[1]
-  if agent then e.agent = { cmd = agent.cmd, model = agent.model, args = agent.args } end -- kept with the task: r and c use it again
-  inbox.add(e)
-  if btw then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
+  local e = entry(text, root, land, kind, agent)
+  if readonly(kind) then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
   jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
-  git.snapshot(root, ref(e, "base"), function(base)
-    local j = jobs[e.id]
-    jobs[e.id] = nil
-    if not base then
-      inbox.remove(e)
-      M._next()
-      return (on_fail or function(why) notify(why, ERROR) end)("could not save your work tree (git add / write-tree failed)")
-    end
-    e.base, e.base0 = base, base
-    if j.stopped then
-      e.status = "stopped"
-      inbox.changed(e)
-      notify("stopped: " .. e.title)
-      return M._next()
-    end
-    queue[#queue + 1] = { e, text .. "\n" .. notes(e), base } -- behind the tasks queued before it
-    M._next()
-    if queued(e) and e.status ~= "queued" then e.status = "queued"; inbox.changed(e) end
-  end)
+  snapshot_for({ e }, root, on_fail)
   return e
+end
+
+-- run several new tasks from cwd at once: specs = { { text, agent } }, the first one starts first;
+-- your work tree is saved once for all of them. The list of entries, or nil, why
+function M.start_many(specs, cwd, land, on_fail)
+  local root = git.root(cwd)
+  if not root then return nil, "not in a git repository: a task runs in a git worktree" end
+  if #specs == 0 then return nil, "no tasks to start" end
+  local es = {}
+  inbox.batch(function()
+    for i = #specs, 1, -1 do -- the inbox is newest first: the first task on top
+      es[i] = entry(specs[i].text, root, land, nil, specs[i].agent)
+      jobs[es[i].id] = {}
+    end
+  end)
+  snapshot_for(es, root, on_fail)
+  return es
+end
+
+-- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by its agent with
+-- the item's model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
+function M.split(e)
+  if e.kind ~= "orchestrate" then return notify("only an orchestrate task splits into tasks") end
+  if M.running(e) then return notify("it's still planning") end
+  if e.status == "split" then return notify("already split: its tasks are in the inbox") end
+  if e.status ~= "planned" or #(e.plan or {}) == 0 then return notify("it has no plan to split: r asks for one") end
+  local specs = {}
+  for i, p in ipairs(e.plan) do
+    local a = vim.tbl_extend("force", e.agent or {}, { model = p.model }) -- no model: the agent's, else models.implement
+    specs[i] = { text = M.subtask(e, i), agent = next(a) and a or nil }
+  end
+  local es, why = M.start_many(specs, e.root, e.land, function(why)
+    e.status, e.split = "planned", nil
+    inbox.changed(e)
+    notify(why, ERROR)
+  end)
+  if not es then return notify(why, ERROR) end
+  e.status, e.split = "split", vim.tbl_map(function(x) return x.id end, es)
+  inbox.changed(e)
+  notify(("split: %s · %s started"):format(e.title, plan_summary(e.plan)))
 end
 
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
@@ -632,14 +790,14 @@ function M.resume(e)
   if not vim.tbl_contains({ "interrupted", "stopped", "error" }, e.status) then
     return notify("it wasn't cut short: r replies to it")
   end
-  if not e.base and e.kind ~= "btw" then return notify("it never started (your work tree wasn't saved): send it again") end
+  if not e.base and not readonly(e.kind) then return notify("it never started (your work tree wasn't saved): send it again") end
   local function go()
     M.continue(e, e.session and "You were interrupted. Carry on with the task from where you left off." or e.task)
   end
   local wt = wtdir(e)
   -- no session: quit before the agent started, the checkout may be half made (it'd read as deletions);
-  -- a btw's worktree has nothing to save
-  if e.kind == "btw" or not (e.session and vim.uv.fs_stat(wt)) then return go() end
+  -- a read-only run has no worktree to save
+  if readonly(e.kind) or not (e.session and vim.uv.fs_stat(wt)) then return go() end
   jobs[e.id] = {} -- saving it: counts as running, x stops it
   git.result(e.root, wt, e.base, ref(e, "result"), e.exclude, function(result)
     local j = jobs[e.id] -- kept through the stat: a stop in between is caught, the slot stays taken
@@ -810,9 +968,9 @@ end
 
 -- everything the task changed, in a new tab: the file before | after in diff mode, all its files in
 -- the after window's location list (]q [q or ]l [l next file, ]c next change, gf the file in your
--- work tree). A btw's answer
+-- work tree). A btw's answer, an orchestrate's reply with its plan
 function M.show(e)
-  local btw = e.kind == "btw"
+  local btw = readonly(e.kind)
   if btw and not e.answer then return notify("no answer yet") end
   if not btw and not e.result then return notify("no changes yet") end
   if btw then

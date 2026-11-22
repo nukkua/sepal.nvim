@@ -44,7 +44,7 @@ end
 M.save = save
 
 -- what the statusline shows (sepal.status): tasks running, ready to land, needing you
-local COUNTS = { running = 1, checking = 1, queued = 1, ready = 2, needs = 3, failed = 3, error = 3 }
+local COUNTS = { running = 1, checking = 1, queued = 1, ready = 2, planned = 2, needs = 3, failed = 3, error = 3 }
 function M.counts(root)
   local n = { 0, 0, 0 }
   for _, e in ipairs(cache[root] or {}) do local i = COUNTS[e.status]; if i then n[i] = n[i] + 1 end end
@@ -118,6 +118,8 @@ local STATUS = {
   interrupted = { "○", "interrupted", "SepalDim" },
   undone = { "↺", "undone", "SepalDim" },
   answered = { "◆", "answered", "SepalOk" }, -- a btw
+  planned = { "◇", "planned", "SepalOk" }, -- an orchestrate: its plan waits for s
+  split = { "⇉", "split", "SepalDim" }, -- an orchestrate whose tasks were made
 }
 M.STATUS = STATUS
 M.LIVE = { running = true, checking = true } -- these spin in the inbox and the panel
@@ -125,7 +127,10 @@ local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close"
+-- an orchestrate's plan item under it: "    2. [sonnet] title"; edit the model in it (or dd it) and :w
+local PLAN = "^%s+(%d+)%.%s*%[([^%]]*)%]"
+local function plan_line(i, p) return ("%d. [%s] %s"):format(i, p.model or "default", p.title) end
 
 local function ago(t)
   local s = os.time() - (t or os.time())
@@ -172,6 +177,10 @@ local function details(e)
   end
   if e.status == "failed" and e.check_out then
     for _, l in ipairs(vim.list_slice(vim.split(vim.trim(e.check_out), "\n"), 1, 3)) do d[#d + 1] = "│ " .. l end
+  end
+  if e.status == "split" then d[#d + 1] = ("→ split into %d task%s, above in the inbox"):format(#(e.split or {}), #(e.split or {}) == 1 and "" or "s") end
+  if e.status == "planned" or e.status == "split" then
+    for i, p in ipairs(e.plan or {}) do d[#d + 1] = plan_line(i, p) end
   end
   for _, a in ipairs(e.assumptions or {}) do d[#d + 1] = "· " .. a end
   for _, c in ipairs(e.conflicts or {}) do d[#d + 1] = "conflict markers in " .. c end
@@ -239,7 +248,7 @@ draw = function()
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not w then drawn = nil; return end -- what it showed is stale now: no tick may touch it
   if vim.bo[b].modified then return end -- your edits wait for :w (or u): a redraw would throw them away
-  local lines, rows, marks, spans, spins, agents = { HELP, "" }, {}, {}, {}, {}, {}
+  local lines, rows, marks, spans, spins, agents, plans = { HELP, "" }, {}, {}, {}, {}, {}, {}
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   -- every column padded to its widest value in the list, so every line is the same width
   local cols, wid = {}, { 0, 0, 0, 0 }
@@ -264,7 +273,12 @@ draw = function()
     for a, z in f:gmatch("()↳ %d+ subagents?()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAgent" } end
     for _, d in ipairs(details(e)) do
       lines[#lines + 1] = "    " .. d; rows[#lines] = e.id
-      if d:match("^↳ ") then agents[#lines] = true end -- not dimmed: these are what's running
+      if d:match("^↳ ") then agents[#lines] = true -- not dimmed: these are what's running
+      elseif e.status == "planned" and lines[#lines]:match(PLAN) then -- nor these: what s makes, the model to edit in color
+        plans[#lines] = true
+        local a, z = lines[#lines]:find("%[[^%]]*%]")
+        spans[#spans + 1] = { #lines, a - 1, z, "SepalAccent" }
+      end
     end
   end
   local key = { w }
@@ -278,9 +292,11 @@ draw = function()
   local old = vim.b[b].sepal_rows or {}
   vim.api.nvim_win_call(w, function()
     for row in pairs(heads) do
-      if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 or nil end
+      if heads[row] and old[row] then opened[old[row]] = vim.fn.foldclosed(row) == -1 end
     end
   end)
+  local planned = {} -- a plan starts unfolded: its tasks and their models are what you act on
+  for _, e in ipairs(list) do planned[e.id] = e.status == "planned" end
   quiet(b, function() vim.api.nvim_buf_set_lines(b, 0, -1, false, lines) end)
   ids = {}
   for row, id in pairs(rows) do
@@ -292,7 +308,7 @@ draw = function()
   for _, sp in ipairs(spans) do vim.api.nvim_buf_set_extmark(b, NS, sp[1] - 1, sp[2], { end_col = sp[3], hl_group = sp[4] }) end
   for row = 3, #lines do
     if agents[row] then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalAgent" })
-    elseif not marks[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalDim" }) end
+    elseif not marks[row] and not plans[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalDim" }) end
   end
   vim.b[b].sepal_rows = rows
   heads = {}
@@ -304,7 +320,8 @@ draw = function()
       while heads[row] and rows[last + 1] == rows[row] do last = last + 1 end
       if last > row then
         vim.cmd(("%d,%dfold"):format(row, last))
-        if opened[rows[row]] then vim.cmd(row .. "foldopen") end
+        local o = opened[rows[row]]
+        if o or (o == nil and planned[rows[row]]) then vim.cmd(row .. "foldopen") end
       end
     end
   end)
@@ -324,14 +341,37 @@ function M.current()
 end
 
 -- :w in the inbox: a task whose line is gone is dropped, a line put twice (yyp) opens a new task
--- with that task's text, to add to and send
+-- with that task's text, to add to and send. Under a planned orchestrate, its plan is what its
+-- plan lines say now: the [model] in each, their order, and a deleted line drops that task
 function M.write(b)
   local root, seen, copies = vim.b[b].sepal_inbox, {}, {}
+  local cur, plans = nil, {} -- the task the lines are under; id -> { { item, model } } read under it
   for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
     local k = tkey(l)
     if ids[k] then
       seen[k] = (seen[k] or 0) + 1
-      if seen[k] > #ids[k] then copies[#copies + 1] = ids[k][1] end
+      if seen[k] > #ids[k] then copies[#copies + 1], cur = ids[k][1], nil
+      else cur = ids[k][seen[k]]; plans[cur] = plans[cur] or {} end
+    else
+      local i, m = l:match(PLAN)
+      if cur and i then table.insert(plans[cur], { tonumber(i), m }) end
+    end
+  end
+  local agent = require("sepal.agent")
+  for id, got in pairs(plans) do
+    local e = M.find(root, id)
+    if e and e.status == "planned" and e.plan then
+      local plan, used = {}, {}
+      for _, g in ipairs(got) do
+        local p = e.plan[g[1]]
+        if p and not used[g[1]] then
+          used[g[1]] = true
+          p = vim.deepcopy(p)
+          p.model = agent.model_of(g[2])
+          plan[#plan + 1] = p
+        end
+      end
+      if not vim.deep_equal(plan, e.plan) then e.plan = plan; save(root) end
     end
   end
   local gone = {}
@@ -339,7 +379,7 @@ function M.write(b)
     for i = (seen[k] or 0) + 1, #list do gone[#gone + 1] = list[i] end
   end
   vim.bo[b].modified = false
-  local agent, dropping = require("sepal.agent"), {}
+  local dropping = {}
   for _, id in ipairs(gone) do local e = M.find(root, id); if e then dropping[#dropping + 1] = e end end
   agent.drop_many(dropping) -- a running one stays
   drawn = nil
@@ -349,6 +389,36 @@ function M.write(b)
   -- scheduled: :w puts you back in the inbox after BufWriteCmd, the draft should keep focus
   if e then vim.schedule(function() require("sepal").task(nil, vim.split(e.task, "\n"), e.kind) end) end
   if #copies > 1 then require("sepal").notify("one task draft at a time: copied only " .. e.title) end
+end
+
+-- m: the model of the plan item under the cursor (on the orchestrate's own line: of all of them),
+-- picked from plan_models, "default" (the agent's own) or one you type
+function M.pick_model()
+  local b, e = vim.api.nvim_get_current_buf(), M.current()
+  local notify = require("sepal").notify
+  if not e then return end
+  if e.status ~= "planned" then return notify("m sets the models of a planned orchestrate's tasks") end
+  if vim.bo[b].modified then return notify("your edits come first: :w (or u)") end
+  local i = tonumber(vim.api.nvim_get_current_line():match(PLAN) or nil)
+  local which = {}
+  for k in ipairs(e.plan) do if not i or k == i then which[#which + 1] = k end end
+  if #which == 0 then return end
+  local choices, cur = {}, i and e.plan[i].model
+  local all = vim.list_extend({}, cfg().plan_models or {})
+  if cur then all[#all + 1] = cur end
+  vim.list_extend(all, { "default", "other…" })
+  for _, m in ipairs(all) do
+    if not vim.tbl_contains(choices, m) then choices[#choices + 1] = m end
+  end
+  local function set(m)
+    if not m then return end
+    for _, k in ipairs(which) do e.plan[k].model = require("sepal.agent").model_of(m) end
+    M.changed(e)
+  end
+  vim.ui.select(choices, { prompt = i and ("model for task %d (%s): "):format(i, e.plan[i].title) or "model for every task: " }, function(c)
+    if c ~= "other…" then return set(c) end
+    vim.ui.input({ prompt = "model: " }, set)
+  end)
 end
 
 function M.open(root)
@@ -370,6 +440,8 @@ function M.open(root)
     vim.keymap.set("n", "c", on(agent.resume), o("Continue a task that was cut short (quit, stopped, crashed)"))
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
+    vim.keymap.set("n", "s", on(agent.split), o("Split a planned orchestrate into its tasks"))
+    vim.keymap.set("n", "m", M.pick_model, o("Set the model of a planned task (all of them on the plan's line)"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
     -- j/k go task to task, past the detail lines under each

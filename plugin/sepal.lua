@@ -1,7 +1,7 @@
 if vim.g.loaded_sepal then return end
 vim.g.loaded_sepal = true
 
--- :[range]Sepal [task] writes a task for the agent (i implement, b btw: a question about the project); :Sepal inbox lists every task (:Sepal panel shows them at the right); land, undo, open,
+-- :[range]Sepal [task] writes a task for the agent (i implement, b btw: a question about the project, o orchestrate: a plan of tasks); :Sepal inbox lists every task (:Sepal panel shows them at the right); land, undo, open,
 -- stop act on the newest one they apply to; clean drops the finished ones
 local SUB = { "task", "inbox", "panel", "land", "undo", "open", "stop", "clean" }
 vim.api.nvim_create_user_command("Sepal", function(o)

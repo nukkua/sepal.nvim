@@ -17,7 +17,8 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw
+  models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
+  plan_models = { "opus", "sonnet", "haiku" }, -- an orchestrate picks each task's model from these (strongest first); m in the inbox too
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
@@ -224,11 +225,11 @@ function M.stop()
   for _, e in ipairs(entries() or {}) do if agent.running(e) or agent.chatting(e) then agent.stop(e); n = n + 1 end end
   if n == 0 then M.notify("no task is running") end
 end
--- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted, answered)
+-- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted, answered, split)
 function M.clean()
   local agent, list = require("sepal.agent"), {}
   for _, e in ipairs(vim.list_slice(entries() or {}, 1)) do
-    if vim.tbl_contains({ "landed", "nochange", "undone", "stopped", "interrupted", "answered" }, e.status) then list[#list + 1] = e end
+    if vim.tbl_contains({ "landed", "nochange", "undone", "stopped", "interrupted", "answered", "split" }, e.status) then list[#list + 1] = e end
   end
   agent.drop_many(list)
   M.notify("dropped " .. #list .. " task" .. (#list == 1 and "" or "s"))
@@ -287,7 +288,8 @@ local function template(check)
 end
 local IDEA = { "", "", "Files:" } -- with task_suggest (or for btw): the idea goes on top, <c-c><c-s> writes the task
 local HINT = { implement = "what to change, where and why; <c-c><c-s> writes the task",
-  btw = "ask anything about the project; it answers, nothing changes" }
+  btw = "ask anything about the project; it answers, nothing changes",
+  orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 
 -- add "- @path" at the end of the Files: list (once)
@@ -359,7 +361,9 @@ end
 local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
 local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
-  local help = vim.b[buf].sepal_kind == "btw" and "btw  <c-c><c-c> ask  "
+  local kind = vim.b[buf].sepal_kind
+  local help = kind == "btw" and "btw  <c-c><c-c> ask  "
+    or kind == "orchestrate" and "orchestrate  <c-c><c-c> plan  <c-c><c-w> plan, its tasks wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
     or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
   help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
   local line = { { help, "SepalDim" } }
@@ -379,7 +383,9 @@ end
 -- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
--- kind: "implement" (nil) changes the code; "btw" asks about the project: it answers, nothing lands
+-- kind: "implement" (nil) changes the code; "btw" asks about the project: it answers, nothing lands;
+-- "orchestrate" plans the job as tasks, each with its model, that s in the inbox starts (<c-c><c-c>:
+-- they land by themselves, <c-c><c-w>: they wait for L)
 -- ponytail: a range is whole lines; a charwise selection brings its full lines
 -- agent: one of the agents option's (nil: its first)
 function M.task(range, lines, kind, agent)
@@ -446,6 +452,7 @@ function M.task(range, lines, kind, agent)
     if not e then return back(why) end
     if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running task is done") end
     if btw then return M.notify("asking: " .. e.title .. " · :Sepal open watches") end
+    if kind == "orchestrate" then return M.notify("planning: " .. e.title .. " · its tasks wait in :Sepal inbox, s starts them") end
     M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
   end
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function() send("auto") end,
@@ -518,15 +525,15 @@ function M.task(range, lines, kind, agent)
   end, vim.tbl_extend("force", o, { desc = "Paste the clipboard's image into the task" }))
 end
 
--- :Sepal task: pick its kind first, i implement or b btw (any other key cancels); an open draft just
--- gets the focus (and the range), whatever its kind
-local KINDS = { i = "implement", b = "btw" }
+-- :Sepal task: pick its kind first, i implement, b btw or o orchestrate (any other key cancels); an
+-- open draft just gets the focus (and the range), whatever its kind
+local KINDS = { i = "implement", b = "btw", o = "orchestrate" }
 function M.pick(range)
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return M.task(range) end end
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local chunks = { { "sepal ", "SepalTitle" } }
-  for _, k in ipairs({ "i", "b" }) do
+  for _, k in ipairs({ "i", "b", "o" }) do
     vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. KINDS[k] } })
     if #agents < 2 then
       local l, m, name = who(KINDS[k])

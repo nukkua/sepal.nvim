@@ -31,7 +31,10 @@ function M.check()
   elseif type(C.max_running) ~= "number" or C.max_running < 1 then h.error("max_running must be a number, 1 or more")
   else h.ok("max_running: " .. C.max_running .. " at once, the rest wait") end
   if type(C.models) ~= "table" then h.error("models must be a table: { implement = \"opus\", btw = \"sonnet\" }")
-  else h.ok(("models: implement %s, btw %s"):format(C.models.implement or "Claude Code's default", C.models.btw or "Claude Code's default")) end
+  else h.ok(("models: implement %s, btw %s, orchestrate %s"):format(C.models.implement or "Claude Code's default",
+    C.models.btw or "Claude Code's default", C.models.orchestrate or "Claude Code's default")) end
+  if type(C.plan_models) ~= "table" then h.error("plan_models must be a list: { \"opus\", \"sonnet\", \"haiku\" }")
+  else h.ok("an orchestrate picks its tasks' models from: " .. table.concat(C.plan_models, ", ")) end
   if C.agents then
     if type(C.agents) ~= "table" then h.error("agents must be a list: { { cmd = \"devin\", model = \"...\" } }") end
     for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do

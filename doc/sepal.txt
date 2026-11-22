@@ -47,6 +47,7 @@ files, fidget.nvim for a spinner.
     task_suggest = nil,
     max_running = 2,
     models = { btw = "sonnet" },
+    plan_models = { "opus", "sonnet", "haiku" },
     sakura = true,
     highlights = {},
     icons = {},
@@ -84,7 +85,12 @@ files, fidget.nvim for a spinner.
 `models`     each task kind's model, passed as `--model` (over one in `args`):
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
-             the other's default.
+             the other's default. `orchestrate`: the planner's model (unset:
+             Claude Code's default).
+                                                        *sepal-plan_models*
+`plan_models` the models an orchestrate picks each task's from, strongest
+             first; `m` in the inbox offers them too. For a Devin agent,
+             its own model names.
                                                              *sepal-agents*
 `agents`     the agents :Sepal task asks you to pick from after the kind
              by its `key` (unset: 1, 2… its place in the list), each
@@ -138,8 +144,16 @@ files, fidget.nvim for a spinner.
                   no wait for a |sepal-max_running| slot.
                   Nothing a btw does lands: <c-c><c-c> asks, the answer's
                   start is a notification, <CR> in the inbox shows all of
-                  it, r asks a follow-up. Any other key cancels. With a
-                  draft open, it goes to the draft.
+                  it, r asks a follow-up. `o` orchestrate: the same
+                  template as implement, but the agent (read-only, like a
+                  btw, on the `orchestrate` model) plans the job as tasks:
+                  how many, what each does, its check, and the model for
+                  each from |sepal-plan_models|. The plan waits in the
+                  inbox (|:Sepal-inbox| `s`, `m`); its tasks get its
+                  `Done when:` when they have none, and land like it was
+                  sent (<c-c><c-c> by themselves, <c-c><c-w> on L). Any
+                  other key cancels. With a draft open, it goes to the
+                  draft.
                   Implement: write a task in a buffer above the code: Goal,
                   Constraints, Done when, Files. Fields left
                   empty aren't sent; an empty Goal: sends nothing.
@@ -183,6 +197,14 @@ files, fidget.nvim for a spinner.
                           starts over
                     o     watch it (running) or open its chat (done)
                     x     stop it
+                    s     split a planned orchestrate: one task per item of
+                          its plan, each with its model, all from one
+                          snapshot of your work tree
+                    m     the model of the plan item under the cursor (on
+                          the orchestrate's own line: of every item), from
+                          |sepal-plan_models|, "default" or one you type.
+                          Or edit the `[model]` in the line and :w; dd an
+                          item (or move it) and :w drops (or reorders) it
                     dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim
                     yyp   a copied line opens, on :w, a new task with
@@ -210,9 +232,9 @@ files, fidget.nvim for a spinner.
                   (normal mode) it's a toggle: it leaves, like `q`.
 :Sepal stop       Stop every running task, and close their chats.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
-                  stopped, interrupted.
+                  stopped, interrupted, answered, split.
 
-Lua: `require("sepal").task(range, lines, kind)` (kind "implement" or "btw", no
+Lua: `require("sepal").task(range, lines, kind)` (kind "implement", "btw" or "orchestrate", no
 picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
 `.panel()`, `.stop()`, `.clean()`.
 

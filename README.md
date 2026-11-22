@@ -36,7 +36,8 @@ vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox
 ```
 
 **2. Write a task.** Select the code you mean (or don't) and press `<leader>as`, then pick what
-kind of task it is: `i` implement (a change, below) or `b` btw (a question, see Btw). A buffer opens
+kind of task it is: `i` implement (a change, below), `b` btw (a question, see Btw) or `o` orchestrate
+(a bigger job, planned as several tasks, see Orchestrate). A buffer opens
 above your code:
 
 ```
@@ -86,7 +87,7 @@ cases.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o chat  x stop  C clean  za fold  q close
+<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close
 
 ✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
     · shutdown() blocks until the queue is empty
@@ -120,6 +121,28 @@ Write the question and send it with `<c-c><c-c>`. It runs on a cheaper model (so
 and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
 `<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat.
 
+### Orchestrate
+
+`o` is for a job too big for one task. Write it like an implement task and send it: the agent reads
+your repo (read-only, like a btw, on `models.orchestrate`) and plans it. It decides how many tasks
+there are, what each one does and checks, and which model runs each one, picked from `plan_models`.
+The plan waits in the inbox, unfolded:
+
+```
+◇ planned      1m   retries for the client    make test
+    1. [opus] Retry with backoff in client.ts
+    2. [haiku] Document the retry option
+```
+
+- `m` on an item changes its model: `plan_models`, `default` (the agent's own) or one you type. `m`
+  on the plan's own line changes all of them. You can also edit the `[model]` in the line and `:w`.
+  `dd` an item (or move it) and `:w` drops (or reorders) it.
+- `s` splits it: each item becomes a task of its own, run with its model and checked with its
+  `Done when:` (the plan's own if it has none). All of them start from one snapshot of your work
+  tree, run in parallel up to `max_running`, and land the way you sent the plan (`<c-c><c-c>` by
+  themselves, `<c-c><c-w>` on `L`).
+- `r` asks for a different plan, `<CR>` reads the agent's whole reply.
+
 ## Setup
 
 `setup()` is optional. These are the defaults:
@@ -136,7 +159,8 @@ require("sepal").setup({
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
-  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args')
+  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
+  plan_models = { "opus", "sonnet", "haiku" }, -- an orchestrate picks each task's model from these, strongest first
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }

@@ -19,7 +19,8 @@ vim.env.CLAUDE_CONFIG_DIR = vim.fs.joinpath(T, "claude") -- drop deletes chats f
 -- a fake Claude Code: logs where it runs, its arguments (without --settings and the prompt) and the
 -- prompt (its last argument), reports through the hooks ($SEPAL_EVENTS), runs $SEPAL_EDIT ($SEPAL_FIX
 -- when it continues a chat), ends its turn with a reply with assumptions, and stays open like claude.
--- $SEPAL_FAIL=start: dies before starting; =quit: quits mid-turn. $SEPAL_ASK: asks for permission
+-- $SEPAL_FAIL=start: dies before starting; =quit: quits mid-turn. $SEPAL_ASK: asks for permission.
+-- $SEPAL_REPLY: a file with the transcript line of its reply instead of the usual one
 local fake = [[
 n=$#; i=0; logged=; skip=
 for a; do
@@ -57,7 +58,8 @@ if [ -n "$SEPAL_INTERRUPT" ]; then # Esc: no Stop hook, it waits at its prompt
   while :; do sleep 1; done
 fi
 if [ -n "$SEPAL_ASK" ]; then ev '{"hook_event_name":"Notification","session_id":"s1","message":"Claude needs your permission to use Bash"}'; fi
-printf '%s\n' '{"type":"user","message":{"content":"go"}}' '{"type":"assistant","message":{"content":[{"type":"text","text":"Did it.\n\nAssumptions:\n- kept the old API\n- no new deps"}]}}' > "$t"
+if [ -n "$SEPAL_REPLY" ]; then { printf '%s\n' '{"type":"user","message":{"content":"go"}}'; cat "$SEPAL_REPLY"; } > "$t"
+else printf '%s\n' '{"type":"user","message":{"content":"go"}}' '{"type":"assistant","message":{"content":[{"type":"text","text":"Did it.\n\nAssumptions:\n- kept the old API\n- no new deps"}]}}' > "$t"; fi
 ev "{\"hook_event_name\":\"Stop\",\"session_id\":\"s1\",\"transcript_path\":\"$t\"}"
 while :; do sleep 1; done]]
 sepal.setup({ cmd = { "sh", "-c", fake, "sh" }, worktrees = vim.fs.joinpath(T, "state") })
@@ -85,7 +87,7 @@ local function args() return vim.split(vim.trim(read(T .. "/args") or ""), "\n")
 local function prompts() return read(T .. "/prompts") or "" end
 local function reset()
   for _, f in ipairs({ "args", "prompts", "cwd" }) do os.remove(T .. "/" .. f) end
-  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT", "SEPAL_SUB" }) do vim.env[k] = nil end
+  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT", "SEPAL_SUB", "SEPAL_REPLY" }) do vim.env[k] = nil end
 end
 local function idle()
   assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the task never finished")
@@ -1169,6 +1171,96 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(task_buf(), nil)
 end)
 
+test("a plan is read from the end of an orchestrate's reply: each task, its model, its text", function()
+  local plan = agent.plan(table.concat({ "Let me plan.", "", "**Plan:**", "1. [opus] **Shout two**", "   Goal: upper case line two",
+    "   Done when: `grep -q TWO a.txt`", "", "   Files:", "   - @a.txt", "2. [default] add b", "- [ Haiku ] docs", "   Constraints:",
+    "   - short", "", "Assumptions:", "- none really" }, "\n"))
+  eq(plan, {
+    { title = "Shout two", model = "opus", task = "Goal: upper case line two\nDone when: grep -q TWO a.txt\n\nFiles:\n- @a.txt" },
+    { title = "add b", task = "Goal: add b" },
+    { title = "docs", model = "Haiku", task = "Goal: docs\nConstraints:\n- short" },
+  })
+  eq(agent.plan("no plan here"), {})
+  eq(agent.plan_summary(plan), "3 tasks: 1 opus, 1 default, 1 Haiku")
+  local e = { check = "make test", plan = plan }
+  eq(agent.subtask(e, 1), plan[1].task .. "\n\nPart of a plan, task 1 of 3 (the others run on their own, in parallel: do only this one):"
+    .. "\n1. Shout two\n2. add b\n3. docs")
+  eq(vim.split(agent.subtask(e, 2), "\n")[3], "Done when: make test") -- the orchestrate's check when it has none
+end)
+
+test("o orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
+  clean(); reset()
+  local reply = vim.fs.joinpath(T, "plan.jsonl")
+  vim.fn.writefile({ vim.json.encode({ type = "assistant", message = { content = { { type = "text", text = table.concat({
+    "Two parts.", "", "Plan:", "1. [opus] Shout two", "   Goal: upper case line two", "   Done when: `test -n ok`",
+    "   Files:", "   - @a.txt", "2. [haiku] Add b", "   Goal: add b.txt", "", "Assumptions:", "- two tasks are enough" }, "\n") } } } }) }, reply)
+  vim.env.SEPAL_REPLY = reply
+  local got = msgs(notified(function()
+    key("o")
+    sepal.pick()
+    eq(vim.b[task_buf()].sepal_kind, "orchestrate")
+    vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: shout and add", "", "Done when: true" })
+    vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+    idle()
+  end))
+  local e = newest()
+  eq(got, { "planning: shout and add · its tasks wait in :Sepal inbox, s starts them",
+    "◇ plan ready: shout and add · 2 tasks: 1 opus, 1 haiku · s in :Sepal inbox makes the tasks, m sets a model" })
+  eq({ e.kind, e.status, e.check, e.assumptions }, { "orchestrate", "planned", "true", { "two tasks are enough" } })
+  eq(vim.tbl_map(function(p) return { p.title, p.model } end, e.plan), { { "Shout two", "opus" }, { "Add b", "haiku" } })
+  eq(args(), { "--permission-mode plan --allowedTools Bash(true)" }) -- read-only, in your repo
+  eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work)
+  assert(prompts():find("from opus, sonnet, haiku", 1, true), prompts())
+  eq(sepal.status(), "✿1") -- waits for you, like a task ready to land
+  vim.cmd("Sepal panel")
+  local pl = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
+  assert(vim.tbl_contains(pl, " ▎ 1. [opus] Shout two") and vim.tbl_contains(pl, " ▎ 2. [haiku] Add b"), vim.inspect(pl))
+  vim.cmd("Sepal panel")
+  -- the inbox: the plan unfolded under it; the [model] edited in place and :w, or m
+  vim.cmd("Sepal inbox")
+  local b = vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  assert(lines[3]:match("^◇ planned%s+now%s+shout and add"), lines[3])
+  eq(vim.list_slice(lines, 4, 5), { "    1. [opus] Shout two", "    2. [haiku] Add b" })
+  eq(vim.fn.foldclosed(3), -1)
+  vim.api.nvim_buf_set_lines(b, 4, 5, false, { "    2. [sonnet] Add b" })
+  vim.cmd("write")
+  eq(e.plan[2].model, "sonnet")
+  eq(vim.api.nvim_buf_get_lines(b, 4, 5, false), { "    2. [sonnet] Add b" })
+  local select = vim.ui.select
+  local offered
+  vim.ui.select = function(items, _, cb) offered = items; cb("default") end
+  vim.api.nvim_win_set_cursor(0, { 4, 0 })
+  vim.cmd("normal m")
+  vim.ui.select = select
+  eq(offered, { "opus", "sonnet", "haiku", "default", "other…" })
+  eq(e.plan[1].model, nil)
+  eq(vim.api.nvim_buf_get_lines(b, 3, 4, false), { "    1. [default] Shout two" })
+  -- s: one task per item, each with its model, one snapshot of your work tree for all of them
+  reset()
+  vim.env.SEPAL_EDIT = [[echo x > "$(basename "$PWD").txt"]]
+  got = msgs(notified(function()
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.cmd("normal s")
+    idle()
+  end))
+  vim.cmd("close")
+  eq(got[1], "split: shout and add · 2 tasks: 1 default, 1 sonnet started")
+  eq({ e.status, #e.split }, { "split", 2 })
+  local l = inbox.list(work)
+  eq(vim.tbl_map(function(x) return { x.title, x.status, x.check } end, vim.list_slice(l, 1, 2)),
+    { { "upper case line two", "landed", "test -n ok" }, { "add b.txt", "landed", "true" } })
+  eq(l[1].base0, l[2].base0) -- one snapshot (base moves on when a task lands)
+  local a = args()
+  table.sort(a)
+  eq(a, { "--permission-mode acceptEdits --allowedTools Bash(test -n ok)", "--permission-mode acceptEdits --model sonnet --allowedTools Bash(true)" })
+  assert(prompts():find("Part of a plan, task 2 of 2", 1, true), prompts())
+  eq(msgs(notified(function() agent.split(e) end)), { "already split: its tasks are in the inbox" })
+  sepal.clean()
+  eq(#inbox.list(work), 0) -- a split orchestrate is over
+  clean()
+end)
+
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()
   clean(); reset()
   local echo, shown = vim.api.nvim_echo, {}
@@ -1193,8 +1285,8 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   local codex = draft()
   vim.api.nvim_echo = echo
   sepal.setup({ models = {}, agents = nil })
-  eq(shown, { "sepal i implement ✻ opus 5.5   b btw ✻ sonnet   ",
-    "sepal i implement   b btw   ",
+  eq(shown, { "sepal i implement ✻ opus 5.5   b btw ✻ sonnet   o orchestrate ◇ sh   ",
+    "sepal i implement   b btw   o orchestrate   ",
     "sepal 1 ✻ claude  2 ❖ devin · opus 5.5 medium + swe 2 high  t ֎ codex · gpt 5  4 ❖ devin  " })
   eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet  " }, { "֎", "SepalDim", " gpt 5  " } })
 end)

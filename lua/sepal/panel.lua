@@ -14,6 +14,7 @@ local COUNTS = {
   { "need you", { needs = true, failed = true, error = true }, "SepalWarn" },
   { "ready", { ready = true }, "SepalOk" },
   { "answered", { answered = true }, "SepalOk" },
+  { "planned", { planned = true }, "SepalOk" },
   { "landed", { landed = true }, "SepalOk" },
 }
 
@@ -32,6 +33,8 @@ local HINT = {
   interrupted = "c in :Sepal inbox to continue",
   undone = "taken back out",
   answered = "<CR> in :Sepal inbox reads it",
+  planned = "s in :Sepal inbox starts its tasks",
+  split = "its tasks are in the inbox",
 }
 -- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
 local PROVIDERS = {
@@ -107,6 +110,9 @@ end
 local function card_sig(e, w)
   local s, subs, C = e.stat, {}, require("sepal").config()
   for _, a in ipairs(e.subagents or {}) do subs[#subs + 1] = tostring(a.name) end
+  if e.status == "planned" then
+    for _, p in ipairs(e.plan or {}) do subs[#subs + 1] = tostring(p.model) .. "\2" .. tostring(p.title) end
+  end
   return table.concat({ tostring(e.status), inbox.ago(e.time), tostring(e.title), w, tostring(e.attempts),
     tostring(e.check), tostring(e.checked), tostring(s and s.files), tostring(s and s.add), tostring(s and s.del),
     tostring(e.activity), table.concat(subs, "\1"), tostring(e.why), tostring(e.error), tostring(e.summary),
@@ -173,6 +179,12 @@ local function card(e, w)
     local t = ("↳ %d subagent%s: %s"):format(#subs, #subs == 1 and "" or "s",
       table.concat(vim.tbl_map(function(a) return a.name end, subs), ", "))
     row({ (inbox.fit(t, inner):gsub("%s+$", "")), "SepalAgent" })
+  end
+  if e.status == "planned" then -- what s starts: each task with its model
+    for i, p in ipairs(e.plan or {}) do
+      local m = "[" .. (p.model or "default") .. "] "
+      row({ i .. ". ", "SepalDim" }, { m, "SepalAccent" }, { (inbox.fit(p.title, math.max(inner - dw(i .. ". " .. m), 1)):gsub("%s+$", "")), "Normal" })
+    end
   end
   if e.why then para(e.why, "SepalWarn", "", 3) end
   if e.error then para(e.error, "SepalError", "", 3) end

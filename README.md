@@ -171,6 +171,20 @@ lighter set on a dark background and a deeper one on a light background. Warning
 always use your theme's colors. A colorscheme that defines a `Sepal*` group wins over both,
 and the `highlights` option wins over everything.
 
+### Statusline
+
+`require("sepal").status()` shows the tasks of the repo you're in: running (`~`), ready to land
+(`●`, `✿` with sakura) and needing you (`▲`), e.g. `~2 ✿1 ▲1`, or nothing when there are none. A
+missed notification still shows there. sepal fires `User SepalChanged` and redraws the statusline
+when the counts move.
+
+```lua
+-- lualine
+sections = { lualine_x = { require("sepal").status } }
+-- plain statusline
+vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
+```
+
 ## Commands
 
 | Command              | Does                                                                     |

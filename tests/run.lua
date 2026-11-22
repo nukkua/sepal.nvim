@@ -983,6 +983,36 @@ test("a new task's Done when: is the project's test command, found and said so; 
   clean()
 end)
 
+test("status: what's running, ready and needs you, for the statusline; User SepalChanged only when it moves", function()
+  reset()
+  clean()
+  eq(sepal.status(), "")
+  local renders, events = 0, 0
+  local panel = require("sepal.panel")
+  local prender = panel.render
+  panel.render = function(...) renders = renders + 1; return prender(...) end -- draw calls it each render
+  local au = vim.api.nvim_create_autocmd("User", { pattern = "SepalChanged", callback = function() events = events + 1 end })
+  vim.env.SEPAL_SUB, vim.env.SEPAL_SLEEP = "1", "0.3"
+  vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\n' > a.txt]]
+  local seen = {}
+  notified(function()
+    send({ "Goal: count me" }, "<c-c><c-w>")
+    vim.wait(5000, function() seen[sepal.status()] = true; return next(agent._t.jobs) == nil end, 5)
+    idle()
+  end)
+  vim.api.nvim_del_autocmd(au)
+  panel.render = prender
+  eq(seen["~1"], true, vim.inspect(seen))
+  eq(sepal.status(), "✿1")
+  print(("  measured: %d renders, %d SepalChanged"):format(renders, events))
+  assert(events < renders and events <= 4, events .. " events for " .. renders .. " renders")
+  newest().status = "needs"
+  inbox.changed(newest())
+  eq(sepal.status(), "▲1")
+  clean()
+  eq(sepal.status(), "")
+end)
+
 test(":'<,'>Sepal task puts the selected lines in the task and lists the file", function()
   sepal.config().task_suggest = nil
   vim.cmd.edit("tests/pool.lua")

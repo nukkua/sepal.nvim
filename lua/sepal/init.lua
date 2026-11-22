@@ -67,6 +67,33 @@ vim.api.nvim_create_autocmd("OptionSet", { group = "sepal.hl", pattern = "backgr
 local BLOSSOM = { landed = "❀", ready = "✿" }
 function M.icon(status, def) return (C.icons or {})[status] or (C.sakura and BLOSSOM[status]) or def end
 
+-- for your statusline: "~2 ✿1 ▲1" (running, ready to land, needs you) for the repo you're in, "" when
+-- none. Cheap, it reads what's loaded; User SepalChanged fires (and the statusline redraws) when it moves
+local loading = {} -- cwd -> true: its inbox is being loaded, once
+function M.status()
+  local cwd, inbox = vim.fn.getcwd(), require("sepal.inbox")
+  local root
+  for r in pairs(inbox.cache) do
+    if (cwd == r or vim.startswith(cwd, r .. "/")) and (not root or #r > #root) then root = r end
+  end
+  if not root then
+    -- not loaded yet (a restart): find it outside the statusline, which can't run git
+    if not loading[cwd] then
+      loading[cwd] = true
+      vim.schedule(function()
+        local r = require("sepal.git").root(cwd)
+        if r then inbox.list(r); inbox.render() end
+      end)
+    end
+    return ""
+  end
+  local n, out = inbox.counts(root), {}
+  for i, s in ipairs({ { "running", "~" }, { "ready", "●" }, { "needs", "▲" } }) do
+    if n[i] > 0 then out[#out + 1] = M.icon(s[1], s[2]) .. n[i] end
+  end
+  return table.concat(out, " ")
+end
+
 -- every message is "what happened", shown under "sepal".
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text

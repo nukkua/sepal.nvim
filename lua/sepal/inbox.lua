@@ -43,10 +43,29 @@ end
 
 M.save = save
 
+-- what the statusline shows (sepal.status): tasks running, ready to land, needing you
+local COUNTS = { running = 1, checking = 1, queued = 1, ready = 2, needs = 3, failed = 3, error = 3 }
+function M.counts(root)
+  local n = { 0, 0, 0 }
+  for _, e in ipairs(cache[root] or {}) do local i = COUNTS[e.status]; if i then n[i] = n[i] + 1 end end
+  return n
+end
+M.cache = cache
+
 local draw -- below
+local counted -- the counts at the last render: User SepalChanged fires only when they move
 local function render() -- in a batch only flagged, drawn once at its end
   if batching > 0 then pending.render = true return end
   draw()
+  -- render runs on every tool call of every running task; the counts move a few times a task
+  local sig = {}
+  for root in pairs(cache) do sig[#sig + 1] = root .. table.concat(M.counts(root), ",") end
+  table.sort(sig)
+  sig = table.concat(sig, ";")
+  if sig == counted then return end
+  counted = sig
+  vim.api.nvim_exec_autocmds("User", { pattern = "SepalChanged", modeline = false })
+  vim.cmd.redrawstatus({ bang = true })
 end
 
 -- run fn with saves and renders deferred: each pending root is saved once and the inbox redrawn

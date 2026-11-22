@@ -216,6 +216,20 @@ Lua: `require("sepal").task(range, lines, kind)` (kind "implement" or "btw", no
 picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
 `.panel()`, `.stop()`, `.clean()`.
 
+                                                  *sepal-status* *SepalChanged*
+require("sepal").status()
+                  for your statusline: the tasks of the repo you're in that
+                  are running (~), ready to land (● / ✿) and need you (▲:
+                  needs you, check failed, failed), e.g. "~2 ✿1 ▲1"; "" when
+                  there are none. Icons follow |sepal-icons|. It only reads
+                  what's loaded, so it's cheap to call on every redraw.
+                  When the counts move, sepal fires `User SepalChanged` and
+                  redraws the statusline: >lua
+    -- lualine
+    sections = { lualine_x = { require("sepal").status } }
+    -- 'statusline'
+    vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
+<
 ==============================================================================
 5. HOW IT WORKS                                                 *sepal-landing*
 

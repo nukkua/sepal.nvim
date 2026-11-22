@@ -538,8 +538,15 @@ end
 local KINDS = { i = "implement", b = "btw", o = "orchestrate" }
 -- a one-line pick (here and the inbox's m): chunks echoed after "sepal ", the key you press (nil: <Esc>, <c-c>)
 function M.choose(chunks)
-  vim.api.nvim_echo(vim.list_extend({ { "sepal ", "SepalTitle" } }, chunks), false, {})
+  chunks = vim.list_extend({ { "sepal ", "SepalTitle" } }, chunks)
+  -- a cmdline as tall as the wrapped line, so it shows whole without a hit-enter prompt
+  local width, ch = 0, vim.o.cmdheight
+  for _, c in ipairs(chunks) do width = width + vim.fn.strdisplaywidth(c[1]) end
+  vim.o.cmdheight = math.max(ch, math.min(math.ceil(width / vim.o.columns), vim.o.lines - 2))
+  vim.cmd.redraw()
+  vim.api.nvim_echo(chunks, false, {})
   local ok, c = pcall(vim.fn.getcharstr)
+  vim.o.cmdheight = ch
   vim.api.nvim_echo({ { "" } }, false, {})
   return ok and c or nil
 end

@@ -51,8 +51,8 @@ function M.update_refs_bg(root, refs, commit, cb)
   bg(root, { "update-ref", "--stdin" }, { stdin = stdin }, function(r) cb(r.code == 0) end)
 end
 
--- a commit of tree (with parent, if any) kept at ref, to cb(commit or nil): same as M.commit,
--- but git runs off the main loop — a finishing agent doesn't freeze the editor
+-- a commit of tree (with parent, if any) kept at ref, to cb(commit or nil): git runs off the
+-- main loop — a finishing agent doesn't freeze the editor
 function M.commit_bg(root, tree, parent, ref, cb)
   local args = { "commit-tree", tree, "-m", "sepal" }
   if parent and parent ~= "" then vim.list_extend(args, { "-p", parent }) end
@@ -93,15 +93,6 @@ function M.snapshot(root, ref, on_done)
       end)
     end)
   end)
-end
-
--- a commit of tree (with parent, if any) kept at ref
-function M.commit(root, tree, parent, ref)
-  local args = { "commit-tree", tree, "-m", "sepal" }
-  if parent and parent ~= "" then vim.list_extend(args, { "-p", parent }) end
-  local c = out(root, args, { env = ENV })
-  if c and ref then M.run(root, { "update-ref", ref, c }) end
-  return c
 end
 
 -- a worktree of commit at dir, made in the background (checking out a big repo takes a while):
@@ -173,19 +164,9 @@ end
 local NUMSTAT = function(a, b) return { "diff", "--numstat", "--no-renames", a, b } end
 local FIRSTS = function(a, b) return { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b } end
 
--- files and lines changed from a to b: stat_of's table
-function M.stat(root, a, b)
-  return stat_of(out(root, NUMSTAT(a, b)) or "")
-end
-
--- M.stat to cb(st): the diff runs off the main loop
+-- files and lines changed from a to b, to cb(st): the diff runs off the main loop
 function M.stat_bg(root, a, b, cb)
   bg(root, NUMSTAT(a, b), nil, function(r) cb(stat_of(r.code == 0 and r.stdout or "")) end)
-end
-
--- the line of each file's first change in b: { [path] = line }
-function M.firsts(root, a, b)
-  return firsts_of(out(root, FIRSTS(a, b)) or "")
 end
 
 -- a git process started, not waited: { p } or nil when it couldn't start
@@ -206,12 +187,6 @@ function M.review(root, a, b, on_stat)
   local st = stat_of(text(num))
   local extra = on_stat and on_stat(st)
   return st, firsts_of(text(uni)), extra
-end
-
--- path's content at rev, "" if it isn't there (added or deleted)
-function M.file(root, rev, path)
-  local r = M.run(root, { "show", rev .. ":" .. path })
-  return r.code == 0 and r.stdout or ""
 end
 
 -- delete every ref under prefixes (one prefix string, or a list of them): one for-each-ref + one update-ref

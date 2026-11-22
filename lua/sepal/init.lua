@@ -540,9 +540,11 @@ local KINDS = { i = "implement", b = "btw", o = "orchestrate" }
 function M.choose(chunks)
   chunks = vim.list_extend({ { "sepal ", "SepalTitle" } }, chunks)
   -- a cmdline as tall as the wrapped line, so it shows whole without a hit-enter prompt
-  local width, ch = 0, vim.o.cmdheight
-  for _, c in ipairs(chunks) do width = width + vim.fn.strdisplaywidth(c[1]) end
-  vim.o.cmdheight = math.max(ch, math.min(math.ceil(width / vim.o.columns), vim.o.lines - 2))
+  local h, ch = 0, vim.o.cmdheight
+  for _, l in ipairs(vim.split(table.concat(vim.tbl_map(function(c) return c[1] end, chunks)), "\n")) do
+    h = h + math.max(1, math.ceil(vim.fn.strdisplaywidth(l) / vim.o.columns))
+  end
+  vim.o.cmdheight = math.max(ch, math.min(h, vim.o.lines - 2))
   vim.cmd.redraw()
   vim.api.nvim_echo(chunks, false, {})
   local ok, c = pcall(vim.fn.getcharstr)
@@ -566,14 +568,23 @@ function M.pick(range)
   local c = M.choose(chunks)
   if not KINDS[c] then return end
   if #agents < 2 then return M.task(range, nil, KINDS[c]) end
-  -- then which agent: its key, else 1, 2… as listed in the agents option (any other key cancels), each with its logo
+  -- then which agent: its key, else 1, 2… as listed in the agents option (any other key cancels), each with its
+  -- logo, three to a row, names padded so the models line up in columns
   chunks = {}
-  local by = {}
+  local by, cells, nw, cw = {}, {}, 0, 0
+  local function pad(s, w) return s .. (" "):rep(w - vim.fn.strdisplaywidth(s)) end
   for i, a in ipairs(agents) do
     local k = a.key or tostring(i)
     by[k] = by[k] or a
     local l, m, name = who(KINDS[c], a)
-    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " }, l, { " " .. name .. (m and " · " .. m or "") .. "  " } })
+    cells[i] = { k, l, name, m and " · " .. m or "" }
+    nw = math.max(nw, vim.fn.strdisplaywidth(k .. name))
+  end
+  for _, x in ipairs(cells) do cw = math.max(cw, nw + vim.fn.strdisplaywidth(x[4])) end
+  for i, x in ipairs(cells) do
+    local last = i == #cells or i % 3 == 0
+    vim.list_extend(chunks, { { x[1], "SepalAccent" }, { " " }, x[2], { " " .. (last and x[4] == "" and x[3] or pad(x[3], nw - #x[1])) },
+      { last and x[4] or pad(x[4], cw - nw) .. "   " }, last and i < #cells and { "\n" } or nil })
   end
   local a = by[M.choose(chunks)]
   if a then M.task(range, nil, KINDS[c], a) end

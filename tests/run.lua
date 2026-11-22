@@ -1233,16 +1233,13 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
   eq(e.plan[2].model, "sonnet")
   eq(vim.api.nvim_buf_get_lines(b, 4, 5, false), { "    2. [sonnet] Add b" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
-  vim.cmd("normal m")
-  local pick = vim.api.nvim_get_current_buf()
-  eq(vim.tbl_map(function(l) return (l:gsub("%s+$", "")) end, vim.api.nvim_buf_get_lines(pick, 0, -1, false)),
-    { " 1  ✻ opus  ● current", " 2  ✻ sonnet", " 3  ✻ haiku", " 4    default  the agent's own", " 5    other…  type a model" })
-  eq(vim.api.nvim_win_get_height(0), 5) -- every model shows
-  eq(vim.api.nvim_win_get_cursor(0)[1], 1) -- on the current one
-  vim.cmd("normal q")
+  local echo, shown = vim.api.nvim_echo, nil
+  vim.api.nvim_echo = function(c, ...) shown = shown or table.concat(vim.tbl_map(function(x) return x[1] end, c)); return echo(c, ...) end
+  key("q"); vim.cmd("normal m")
+  vim.api.nvim_echo = echo
+  eq(vim.trim(shown), "sepal task 1 model  1 ✻ opus ●   2 ✻ sonnet   3 ✻ haiku   d default   o other…")
   eq({ vim.api.nvim_get_current_buf(), e.plan[1].model }, { b, "opus" }) -- cancelled
-  vim.cmd("normal m")
-  vim.cmd("normal 4")
+  key("d"); vim.cmd("normal m")
   eq(vim.api.nvim_get_current_buf(), b)
   eq(e.plan[1].model, nil)
   eq(vim.api.nvim_buf_get_lines(b, 3, 4, false), { "    1. [default] Shout two" })

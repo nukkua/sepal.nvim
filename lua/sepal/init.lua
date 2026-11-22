@@ -536,11 +536,18 @@ end
 -- :Sepal task: pick its kind first, i implement, b btw or o orchestrate (any other key cancels); an
 -- open draft just gets the focus (and the range), whatever its kind
 local KINDS = { i = "implement", b = "btw", o = "orchestrate" }
+-- a one-line pick (here and the inbox's m): chunks echoed after "sepal ", the key you press (nil: <Esc>, <c-c>)
+function M.choose(chunks)
+  vim.api.nvim_echo(vim.list_extend({ { "sepal ", "SepalTitle" } }, chunks), false, {})
+  local ok, c = pcall(vim.fn.getcharstr)
+  vim.api.nvim_echo({ { "" } }, false, {})
+  return ok and c or nil
+end
 function M.pick(range)
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return M.task(range) end end
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
-  local chunks = { { "sepal ", "SepalTitle" } }
+  local chunks = {}
   for _, k in ipairs({ "i", "b", "o" }) do
     vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. KINDS[k] } })
     if #agents < 2 then
@@ -549,13 +556,11 @@ function M.pick(range)
     end
     vim.list_extend(chunks, { { "   " } })
   end
-  vim.api.nvim_echo(chunks, false, {})
-  local ok, c = pcall(vim.fn.getcharstr)
-  vim.api.nvim_echo({ { "" } }, false, {})
-  if not (ok and KINDS[c]) then return end
+  local c = M.choose(chunks)
+  if not KINDS[c] then return end
   if #agents < 2 then return M.task(range, nil, KINDS[c]) end
   -- then which agent: its key, else 1, 2… as listed in the agents option (any other key cancels), each with its logo
-  chunks = { { "sepal ", "SepalTitle" } }
+  chunks = {}
   local by = {}
   for i, a in ipairs(agents) do
     local k = a.key or tostring(i)
@@ -563,10 +568,7 @@ function M.pick(range)
     local l, m, name = who(KINDS[c], a)
     vim.list_extend(chunks, { { k, "SepalAccent" }, { " " }, l, { " " .. name .. (m and " · " .. m or "") .. "  " } })
   end
-  vim.api.nvim_echo(chunks, false, {})
-  local ok2, n = pcall(vim.fn.getcharstr)
-  vim.api.nvim_echo({ { "" } }, false, {})
-  local a = ok2 and by[n]
+  local a = by[M.choose(chunks)]
   if a then M.task(range, nil, KINDS[c], a) end
 end
 

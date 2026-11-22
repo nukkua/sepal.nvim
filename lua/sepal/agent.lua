@@ -39,7 +39,6 @@ local function model(e)
 end
 -- a btw (a question) and an orchestrate (a plan) read your repo itself and change nothing
 local function readonly(kind) return kind == "btw" or kind == "orchestrate" end
-M.readonly = readonly
 -- reading your repo itself: Claude Code's plan mode, so it can't change a file
 local function mode(e) return readonly(e.kind) and "plan" or nil end
 

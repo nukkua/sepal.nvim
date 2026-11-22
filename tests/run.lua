@@ -1136,6 +1136,20 @@ test("c continues a task nvim quit on: what its worktree had is kept, the agent 
   eq(msgs(notified(function() agent.resume(e) end)), { "it wasn't cut short: r replies to it" })
 end)
 
+test("c preserves unfinished work from a legacy storage directory", function()
+  clean(); reset()
+  run({ "Goal: legacy worktree" }, "<c-c><c-w>")
+  local e = newest()
+  e.status = "interrupted"
+  local wt = vim.fs.joinpath(T, "state", (work:gsub("[^%w]", "-")), e.id)
+  assert(sh(("git worktree add -q --detach %q %s && printf 'half\\n' > %q/c.txt"):format(wt, e.base, wt)).code == 0)
+  reset()
+  notified(function() agent.resume(e); idle() end)
+  eq(e.status, "ready")
+  assert(vim.tbl_contains(e.stat.list, "c.txt +1 −0"), "legacy unfinished work was lost")
+  eq(vim.uv.fs_stat(wt), nil)
+end)
+
 test("c starts over a task that never got its agent going; x keeps what the agent did", function()
   clean(); reset()
   vim.env.SEPAL_FAIL = "start"

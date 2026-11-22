@@ -47,7 +47,6 @@ files, fidget.nvim for a spinner.
     task_suggest = nil,
     max_running = 2,
     models = { btw = "sonnet" },
-    plan_models = { "opus", "sonnet", "haiku" },
     sakura = true,
     highlights = {},
     icons = {},
@@ -87,10 +86,6 @@ files, fidget.nvim for a spinner.
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
              the other's default. `orchestrate`: the planner's model (unset:
              Claude Code's default).
-                                                        *sepal-plan_models*
-`plan_models` the models an orchestrate picks each task's from, strongest
-             first; `m` in the inbox offers them too. For a Devin agent,
-             its own model names.
                                                              *sepal-agents*
 `agents`     the agents :Sepal task asks you to pick from after the kind
              by its `key` (unset: 1, 2… its place in the list), each
@@ -148,7 +143,7 @@ files, fidget.nvim for a spinner.
                   template as implement, but the agent (read-only, like a
                   btw, on the `orchestrate` model) plans the job as tasks:
                   how many, what each does, its check, and the model for
-                  each from |sepal-plan_models|. The plan waits in the
+                  each from your |sepal-agents|' models. The plan waits in the
                   inbox (|:Sepal-inbox| `s`, `m`); its tasks get its
                   `Done when:` when they have none, and land like it was
                   sent (<c-c><c-c> by themselves, <c-c><c-w> on L). Any
@@ -202,7 +197,9 @@ files, fidget.nvim for a spinner.
                           snapshot of your work tree
                     m     the model of the plan item under the cursor (on
                           the orchestrate's own line: of every item), from
-                          |sepal-plan_models|, "default" or one you type.
+                          your |sepal-agents|' models, "default" or one you
+                          type; an item with an agent's model runs on that
+                          agent.
                           Or edit the `[model]` in the line and :w; dd an
                           item (or move it) and :w drops (or reorders) it
                     dd    drop it, once you :w (u before :w takes it

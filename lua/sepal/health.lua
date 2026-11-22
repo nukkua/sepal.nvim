@@ -33,8 +33,9 @@ function M.check()
   if type(C.models) ~= "table" then h.error("models must be a table: { implement = \"opus\", btw = \"sonnet\" }")
   else h.ok(("models: implement %s, btw %s, orchestrate %s"):format(C.models.implement or "Claude Code's default",
     C.models.btw or "Claude Code's default", C.models.orchestrate or "Claude Code's default")) end
-  if type(C.plan_models) ~= "table" then h.error("plan_models must be a list: { \"opus\", \"sonnet\", \"haiku\" }")
-  else h.ok("an orchestrate picks its tasks' models from: " .. table.concat(C.plan_models, ", ")) end
+  local pm = require("sepal").plan_models()
+  if #pm == 0 then h.info("an orchestrate's tasks run on the default model: give your agents a model to pick from")
+  else h.ok("an orchestrate picks its tasks' models from your agents': " .. table.concat(pm, ", ")) end
   if C.agents then
     if type(C.agents) ~= "table" then h.error("agents must be a list: { { cmd = \"devin\", model = \"...\" } }") end
     for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do

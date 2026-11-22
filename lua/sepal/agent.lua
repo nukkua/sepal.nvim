@@ -99,13 +99,13 @@ local function notes(e)
       "- Read what you need; don't edit files or ask to." }, "\n")
   end
   if e.kind == "orchestrate" then
-    local models = C().plan_models or {}
+    local models = sepal().plan_models()
     return table.concat({ "", "---", "How to plan this (from sepal, not part of the task):",
       "- Don't change anything: read the code and plan the work as tasks for other agents. Each task runs alone in its own git worktree,"
         .. " in parallel with the others, and can't see their changes: each one has to stand on its own.",
       "- Decide how many tasks: as few as the work needs. Split only where the parts are independent (other files or areas);"
         .. " one task when it doesn't split.",
-      #models > 0 and ("- Pick the model for each task, from %s (strongest first): the cheapest one that will do it well.")
+      #models > 0 and ("- Pick the model for each task, only from these: %s (or default: the agent's own); the cheapest one that will do it well.")
         :format(table.concat(models, ", ")) or "- Pick the model for each task: the cheapest one that will do it well.",
       "- Each task says what to change and where (Goal), a shell command that proves it (Done when"
         .. (e.check and (", `%s` if nothing narrower fits"):format(e.check) or "") .. ") and its files.",
@@ -751,8 +751,8 @@ function M.start_many(specs, cwd, land, on_fail)
   return es
 end
 
--- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by its agent with
--- the item's model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
+-- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by the agent with
+-- the item's model (agents option), else by the orchestrate's agent with that model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
 function M.split(e)
   if e.kind ~= "orchestrate" then return notify("only an orchestrate task splits into tasks") end
   if M.running(e) then return notify("it's still planning") end
@@ -760,7 +760,9 @@ function M.split(e)
   if e.status ~= "planned" or #(e.plan or {}) == 0 then return notify("it has no plan to split: r asks for one") end
   local specs = {}
   for i, p in ipairs(e.plan) do
-    local a = vim.tbl_extend("force", e.agent or {}, { model = p.model }) -- no model: the agent's, else models.implement
+    local a
+    for _, x in ipairs(p.model and C().agents or {}) do if x.model == p.model then a = vim.deepcopy(x); break end end
+    a = a or vim.tbl_extend("force", e.agent or {}, { model = p.model }) -- no model: the agent's, else models.implement
     specs[i] = { text = M.subtask(e, i), agent = next(a) and a or nil }
   end
   local es, why = M.start_many(specs, e.root, e.land, function(why)

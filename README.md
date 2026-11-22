@@ -125,7 +125,7 @@ and it doesn't wait for a `max_running` slot. You get the start of the answer as
 
 `o` is for a job too big for one task. Write it like an implement task and send it: the agent reads
 your repo (read-only, like a btw, on `models.orchestrate`) and plans it. It decides how many tasks
-there are, what each one does and checks, and which model runs each one, picked from `plan_models`.
+there are, what each one does and checks, and which model runs each one, picked from your `agents`' models.
 The plan waits in the inbox, unfolded:
 
 ```
@@ -134,7 +134,8 @@ The plan waits in the inbox, unfolded:
     2. [haiku] Document the retry option
 ```
 
-- `m` on an item changes its model: `plan_models`, `default` (the agent's own) or one you type. `m`
+- `m` on an item changes its model: one of your `agents`' models (the task then runs on that agent),
+  `default` (the plan's agent's own) or one you type. `m`
   on the plan's own line changes all of them. You can also edit the `[model]` in the line and `:w`.
   `dd` an item (or move it) and `:w` drops (or reorders) it.
 - `s` splits it: each item becomes a task of its own, run with its model and checked with its
@@ -160,7 +161,6 @@ require("sepal").setup({
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
-  plan_models = { "opus", "sonnet", "haiku" }, -- an orchestrate picks each task's model from these, strongest first
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }

@@ -18,7 +18,6 @@ local C = {
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
   models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
-  plan_models = { "opus", "sonnet", "haiku" }, -- an orchestrate picks each task's model from these (strongest first); m in the inbox too
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
@@ -33,6 +32,15 @@ function M.setup(opts)
   highlight()
 end
 function M.config() return C end
+
+-- the models a plan's tasks are picked from (m in the inbox too): your agents' (agents option), in order
+function M.plan_models()
+  local out = {}
+  for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do
+    if type(a.model) == "string" and a.model ~= "" and not vim.tbl_contains(out, a.model) then out[#out + 1] = a.model end
+  end
+  return out
+end
 
 -- sepal's colors are its own groups, linked to your colorscheme's by default: a colorscheme (or
 -- :hi) that sets a Sepal* group wins over the links and over sakura; the highlights option wins over all

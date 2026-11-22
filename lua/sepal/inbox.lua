@@ -392,7 +392,7 @@ function M.write(b)
 end
 
 -- m: the model of the plan item under the cursor (on the orchestrate's own line: of all of them),
--- picked from plan_models, "default" (the agent's own) or one you type
+-- picked from your agents' models (agents option), "default" (the agent's own) or one you type
 function M.pick_model()
   local b, e = vim.api.nvim_get_current_buf(), M.current()
   local notify = require("sepal").notify
@@ -404,7 +404,7 @@ function M.pick_model()
   for k in ipairs(e.plan) do if not i or k == i then which[#which + 1] = k end end
   if #which == 0 then return end
   local choices, cur = {}, i and e.plan[i].model
-  local all = vim.list_extend({}, cfg().plan_models or {})
+  local all = vim.list_extend({}, require("sepal").plan_models())
   if cur then all[#all + 1] = cur end
   vim.list_extend(all, { "default", "other…" })
   for _, m in ipairs(all) do

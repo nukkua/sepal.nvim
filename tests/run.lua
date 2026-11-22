@@ -106,7 +106,10 @@ local function notified(fn)
 end
 local function msgs(got) return vim.tbl_map(function(g) return g[1] end, got) end
 -- the key :Sepal task's picker reads (getcharstr reads stdin under nvim -l)
-local function key(k) local g = vim.fn.getcharstr; vim.fn.getcharstr = function() vim.fn.getcharstr = g; return k end end
+local function key(...)
+  local ks, g = { ... }, vim.fn.getcharstr
+  vim.fn.getcharstr = function() local k = table.remove(ks, 1); if #ks == 0 then vim.fn.getcharstr = g end; return k end
+end
 local function task_buf()
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return b end end
 end
@@ -1190,13 +1193,15 @@ end)
 
 test("o orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
   clean(); reset()
+  local cmd = sepal.config().cmd
+  sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "opus" }, { cmd = cmd, model = "sonnet" }, { cmd = cmd, model = "haiku" } }
   local reply = vim.fs.joinpath(T, "plan.jsonl")
   vim.fn.writefile({ vim.json.encode({ type = "assistant", message = { content = { { type = "text", text = table.concat({
     "Two parts.", "", "Plan:", "1. [opus] Shout two", "   Goal: upper case line two", "   Done when: `test -n ok`",
     "   Files:", "   - @a.txt", "2. [haiku] Add b", "   Goal: add b.txt", "", "Assumptions:", "- two tasks are enough" }, "\n") } } } }) }, reply)
   vim.env.SEPAL_REPLY = reply
   local got = msgs(notified(function()
-    key("o")
+    key("o", "1")
     sepal.pick()
     eq(vim.b[task_buf()].sepal_kind, "orchestrate")
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: shout and add", "", "Done when: true" })
@@ -1210,7 +1215,7 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
   eq(vim.tbl_map(function(p) return { p.title, p.model } end, e.plan), { { "Shout two", "opus" }, { "Add b", "haiku" } })
   eq(args(), { "--permission-mode plan --allowedTools Bash(true)" }) -- read-only, in your repo
   eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work)
-  assert(prompts():find("from opus, sonnet, haiku", 1, true), prompts())
+  assert(prompts():find("only from these: opus, sonnet, haiku (or default", 1, true), prompts())
   eq(sepal.status(), "✿1") -- waits for you, like a task ready to land
   vim.cmd("Sepal panel")
   local pl = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
@@ -1258,7 +1263,16 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
   eq(msgs(notified(function() agent.split(e) end)), { "already split: its tasks are in the inbox" })
   sepal.clean()
   eq(#inbox.list(work), 0) -- a split orchestrate is over
+  sepal.config().agents = nil
   clean()
+end)
+
+test("a plan's models are your agents': m offers them, a task with one runs on its agent", function()
+  local C = sepal.config()
+  eq(sepal.plan_models(), {}) -- no agents: the tasks run on the default model
+  C.agents = { { cmd = "claude" }, { cmd = "claude", model = "opus" }, { cmd = "devin", model = "fusion-x" }, { cmd = "claude", model = "opus" } }
+  eq(sepal.plan_models(), { "opus", "fusion-x" })
+  C.agents = nil
 end)
 
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()

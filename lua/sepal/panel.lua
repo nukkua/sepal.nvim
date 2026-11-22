@@ -299,6 +299,4 @@ function M.toggle(root)
   require("sepal").fidget()
 end
 
-M._t = { rows = function() return rows end }
-
 return M

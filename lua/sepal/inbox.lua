@@ -415,10 +415,56 @@ function M.pick_model()
     for _, k in ipairs(which) do e.plan[k].model = require("sepal.agent").model_of(m) end
     M.changed(e)
   end
-  vim.ui.select(choices, { prompt = i and ("model for task %d (%s): "):format(i, e.plan[i].title) or "model for every task: " }, function(c)
+  M.picker(choices, i and ("model for task %d · %s"):format(i, e.plan[i].title) or "model for every task", cur or "default", function(c)
     if c ~= "other…" then return set(c) end
     vim.ui.input({ prompt = "model: " }, set)
   end)
+end
+
+-- a float as tall as its models (up to the screen): each with its provider's logo, short name and id,
+-- the current one marked and under the cursor. <CR> or its number picks, q/<Esc> cancels
+function M.picker(items, title, cur, cb)
+  local panel = require("sepal.panel")
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.bo[b].bufhidden = "wipe"
+  local ns, lines, marks, width, at = vim.api.nvim_create_namespace("sepal.picker"), {}, {}, vim.fn.strdisplaywidth(title) + 4, 1
+  for k, m in ipairs(items) do
+    local special = m == "default" or m == "other…"
+    local l, hl = panel.logo(special and "" or m)
+    local name = m == "default" and "default" or m == "other…" and "other…" or panel.model(m)
+    local note = m == "default" and "the agent's own" or m == "other…" and "type a model" or (name ~= m and m or "")
+    local s = (" %d  %s %s"):format(k, special and " " or l, name)
+    local tail = (note ~= "" and "  " .. note or "") .. (m == cur and "  ● current" or "")
+    lines[k], marks[k] = s .. tail, { #s - #name, #s, special and "SepalDim" or hl, #s - #name - #l - 1 }
+    width = math.max(width, vim.fn.strdisplaywidth(lines[k]) + 2)
+    if m == cur then at = k end
+  end
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+  for k, mk in ipairs(marks) do
+    if mk[3] ~= "SepalDim" then vim.api.nvim_buf_set_extmark(b, ns, k - 1, mk[4], { end_col = mk[1] - 1, hl_group = mk[3] }) end
+    vim.api.nvim_buf_set_extmark(b, ns, k - 1, mk[2], { end_col = #lines[k], hl_group = "SepalDim" })
+  end
+  vim.bo[b].modifiable = false
+  local h = math.min(#items, math.max(vim.o.lines - vim.o.cmdheight - 4, 1))
+  width = math.min(width, vim.o.columns - 4)
+  local w = vim.api.nvim_open_win(b, true, { relative = "editor", style = "minimal", border = "rounded",
+    title = " " .. title .. " ", title_pos = "center", footer = " <CR> pick · 1-9 · q cancel ", footer_pos = "center",
+    width = width, height = h, row = math.floor((vim.o.lines - h) / 2) - 1, col = math.floor((vim.o.columns - width) / 2) })
+  vim.wo[w].cursorline, vim.wo[w].wrap = true, false
+  vim.api.nvim_win_set_cursor(w, { at, 0 })
+  local done = false
+  local function close(c)
+    if done then return end
+    done = true
+    if vim.api.nvim_win_is_valid(w) then vim.api.nvim_win_close(w, true) end
+    if c then cb(c) end
+  end
+  local o = { buffer = b, nowait = true }
+  vim.keymap.set("n", "<CR>", function() close(items[vim.api.nvim_win_get_cursor(w)[1]]) end, o)
+  for k = 1, math.min(#items, 9) do vim.keymap.set("n", tostring(k), function() close(items[k]) end, o) end
+  for _, key in ipairs({ "q", "<Esc>" }) do vim.keymap.set("n", key, function() close() end, o) end
+  vim.api.nvim_create_autocmd("WinLeave", { buffer = b, once = true, callback = function() close() end })
+  return w
 end
 
 function M.open(root)

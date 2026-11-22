@@ -1232,13 +1232,18 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
   vim.cmd("write")
   eq(e.plan[2].model, "sonnet")
   eq(vim.api.nvim_buf_get_lines(b, 4, 5, false), { "    2. [sonnet] Add b" })
-  local select = vim.ui.select
-  local offered
-  vim.ui.select = function(items, _, cb) offered = items; cb("default") end
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
   vim.cmd("normal m")
-  vim.ui.select = select
-  eq(offered, { "opus", "sonnet", "haiku", "default", "other…" })
+  local pick = vim.api.nvim_get_current_buf()
+  eq(vim.tbl_map(function(l) return (l:gsub("%s+$", "")) end, vim.api.nvim_buf_get_lines(pick, 0, -1, false)),
+    { " 1  ✻ opus  ● current", " 2  ✻ sonnet", " 3  ✻ haiku", " 4    default  the agent's own", " 5    other…  type a model" })
+  eq(vim.api.nvim_win_get_height(0), 5) -- every model shows
+  eq(vim.api.nvim_win_get_cursor(0)[1], 1) -- on the current one
+  vim.cmd("normal q")
+  eq({ vim.api.nvim_get_current_buf(), e.plan[1].model }, { b, "opus" }) -- cancelled
+  vim.cmd("normal m")
+  vim.cmd("normal 4")
+  eq(vim.api.nvim_get_current_buf(), b)
   eq(e.plan[1].model, nil)
   eq(vim.api.nvim_buf_get_lines(b, 3, 4, false), { "    1. [default] Shout two" })
   -- s: one task per item, each with its model, one snapshot of your work tree for all of them

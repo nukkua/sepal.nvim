@@ -232,8 +232,31 @@ function M.tidy(buf)
   return lines
 end
 
-local function template()
-  return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (C.check or ""), "", "Files:" }
+-- the project's test command for a new task's Done when:, and where it was found; nil when there's none
+local function readf(p) local f = io.open(p); if not f then return nil end local s = f:read("a"); f:close(); return s end
+function M.find_check(cwd)
+  local root = vim.fs.root(cwd, ".git")
+  if not root then return nil end
+  local function at(name) return readf(vim.fs.joinpath(root, name)) end
+  for _, name in ipairs({ "AGENTS.md", "CLAUDE.md" }) do -- "- Tests: `nvim -l tests/run.lua`"
+    local c = ("\n" .. (at(name) or "")):match("\n[ \t%-%*]*Tests?:[^\n`]*`([^`\n]+)`")
+    if c then return c, name end
+  end
+  local mk = at("Makefile")
+  if mk and (mk:match("^test:") or mk:match("\ntest:")) then return "make test", "Makefile" end
+  local ok, pkg = pcall(vim.json.decode, at("package.json") or "")
+  local t = ok and type(pkg) == "table" and type(pkg.scripts) == "table" and pkg.scripts.test
+  if type(t) == "string" and not t:match("no test specified") then return "npm test", "package.json" end
+  if at("Cargo.toml") then return "cargo test", "Cargo.toml" end
+  if at("go.mod") then return "go test ./...", "go.mod" end
+  for _, name in ipairs({ "pytest.ini", "pyproject.toml" }) do
+    local s = at(name)
+    if s and (name == "pytest.ini" or s:match("%[tool%.pytest")) then return "pytest", name end
+  end
+end
+
+local function template(check)
+  return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
 local IDEA = { "", "", "Files:" } -- with task_suggest (or for btw): the idea goes on top, <c-c><c-s> writes the task
 local HINT = { implement = "what to change, where and why; <c-c><c-s> writes the task",
@@ -286,6 +309,24 @@ local function who(kind, agent)
   return { l, hl }, m and panel.model(m), agent and agent.name or c
 end
 
+-- at the end of the Done when: line, what it does: green lands, red goes back to the agent; and
+-- where sepal found it, while it's still that. A virtual text, so never sent
+local CHECK_NS = vim.api.nvim_create_namespace("sepal.check")
+local function check_hint(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, CHECK_NS, 0, -1)
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+    local v = l:match("^%s*Done when:%s*(.-)%s*$")
+    if v then
+      local found = vim.b[buf].sepal_found
+      local chunks = v == "" and { { "  a command that proves it's done; empty: not checked", "SepalDim" } }
+        or { { "  " }, { "✓ green", "SepalAdded" }, { " lands  ", "SepalDim" }, { "✗ red", "SepalRemoved" },
+          { " goes back to the agent" .. (found and v == found[1] and "  · found in " .. found[2] .. ", dd: no check" or ""), "SepalDim" } }
+      return vim.api.nvim_buf_set_extmark(buf, CHECK_NS, i - 1, 0, { virt_text = chunks, virt_text_pos = "eol" })
+    end
+  end
+end
+
 -- the task's keys, a dim line and a blank on top of it like the inbox's: virtual lines, so never sent;
 -- the provider's logo and model first, so you see who'll work on it
 local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
@@ -333,12 +374,19 @@ function M.task(range, lines, kind, agent)
   vim.b[buf].sepal_who = { l[1], l[2], m or name }
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].bufhidden = "wipe" -- closing the window drops the draft: :Sepal task always starts a new one
-  local template = (btw or C.task_suggest) and IDEA or template()
+  -- the check option is used anyway when the line is gone, so only a found one says "dd: no check"
+  local check = C.check
+  if not check and not btw and not lines then
+    local c, from = M.find_check(vim.fn.getcwd())
+    if c then check, vim.b[buf].sepal_found = c, { c, from } end
+  end
+  local template = (btw or C.task_suggest) and IDEA or template(check)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
   keys(buf)
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf) end })
+  check_hint(buf)
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf); check_hint(buf) end })
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.schedule(function() vim.cmd.startinsert({ bang = true }) end) -- after keys already typed (see sepal.resume)

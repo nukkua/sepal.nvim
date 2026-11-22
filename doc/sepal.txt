@@ -142,7 +142,13 @@ files, fidget.nvim for a spinner.
                   draft open, it goes to the draft.
                   Implement: write a task in a buffer above the code: Goal,
                   Constraints, Done when, Files. Fields left
-                  empty aren't sent; an empty Goal: sends nothing. In it:
+                  empty aren't sent; an empty Goal: sends nothing.
+                  Done when: starts as the project's test command when
+                  sepal finds one: a `Tests:` line with a `command` in
+                  AGENTS.md or CLAUDE.md, a Makefile test target, a
+                  package.json test script, Cargo.toml, go.mod or pytest.
+                  Its line says where it was found; dd it for no check.
+                  In it:
                     <c-c><c-c>  send it and close the buffer; it lands by
                                 itself once it passes
                     <c-c><c-w>  send it and close the buffer; it waits in

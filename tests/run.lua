@@ -962,6 +962,27 @@ test("task opens the template above, <c-c><c-f> adds files with fff", function()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
+test("a new task's Done when: is the project's test command, found and said so; dd sends no check", function()
+  put("AGENTS.md", "# x\n\n- Tests: `grep -q one a.txt` from the repo root\n")
+  sepal.task()
+  local b = task_buf()
+  eq(vim.api.nvim_buf_get_lines(b, 5, 6, false), { "Done when: grep -q one a.txt" })
+  local hint = vim.api.nvim_buf_get_extmarks(b, vim.api.nvim_create_namespace("sepal.check"), 0, -1, { details = true })[1]
+  local text = table.concat(vim.tbl_map(function(c) return c[1] end, hint[4].virt_text))
+  eq({ hint[2], text }, { 5, "  ✓ green lands  ✗ red goes back to the agent  · found in AGENTS.md, dd: no check" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  os.remove(vim.fs.joinpath(work, "AGENTS.md"))
+  put("Makefile", "all:\n\ttrue\ntest:\n\ttrue\n")
+  eq({ sepal.find_check(work) }, { "make test", "Makefile" })
+  os.remove(vim.fs.joinpath(work, "Makefile"))
+  eq(sepal.find_check(work), nil)
+  reset()
+  local got = run({ "Goal: no check", "" }) -- the line deleted
+  eq(newest().check, nil)
+  eq(got[1], "working on it: no check · :Sepal open watches")
+  clean()
+end)
+
 test(":'<,'>Sepal task puts the selected lines in the task and lists the file", function()
   sepal.config().task_suggest = nil
   vim.cmd.edit("tests/pool.lua")

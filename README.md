@@ -56,7 +56,13 @@ Files:
 
 `Done when:` is the check: a shell command that has to pass. The agent is allowed to run it, and
 it keeps working until the check passes. Then sepal runs the check again itself before landing
-anything. Leave it empty and the task isn't checked. `<c-c><c-f>` adds more files.
+anything. Leave it empty and the task isn't checked.
+
+A new task starts with your project's test command already there, found in this order: a
+`Tests:` line with a command in backticks in `AGENTS.md` or `CLAUDE.md`, a Makefile `test` target
+(`make test`), a `test` script in `package.json` (`npm test`), `Cargo.toml` (`cargo test`), `go.mod`
+(`go test ./...`), pytest (`pytest`). Its line says so: `✓ green lands  ✗ red goes back to the agent
+· found in AGENTS.md, dd: no check`. Delete the line for a task you don't want checked. `<c-c><c-f>` adds more files.
 
 **3. Send it.** `<c-c><c-c>`. The buffer closes and you get `working on it: Finish queued tasks…`.
 Keep coding. You can send more tasks, and they run in parallel, each in its own worktree.

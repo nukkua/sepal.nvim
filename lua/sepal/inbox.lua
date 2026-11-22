@@ -146,8 +146,6 @@ end
 -- the lines under an entry: what you should read
 local function details(e)
   local d = {}
-  if e.won then d[#d + 1] = "⚑ won the race of " .. e.won end
-  if e.race and (M.LIVE[e.status] or e.status == "queued") then d[#d + 1] = "⚑ racing " .. e.racers .. ": the first to pass lands" end
   if e.why then d[#d + 1] = e.why end
   if e.error then d[#d + 1] = e.error end
   if e.status == "running" then

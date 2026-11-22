@@ -146,7 +146,6 @@ local function facts(e)
   local f = {}
   if e.stat and e.stat.files > 0 then f[#f + 1] = ("%s +%d −%d"):format(plural(e.stat.files, "file"), e.stat.add, e.stat.del) end
   if e.check and e.checked ~= nil then f[#f + 1] = e.check .. (e.checked and " ✓" or " ✗") end
-  if e.won then f[#f + 1] = "won the race of " .. e.won end
   return #f > 0 and " · " .. table.concat(f, " · ") or ""
 end
 local function with_assumptions(msg, e)
@@ -170,18 +169,11 @@ local function finish(e, wt, status, extra)
   for k, v in pairs(extra or {}) do e[k] = v end
   inbox.changed(e)
   if j and j.done then j.done(true) end
-  if status == "stopped" then
-    if not e.lost then notify("stopped: " .. e.title) end -- a race loser says nothing: the winner's message covers it
-  elseif status == "error" or status == "failed" then
-    -- a racer down while the race still runs says nothing either; the last one out notifies as usual
-    local racing = e.race and vim.iter(inbox.list(e.root)):any(function(x) return x ~= e and x.race == e.race and M.running(x) end)
-    if not racing then
-      if status == "error" then notify("✗ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
-      else
-        local tries = (e.attempts or 0) + 1
-        notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
-      end
-    end
+  if status == "stopped" then notify("stopped: " .. e.title)
+  elseif status == "error" then notify("✗ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
+  elseif status == "failed" then
+    local tries = (e.attempts or 0) + 1
+    notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   elseif status == "answered" then notify("● " .. e.title .. ": " .. tostring(e.summary) .. " · <CR> in :Sepal inbox reads it")
   end
@@ -196,21 +188,6 @@ end
 local agent, show, loading -- below
 
 local function done(e, wt)
-  if e.race then -- it passed first (nochange counts): every other run is over, whatever it was doing
-    local race = e.race
-    inbox.batch(function()
-      for _, x in ipairs(inbox.list(e.root)) do
-        if x.race == race then
-          x.race = nil
-          if x ~= e and M.running(x) then
-            x.lost, x.why = true, "lost the race: another run passed first"
-            M.stop(x)
-          end
-        end
-      end
-    end)
-    e.won = e.racers
-  end
   if not e.stat or e.stat.files == 0 then return finish(e, wt, "nochange") end
   finish(e, wt, "ready")
   if (e.land or C().land) == "auto" then return M.land(e, true) end
@@ -603,8 +580,7 @@ end
 -- land: "auto" / "manual" for this task, nil: the land option
 -- kind: "btw" for a question (see sepal.task), nil/"implement" for a change
 -- agent: { cmd, model } from the agents option (nil: its first, or cmd and models when it's not set)
--- race: { id, n }: this run is one of n racing the same task, id their shared name (see M.race)
-function M.start(text, cwd, land, on_fail, kind, agent, race)
+function M.start(text, cwd, land, on_fail, kind, agent)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
   local check, title = M.parse(text)
@@ -615,7 +591,6 @@ function M.start(text, cwd, land, on_fail, kind, agent, race)
     attempts = 0, land = land, kind = btw and "btw" or nil }
   agent = agent or (C().agents or {})[1]
   if agent then e.agent = { cmd = agent.cmd, model = agent.model, args = agent.args } end -- kept with the task: r and c use it again
-  if race then e.race, e.racers = race.id or e.id, race.n end -- the first racer's id names the race
   inbox.add(e)
   if btw then launch(e, text .. "\n" .. notes(e)); return e end -- reads your repo as it is: no snapshot
   jobs[e.id] = {} -- from here it counts as running: x stops it, :Sepal open says it's starting
@@ -631,7 +606,7 @@ function M.start(text, cwd, land, on_fail, kind, agent, race)
     if j.stopped then
       e.status = "stopped"
       inbox.changed(e)
-      if not e.lost then notify("stopped: " .. e.title) end -- a race loser says nothing
+      notify("stopped: " .. e.title)
       return M._next()
     end
     queue[#queue + 1] = { e, text .. "\n" .. notes(e), base } -- behind the tasks queued before it
@@ -641,36 +616,11 @@ function M.start(text, cwd, land, on_fail, kind, agent, race)
   return e
 end
 
--- the same task on several agents at once (each in its own worktree): the first run whose check
--- passes lands, the rest are stopped (see done). agents with 2+ entries races all of them, in
--- order (the agent arg is ignored then); else race copies of agent (nil: the default). The
--- entries started, or nil, why — the task needs a check to pick its winner by
-function M.race(text, cwd, land, on_fail, agent)
-  if not git.root(cwd) then return nil, "not in a git repository: a task runs in a git worktree" end
-  if not (M.parse(text) or C().check) then return nil, "a race needs a check to pick its winner: fill in Done when:" end
-  local agents = C().agents or {}
-  local every = #agents >= 2 and agents or nil
-  local n = every and #every or C().race or 2
-  local failed -- each racer's save could fail: the way back fires once
-  local function back(why)
-    if failed then return end
-    failed = true
-    if on_fail then return on_fail(why) end
-    notify(why, ERROR)
-  end
-  local es, rid = {}, nil -- the first racer's id names them all
-  for i = 1, n do
-    local e = M.start(text, cwd, land, back, nil, every and every[i] or agent or agents[1], { id = rid, n = n })
-    if e then es[#es + 1] = e; rid = rid or e.id end
-  end
-  return es
-end
-
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
 function M.continue(e, text)
   if M.running(e) then return notify("it's still running") end
   endchat(e) -- the agent goes on with the same chat
-  e.attempts, e.checked, e.why, e.error, e.check_out, e.race, e.lost = 0 -- won stays: it did win its race
+  e.attempts, e.checked, e.why, e.error, e.check_out = 0
   e.time = os.time()
   launch(e, text .. "\n" .. notes(e), e.result or e.base)
 end
@@ -768,7 +718,6 @@ function M.stop(e)
     table.remove(queue, i)
     e.status = "stopped"
     inbox.changed(e)
-    if e.lost then return end -- a race loser says nothing
     return notify("stopped: " .. e.title)
   end
   local j = jobs[e.id]

@@ -46,7 +46,6 @@ files, fidget.nvim for a spinner.
     worktrees = vim.fn.stdpath("state") .. "/sepal",
     task_suggest = nil,
     max_running = 2,
-    race = 2,
     models = { btw = "sonnet" },
     sakura = true,
     highlights = {},
@@ -81,12 +80,6 @@ files, fidget.nvim for a spinner.
 `max_running` tasks running at once; the rest wait in the inbox as
              "queued" and start when one is done. nil: no limit. Each
              running task is a Claude Code process.
-                                                                *sepal-race*
-`race`       how many copies of the agent <c-c><c-r> runs at once: the
-             task goes to each in its own worktree and the first run whose
-             check passes lands; the others are stopped. With 2+ entries
-             in |sepal-agents| every agent races instead. A race needs a
-             check — "Done when:" or |sepal-check| — to pick its winner by.
                                                              *sepal-models*
 `models`     each task kind's model, passed as `--model` (over one in `args`):
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
@@ -154,8 +147,6 @@ files, fidget.nvim for a spinner.
                                 itself once it passes
                     <c-c><c-w>  send it and close the buffer; it waits in
                                 the inbox for L
-                    <c-c><c-r>  race it: several agents at once, the first
-                                to pass the check lands (|sepal-race|)
                     <c-c><c-s>  have |sepal-task_suggest| write the task
                     <c-c><c-f>  add a file under Files: as @path
                     <c-c><c-p>  paste the clipboard's image (wl-paste,
@@ -240,7 +231,7 @@ it there.
 6. HEALTH                                                       *sepal-health*
 
 `:checkhealth sepal` checks git, `cmd`, `args`, `check`, `retries`, `land`,
-`prepare`, `max_running`, `race`, `task_suggest`, `sakura`, `highlights`,
-`icons`, fidget and fff.
+`prepare`, `max_running`, `task_suggest`, `sakura`, `highlights`, `icons`,
+fidget and fff.
 
  vim:tw=78:ts=8:ft=help:norl:

@@ -17,7 +17,6 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  race = 2,            -- <c-c><c-r> runs this many copies of the agent when agents lists fewer than 2
   models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
@@ -293,7 +292,7 @@ local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
 local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
   local help = vim.b[buf].sepal_kind == "btw" and "btw  <c-c><c-c> ask  "
-    or "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-r> race  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
+    or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
   help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
   local line = { { help, "SepalDim" } }
   local w = vim.b[buf].sepal_who
@@ -308,7 +307,6 @@ end
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
--- <c-c><c-r> races it on several agents at once (the first to pass the check lands),
 -- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-p> pastes an image,
 -- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
@@ -377,27 +375,9 @@ function M.task(range, lines, kind, agent)
   end
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function() send("auto") end,
     vim.tbl_extend("force", o, { desc = "Run the task, it lands by itself" }))
-  if not btw then -- a question doesn't land, nor is it a task to write or to race
+  if not btw then -- a question doesn't land, nor is it a task to write
     vim.keymap.set({ "n", "i" }, "<c-c><c-w>", function() send("manual") end,
       vim.tbl_extend("force", o, { desc = "Run the task, it waits in the inbox" }))
-    vim.keymap.set({ "n", "i" }, "<c-c><c-r>", function()
-      local lines, err = M.tidy(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-      if not lines then return M.notify(err, vim.log.levels.WARN) end
-      local text = table.concat(lines, "\n")
-      -- nothing to pick the winner by: keep the draft (the check can still come from `check`)
-      if not (require("sepal.agent").parse(text) or C.check) then
-        return M.notify("a race needs a check to pick its winner: fill in Done when:", vim.log.levels.WARN)
-      end
-      vim.cmd.stopinsert()
-      vim.api.nvim_buf_delete(buf, { force = true })
-      local function back(why)
-        M.notify(why .. "\nthe task is back in its buffer", vim.log.levels.ERROR)
-        giveback(text, kind, agent)
-      end
-      local es, why = require("sepal.agent").race(text, vim.fn.getcwd(), "auto", back, agent)
-      if not es then return back(why) end
-      M.notify("racing " .. #es .. ": " .. es[1].title .. " · the first to pass `" .. es[1].check .. "` lands · :Sepal panel watches")
-    end, vim.tbl_extend("force", o, { desc = "Race it: several agents, the first to pass the check lands" }))
   end
   vim.keymap.set({ "n", "i" }, "<c-c><c-k>", function()
     vim.cmd.stopinsert()

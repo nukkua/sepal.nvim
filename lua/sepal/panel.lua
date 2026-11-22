@@ -112,7 +112,7 @@ local function card_sig(e, w)
     tostring(e.activity), table.concat(subs, "\1"), tostring(e.why), tostring(e.error), tostring(e.summary),
     tostring(not e.summary and e.task), #(e.assumptions or {}), tostring(e.model),
     tostring(e.agent and e.agent.cmd), tostring(require("sepal").icon(e.status, "?")),
-    tostring(C.retries), tostring(C.sakura), tostring(e.race), tostring(e.racers), tostring(e.won), tostring(e.lost),
+    tostring(C.retries), tostring(C.sakura),
     tostring(inbox.LIVE[e.status] and inbox.spin()) }, "\0")
 end
 
@@ -155,8 +155,6 @@ local function card(e, w)
     add(e.check .. (e.checked == true and " ✓" or e.checked == false and " ✗" or ""),
       e.checked == true and "SepalOk" or e.checked == false and "SepalError" or "SepalDim")
   end
-  if e.race and (inbox.LIVE[e.status] or e.status == "queued") then add("⚑ race", "SepalAccent") end
-  if e.won then add("⚑ won", "SepalAccent") end
   row(unpack(meta))
   local s = e.stat
   if s and s.files > 0 then

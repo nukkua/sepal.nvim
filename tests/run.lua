@@ -177,6 +177,38 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/after/") end, vim.api.nvim_list_bufs()), 0, "after buffers left")
 end)
 
+test("review preserves non-ASCII and escaped filenames and their first changed lines", function()
+  clean(); reset()
+  local git = require("sepal.git")
+  local paths = { "日本語.txt", 'quote"tab\tback\\slash.txt', "with space.txt" }
+  for _, path in ipairs(paths) do put(path, "one\nbefore\n") end
+  local base
+  git.snapshot(work, nil, function(c) base = c end)
+  assert(vim.wait(10000, function() return base ~= nil end, 10))
+  for _, path in ipairs(paths) do put(path, "one\nafter\n") end
+  local result
+  git.snapshot(work, nil, function(c) result = c end)
+  assert(vim.wait(10000, function() return result ~= nil end, 10))
+  local st, first = git.review(work, base, result)
+  eq(st.files, #paths)
+  for _, path in ipairs(paths) do
+    assert(vim.tbl_contains(st.paths, path), "quoted path in review: " .. vim.inspect(st.paths))
+    eq(first[path], 2)
+    eq(git.files(work, { result .. ":" .. path })[1], "one\nafter\n")
+  end
+  local async
+  git.stat_bg(work, base, result, function(s) async = s end)
+  assert(vim.wait(10000, function() return async ~= nil end, 10))
+  eq(async, st)
+  local empty = git.review(work, base, base)
+  eq(empty.files, 0)
+  local missing = git.review(work, "refs/sepal/missing", result)
+  eq(missing.files, 0)
+  agent.show({ id = "quoted", root = work, title = "quoted", base = base, result = result })
+  eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "one", "after" })
+  vim.cmd.tabclose()
+end)
+
 test("your edits since the task started are kept; u takes the task back out", function()
   clean(); reset()
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_EDIT = "0.5", [[printf 'one\ntwo\nTHREE\n' > a.txt]]

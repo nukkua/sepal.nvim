@@ -6,17 +6,21 @@ local M = {}
 local cache = {} -- root -> list of entries, newest first
 
 local function cfg() return require("sepal").config() end
-function M.key(root) return (root:gsub("[^%w]", "-")) end
+function M.key(root) return vim.fn.sha256(root) end
 local function file(root) return vim.fs.joinpath(cfg().worktrees, M.key(root) .. ".json") end
 
 function M.list(root)
   if cache[root] then return cache[root] end
   local list = {}
   local f = io.open(file(root))
+  local legacy = not f
+  if legacy then f = io.open(vim.fs.joinpath(cfg().worktrees, (root:gsub("[^%w]", "-")) .. ".json")) end
   if f then
     local ok, data = pcall(vim.json.decode, f:read("a"), { luanil = { object = true, array = true } })
     f:close()
-    if ok and type(data) == "table" then list = data end
+    if ok and type(data) == "table" then
+      list = legacy and vim.tbl_filter(function(e) return type(e) == "table" and e.root == root end, data) or data
+    end
   end
   for _, e in ipairs(list) do
     -- nvim quit while it ran: the agent was stopped with it

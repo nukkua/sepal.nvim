@@ -410,6 +410,33 @@ test("the inbox lists the tasks and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
+test("inbox keys isolate roots and read only their own legacy entries", function()
+  local a, b = T .. "/foo-bar", T .. "/foo_bar"
+  local state = sepal.config().worktrees
+  local legacy = vim.fs.joinpath(state, (a:gsub("[^%w]", "-")) .. ".json")
+  local f = assert(io.open(legacy, "w"))
+  f:write(vim.json.encode({
+    { id = "legacy-a", root = a, status = "ready", spec = "Goal: legacy A" },
+    { id = "legacy-b", root = b, status = "ready", task = "Goal: legacy B" },
+  }))
+  f:close()
+  eq(#inbox.list(a), 1, "legacy entries leaked across roots")
+  eq(inbox.list(a)[1].task, "Goal: legacy A")
+  eq(inbox.list(b)[1].task, "Goal: legacy B")
+  assert(inbox.key(a) ~= inbox.key(b), "storage keys collide")
+  inbox.add({ id = "new-a", root = a, status = "ready", task = "Goal: new A" })
+  inbox.save(b)
+  inbox._t.reset()
+  eq(#inbox.list(a), 2)
+  eq(#inbox.list(b), 1)
+  eq(inbox.list(b)[1].id, "legacy-b")
+  local fresh = T .. "/missing-inbox"
+  eq(inbox.list(fresh), {})
+  put("../state/" .. inbox.key(fresh) .. ".json", "invalid JSON")
+  inbox._t.reset()
+  eq(inbox.list(fresh), {})
+end)
+
 test("a task saved by an older inbox (as spec) can still be dropped", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]

@@ -9,10 +9,11 @@ You don't watch the agent work.
 ## Requirements
 
 - Neovim 0.12+
-- [Claude Code](https://claude.com/claude-code)
+- [Claude Code](https://claude.com/claude-code), or [Devin CLI](https://cli.devin.ai) (see Devin)
 - git (tasks run in git worktrees, so your project has to be a git repo)
 - optional: [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) to pick files for a task
 - optional: [fidget.nvim](https://github.com/j-hui/fidget.nvim) for a spinner showing what the agent is doing
+- optional: `wl-paste` (Wayland), `pngpaste` (macOS), or `xclip` (X11) to paste clipboard images
 
 ## Install
 
@@ -57,13 +58,15 @@ Files:
 
 `Done when:` is the check: a shell command that has to pass. The agent is allowed to run it, and
 it keeps working until the check passes. Then sepal runs the check again itself before landing
-anything. Leave it empty and the task isn't checked.
+anything. Leave it empty or delete it to use the `check` option (unset by default: no check).
 
 A new task starts with your project's test command already there, found in this order: a
 `Tests:` line with a command in backticks in `AGENTS.md` or `CLAUDE.md`, a Makefile `test` target
 (`make test`), a `test` script in `package.json` (`npm test`), `Cargo.toml` (`cargo test`), `go.mod`
 (`go test ./...`), pytest (`pytest`). Its line says so: `✓ green lands  ✗ red goes back to the agent
-· found in AGENTS.md, dd: no check`. Delete the line for a task you don't want checked. `<c-c><c-f>` adds more files.
+· found in AGENTS.md, dd: no check`. Delete the line to skip the detected check (unless you've set
+`check`). `<c-c><c-f>` adds more files. Pytest is detected from `pytest.ini` or a `[tool.pytest…]`
+section in `pyproject.toml`.
 
 **3. Send it.** `<c-c><c-c>`. The buffer closes and you get `working on it: Finish queued tasks…`.
 Keep coding. You can send more tasks, and they run in parallel, each in its own worktree.
@@ -82,7 +85,8 @@ the part worth reading.
 
 **5. Review it like a teammate's change.** `git diff`, gitsigns, fugitive: whatever you use. Don't
 like it? `:Sepal undo` takes it back out. Your own edits since the task started stay in both
-cases.
+cases where they merge cleanly; overlapping edits can leave conflict markers. Save any modified
+buffers for affected files before landing or undoing.
 
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
@@ -152,7 +156,7 @@ The plan waits in the inbox, unfolded:
 require("sepal").setup({
   cmd = { "claude" },                            -- the agent
   args = { "--permission-mode", "acceptEdits" }, -- added to each run (see Permissions)
-  auto_mode = false,   -- true: every run and chat in Claude Code's auto mode (--permission-mode auto)
+  auto_mode = false,   -- true: auto mode for implementation runs and chats; questions/plans stay read-only
   check = nil,         -- the check for tasks without a `Done when:` line, e.g. "make test"
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
   land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits for L in the inbox (Lua API; the task keys choose for themselves)
@@ -171,12 +175,16 @@ require("sepal").setup({
 ### Devin
 
 With `agents`, `:Sepal task` asks which agent after the kind: by its `key`, or `1`, `2`… (its place
-in the list) without one. A `cmd` named `devin`
+in the list) without one. With only one agent, it is used without asking; unset, `cmd` is used.
+Each entry accepts `cmd` (a command string or argv), `model`, `args`, `name` (picker label), and `key`.
+A `cmd` whose executable name starts with `devin`
 runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code, the same way: sepal adds its hooks
 and the check's allow rule to a copy of your `~/.config/devin/config.json`, so the panel shows what it
 does, a permission prompt warns you, and ctrl-c in it stops the task (what it did is kept). It runs
-in `accept-edits` (`auto` for a btw, `smart` with `auto_mode`). An agent's `model` wins over
+in `accept-edits` (`auto` for a btw or orchestrate, `smart` for implementations with `auto_mode`). An agent's `model` wins over
 `models`, and its `args` replace `args` (Claude Code's flags aren't Devin's).
+The config path follows `$XDG_CONFIG_HOME` when set. It must be valid JSON: an unreadable or
+invalid config (including JSONC comments) is replaced by an empty config in sepal's copy.
 
 ```lua
 agents = {
@@ -189,7 +197,7 @@ agents = {
 
 Everything sepal draws uses its own groups, linked to your colorscheme's: `SepalTitle` (Title),
 `SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalOk` (DiagnosticOk), `SepalWarn`,
-`SepalError`, `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong). With
+`SepalError`, `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong), and `SepalAgent` (SepalClaude, running subagents). With
 `sakura = true` (the default) the title, accent, info and ok groups are cherry-blossom pinks, a
 lighter set on a dark background and a deeper one on a light background. Warnings and errors
 always use your theme's colors. A colorscheme that defines a `Sepal*` group wins over both,
@@ -201,6 +209,9 @@ and the `highlights` option wins over everything.
 (`●`, `✿` with sakura) and needing you (`▲`), e.g. `~2 ✿1 ▲1`, or nothing when there are none. A
 missed notification still shows there. sepal fires `User SepalChanged` and redraws the statusline
 when the counts move.
+Running includes queued and checking tasks; ready includes planned orchestrates; needing you
+includes check failures and agent errors. `icons` overrides status icons and the provider logos
+(`devin`, `claude`, `openai`, `gemini`, `opencode`).
 
 ```lua
 -- lualine
@@ -213,21 +224,21 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 
 | Command              | Does                                                                     |
 | -------------------- | ------------------------------------------------------------------------ |
-| `:[range]Sepal task` | write a task (with a range: those lines go in as a `Selection:`)         |
+| `:[range]Sepal [task]` | write a task (with a range: those lines go in as a `Selection:`)         |
 | `:Sepal inbox`       | every task of this repo and where it stands                              |
 | `:Sepal panel`       | a board at the right: each task, what its agent is doing, a summary (toggle) |
-| `:Sepal land`        | land the newest task that's waiting (with conflict markers if it overlaps your edits) |
+| `:Sepal land`        | land the newest eligible task with a saved result (see How it works)     |
 | `:Sepal undo`        | take the newest landed task back out                                     |
-| `:Sepal open`        | watch the newest task in Claude Code (its chat once it's done)           |
-| `:Sepal stop`        | stop every running task                                                  |
-| `:Sepal clean`       | drop the tasks that are over (landed, no changes, undone, stopped)       |
+| `:Sepal open`        | watch the newest running task or task with a chat, in its agent         |
+| `:Sepal stop`        | stop running and queued tasks, and close their chats                    |
+| `:Sepal clean`       | drop landed, no changes, undone, stopped, interrupted, answered and split tasks |
 
 ## How it works
 
 1. **Start**: your work tree (uncommitted and untracked files too) is saved as a commit, through a
    temporary index. Your own index and branches aren't touched. The agent gets a worktree of that
    commit, so it starts from exactly what you see.
-2. **Work**: `claude -p` runs there with the task, plus a few rules from sepal: it's alone, it
+2. **Work**: the agent runs interactively in a hidden terminal with the task, plus a few rules from sepal: it's alone, it
    shouldn't commit, it should run the check until it passes, and it should end with its
    assumptions.
 3. **Check**: sepal runs `Done when:` in the worktree itself. If it fails, the agent gets the output
@@ -238,7 +249,15 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
    has unsaved changes, it waits as "needs you".
 5. The worktree is removed and the result stays as a commit (`refs/sepal/<id>/*`) until you drop
    the task. The inbox is saved per repo, so it survives a restart. A task that was running when
-   Neovim quit shows as "interrupted", and `c` continues it with what it had done so far.
+   Neovim quit (including queued or checking tasks) shows as "interrupted", and `c` continues it
+   with what it had done so far. If its initial snapshot never finished, send it again.
+
+Tasks move through `queued`, `running`, `checking`, then `ready` (manual landing) or `landed`.
+No diff gives `no changes`; exhausted checks give `check failed`; agent/setup errors give `failed`;
+unsafe automatic landing gives `needs you`. Stopping gives `stopped`, undo gives `undone`.
+Questions finish as `answered`; orchestrates as `planned`, then `split` when their tasks start.
+`L` / `:Sepal land` can also apply saved results from failed, stopped, interrupted or undone tasks:
+it does not rerun the check. Dropping a task removes its refs, chat and pasted images, not landed edits.
 
 ## Tasks
 
@@ -296,7 +315,8 @@ require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowed
 
 Other flags go there too, e.g. `"--model", "opus"`.
 
-Or let Claude Code's auto mode decide, for tasks and chats alike (it replaces the `--permission-mode` in `args`):
+Or let Claude Code's auto mode decide for implementation runs and chats (it replaces the
+`--permission-mode` in `args`; btw and orchestrate runs still use plan mode):
 
 ```lua
 require("sepal").setup({ auto_mode = true })
@@ -315,12 +335,14 @@ sepal follows the agent through Claude Code hooks (passed with `--settings`, you
 run): what tool it's on, when it asks for something, and when its turn is over. Then it closes it
 and runs the check.
 
-At most `max_running` tasks (2 by default) run at once, the rest wait as `queued`.
+At most `max_running` implementation tasks (2 by default) run at once, including preparation and
+checking; the rest wait as `queued`. Btw and orchestrate runs bypass this limit.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal warns
 (`▲ …: Claude Code asks to trust the worktree · :Sepal open`), and you answer it there.
 
-`:checkhealth sepal` checks the setup.
+`:checkhealth sepal` checks Neovim, git, agent executables, arguments, checks/retries, landing,
+preparation, concurrency, models and plan models, task suggestions, appearance and optional plugins.
 
 ## Tests
 

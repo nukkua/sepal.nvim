@@ -76,7 +76,11 @@ local function tail(s, n)
 end
 
 local function ref(e, what) return "refs/sepal/" .. e.id .. "/" .. what end
-local function wtdir(e) return vim.fs.joinpath(C().worktrees, inbox.key(e.root), e.id) end
+local function wtdir(e)
+  local dir = vim.fs.joinpath(C().worktrees, inbox.key(e.root), e.id)
+  local legacy = vim.fs.joinpath(C().worktrees, (e.root:gsub("[^%w]", "-")), e.id)
+  return not vim.uv.fs_stat(dir) and vim.uv.fs_stat(legacy) and legacy or dir
+end
 
 -- the task's check ("Done when: make test") and title (Goal, else its first line)
 function M.parse(text)
@@ -670,7 +674,7 @@ end
 local function entry(text, root, land, kind, agent)
   local check, title = M.parse(text)
   local btw = kind == "btw"
-  if btw then check = nil end -- a question has nothing to check (nor the check option); a plan's is its tasks'
+  -- a question has nothing to check (nor the check option); a plan's is its tasks'
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
     task = text, check = not btw and (check or C().check) or nil, time = os.time(),
     status = not readonly(kind) and full() and "queued" or "running",

@@ -76,7 +76,11 @@ local function tail(s, n)
 end
 
 local function ref(e, what) return "refs/sepal/" .. e.id .. "/" .. what end
-local function wtdir(e) return vim.fs.joinpath(C().worktrees, inbox.key(e.root), e.id) end
+local function wtdir(e)
+  local dir = vim.fs.joinpath(C().worktrees, inbox.key(e.root), e.id)
+  local legacy = vim.fs.joinpath(C().worktrees, (e.root:gsub("[^%w]", "-")), e.id)
+  return not vim.uv.fs_stat(dir) and vim.uv.fs_stat(legacy) and legacy or dir
+end
 
 -- the task's check ("Done when: make test") and title (Goal, else its first line)
 function M.parse(text)

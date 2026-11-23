@@ -487,6 +487,33 @@ test("the inbox lists the tasks and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
+test("inbox keys isolate roots and read only their own legacy entries", function()
+  local a, b = T .. "/foo-bar", T .. "/foo_bar"
+  local state = sepal.config().worktrees
+  local legacy = vim.fs.joinpath(state, (a:gsub("[^%w]", "-")) .. ".json")
+  local f = assert(io.open(legacy, "w"))
+  f:write(vim.json.encode({
+    { id = "legacy-a", root = a, status = "ready", spec = "Goal: legacy A" },
+    { id = "legacy-b", root = b, status = "ready", task = "Goal: legacy B" },
+  }))
+  f:close()
+  eq(#inbox.list(a), 1, "legacy entries leaked across roots")
+  eq(inbox.list(a)[1].task, "Goal: legacy A")
+  eq(inbox.list(b)[1].task, "Goal: legacy B")
+  assert(inbox.key(a) ~= inbox.key(b), "storage keys collide")
+  inbox.add({ id = "new-a", root = a, status = "ready", task = "Goal: new A" })
+  inbox.save(b)
+  inbox._t.reset()
+  eq(#inbox.list(a), 2)
+  eq(#inbox.list(b), 1)
+  eq(inbox.list(b)[1].id, "legacy-b")
+  local fresh = T .. "/missing-inbox"
+  eq(inbox.list(fresh), {})
+  put("../state/" .. inbox.key(fresh) .. ".json", "invalid JSON")
+  inbox._t.reset()
+  eq(inbox.list(fresh), {})
+end)
+
 test("a task saved by an older inbox (as spec) can still be dropped", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
@@ -1184,6 +1211,20 @@ test("c continues a task nvim quit on: what its worktree had is kept, the agent 
   eq(vim.tbl_contains(e.stat.list, "c.txt +1 −0"), true, vim.inspect(e.stat.list))
   eq(got[#got]:match("^● ready"), "● ready")
   eq(msgs(notified(function() agent.resume(e) end)), { "it wasn't cut short: r replies to it" })
+end)
+
+test("c preserves unfinished work from a legacy storage directory", function()
+  clean(); reset()
+  run({ "Goal: legacy worktree" }, "<c-c><c-w>")
+  local e = newest()
+  e.status = "interrupted"
+  local wt = vim.fs.joinpath(T, "state", (work:gsub("[^%w]", "-")), e.id)
+  assert(sh(("git worktree add -q --detach %q %s && printf 'half\\n' > %q/c.txt"):format(wt, e.base, wt)).code == 0)
+  reset()
+  notified(function() agent.resume(e); idle() end)
+  eq(e.status, "ready")
+  assert(vim.tbl_contains(e.stat.list, "c.txt +1 −0"), "legacy unfinished work was lost")
+  eq(vim.uv.fs_stat(wt), nil)
 end)
 
 test("c starts over a task that never got its agent going; x keeps what the agent did", function()

@@ -268,9 +268,9 @@ function M.plan(root, a, b)
   local r = M.run(root, { "diff", "--raw", "-z", "--no-renames", "--no-abbrev", a, b })
   local raw = vim.split(r.code == 0 and r.stdout or "", "\0", { plain = true })
   for i = 1, #raw - 1, 2 do
-    local old, new, status = raw[i]:match("^:%d+ %d+ (%x+) (%x+) (%a)")
+    local oldmode, newmode, old, new, status = raw[i]:match("^:(%d+) (%d+) (%x+) (%x+) (%a)")
     if old then
-      files[#files + 1] = { status = status, rel = raw[i + 1], old = old, new = new }
+      files[#files + 1] = { status = status, rel = raw[i + 1], old = old, new = new, oldmode = oldmode, newmode = newmode }
       if status ~= "A" then oids[#oids + 1] = old end
       if status ~= "D" then oids[#oids + 1] = new end
     end
@@ -279,9 +279,26 @@ function M.plan(root, a, b)
   for _, f in ipairs(files) do
     local status, rel = f.status, f.rel
     local path = vim.fs.joinpath(root, rel)
-    local cur, old, new = readb(path), status ~= "A" and blob[f.old] or nil, status ~= "D" and blob[f.new] or nil
+    local st = vim.uv.fs_lstat(path)
+    local mode = not st and "000000" or st.type == "link" and "120000"
+      or st.type == "file" and (bit.band(st.mode, 64) ~= 0 and "100755" or "100644") or "other"
+    local cur = st and (st.type == "link" and vim.uv.fs_readlink(path) or st.type == "file" and readb(path)) or nil
+    local old, new = status ~= "A" and blob[f.old] or nil, status ~= "D" and blob[f.new] or nil
     local c = { rel = rel, path = path }
-    if cur == new then c.skip = true -- already like that
+    c.mode = mode == f.oldmode and f.newmode or mode
+    local parent, linked = vim.fs.dirname(path), false
+    while parent ~= root and parent ~= vim.fs.dirname(parent) do
+      local p = vim.uv.fs_lstat(parent)
+      if p and p.type == "link" then linked = true; break end
+      parent = vim.fs.dirname(parent)
+    end
+    if linked or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
+      c.conflict, c.preserve = true, true
+    elseif mode == "120000" or f.oldmode == "120000" or f.newmode == "120000" then
+      if cur == new and mode == f.newmode then c.skip = true
+      elseif cur == old and mode == f.oldmode then c.content, c.mode = new, f.newmode
+      else c.conflict, c.preserve = true, true end
+    elseif cur == new then c.skip, c.content = mode == c.mode, cur -- content already like that; the mode may differ
     elseif cur == old then c.content = new -- you didn't touch it: take theirs (or delete)
     elseif new == nil or cur == nil then c.conflict, c.content = true, cur -- deleted on one side, changed on the other
     elseif (old or ""):find("\0", 1, true) or new:find("\0", 1, true) or cur:find("\0", 1, true) then c.conflict, c.content = true, cur -- binary
@@ -304,7 +321,25 @@ end
 -- carry out a plan: write (or delete) each file
 function M.apply(changes)
   for _, c in ipairs(changes) do
-    if c.content == nil then os.remove(c.path) else writeb(c.path, c.content) end
+    if not c.preserve then
+      if c.content == nil then os.remove(c.path)
+      else
+        local st = vim.uv.fs_lstat(c.path)
+        if st and st.type == "link" then assert(vim.uv.fs_unlink(c.path)) end
+        if c.mode == "120000" then
+          if st and st.type ~= "link" then assert(vim.uv.fs_unlink(c.path)) end
+          vim.fn.mkdir(vim.fs.dirname(c.path), "p")
+          assert(vim.uv.fs_symlink(c.content, c.path))
+        else
+          writeb(c.path, c.content)
+          if c.mode and (not st or st.type ~= "file" or (bit.band(st.mode, 64) ~= 0) ~= (c.mode == "100755")) then
+            local permissions = st and st.type == "file" and bit.band(st.mode, 511) or 420
+            permissions = bit.band(permissions, bit.bnot(73)) + (c.mode == "100755" and 73 or 0)
+            assert(vim.uv.fs_chmod(c.path, permissions))
+          end
+        end
+      end
+    end
   end
 end
 

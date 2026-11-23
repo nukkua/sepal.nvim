@@ -177,6 +177,57 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/after/") end, vim.api.nvim_list_bufs()), 0, "after buffers left")
 end)
 
+test("review preserves non-ASCII and escaped filenames and their first changed lines", function()
+  clean(); reset()
+  local git = require("sepal.git")
+  local paths = { "日本語.txt", 'quote"tab\tback\\slash.txt', "with space.txt", "a\nnewline.txt" }
+  local before, after = {}, {}
+  for i, path in ipairs(paths) do
+    before[path], after[path] = "one\nbefore " .. i .. "\n", "one\nafter " .. i .. "\n"
+    put(path, before[path])
+  end
+  local base
+  git.snapshot(work, nil, function(c) base = c end)
+  assert(vim.wait(10000, function() return base ~= nil end, 10))
+  for _, path in ipairs(paths) do put(path, after[path]) end
+  local result
+  git.snapshot(work, nil, function(c) result = c end)
+  assert(vim.wait(10000, function() return result ~= nil end, 10))
+  local st, first = git.review(work, base, result, function() end)
+  eq(st.files, #paths)
+  local e = { id = "quoted", root = work, title = "quoted", task = "Goal: quoted", status = "ready", base = base, result = result, stat = st }
+  inbox.add(e)
+  inbox.open(work)
+  assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("a\\nnewline.txt", 1, true))
+  vim.cmd.close()
+  for _, path in ipairs(paths) do
+    assert(vim.tbl_contains(st.paths, path), "quoted path in review: " .. vim.inspect(st.paths))
+    eq(first[path], 2)
+    eq(git.files(work, { result .. ":" .. path })[1], after[path])
+  end
+  local contents = git.files(work, { result .. ":missing\nfile", result .. ":" .. paths[4], result .. ":" .. paths[1] })
+  eq(contents[1], nil)
+  eq(contents[2], after[paths[4]])
+  eq(contents[3], after[paths[1]])
+  local async
+  git.stat_bg(work, base, result, function(s) async = s end)
+  assert(vim.wait(10000, function() return async ~= nil end, 10))
+  eq(async, st)
+  local empty = git.review(work, base, base, function() end)
+  eq(empty.files, 0)
+  local missing = git.review(work, "refs/sepal/missing", result, function() end)
+  eq(missing.files, 0)
+  agent.show(e)
+  for i = 1, #paths do
+    local path = vim.b.sepal_path
+    eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), vim.split(vim.trim(after[path]), "\n"))
+    local wins = vim.api.nvim_tabpage_list_wins(0)
+    eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[1]), 0, -1, false), vim.split(vim.trim(before[path]), "\n"))
+    if i < #paths then vim.cmd.lnext() end
+  end
+  vim.cmd.tabclose()
+end)
+
 test("manual landing and undo preserve executable modes", function()
   clean(); reset()
   put("script.sh", "#!/bin/sh\necho old\n")

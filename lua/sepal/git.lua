@@ -140,28 +140,47 @@ end
 -- the numstat of a -> b parsed: { files, add, del, list = { "path +1 −3", ... }, paths = { "path", ... } }
 local function stat_of(s)
   local st = { files = 0, add = 0, del = 0, list = {}, paths = {} }
-  for line in s:gmatch("[^\n]+") do
-    local add, del, path = line:match("^(%S+)%s+(%S+)%s+(.*)$")
-    st.list[#st.list + 1] = path .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
+  for line in s:gmatch("[^%z]+") do
+    local add, del, path = line:match("^(%S+)\t(%S+)\t(.*)$")
+    local display = path:gsub("%c", function(c)
+      return ({ ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" })[c] or ("\\%03o"):format(c:byte())
+    end)
+    st.list[#st.list + 1] = display .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
     st.paths[#st.paths + 1] = path
     st.files, st.add, st.del = st.files + 1, st.add + (tonumber(add) or 0), st.del + (tonumber(del) or 0)
   end
   return st
 end
 
+local function unquote(path)
+  if path:sub(1, 1) ~= '"' then return path end
+  local out, i = {}, 2
+  local escapes = { a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v" }
+  while i < #path do
+    local c = path:sub(i, i)
+    if c == "\\" then
+      local oct = path:sub(i + 1):match("^([0-7][0-7][0-7])")
+      if oct then c, i = string.char(tonumber(oct, 8)), i + 4
+      else c, i = escapes[path:sub(i + 1, i + 1)] or path:sub(i + 1, i + 1), i + 2 end
+    else i = i + 1 end
+    out[#out + 1] = c
+  end
+  return table.concat(out)
+end
+
 -- the -U0 diff of a -> b parsed: { [path] = line of its first change }
--- shortcut: paths git quotes (odd characters) aren't found, they start at line 1
 local function firsts_of(s)
   local t, path = {}, nil
   for l in s:gmatch("[^\n]+") do
-    path = l:match("^diff %-%-git a/.- b/(.*)$") or path
+    local header = l:match("^%+%+%+ (.*)$")
+    if header then path = unquote((header:gsub("\t$", ""))):match("^b/(.*)$") end
     local n = l:match("^@@ %-%S+ %+(%d+)")
     if n and path and not t[path] then t[path] = math.max(1, tonumber(n)) end
   end
   return t
 end
 
-local NUMSTAT = function(a, b) return { "diff", "--numstat", "--no-renames", a, b } end
+local NUMSTAT = function(a, b) return { "diff", "--numstat", "-z", "--no-renames", a, b } end
 local FIRSTS = function(a, b) return { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b } end
 
 -- files and lines changed from a to b, to cb(st): the diff runs off the main loop
@@ -208,19 +227,19 @@ local function writeb(path, s)
   f:write(s)
   f:close()
 end
--- cat-file --batch's stdout parsed as a list in the specs' order: content, or nil where the
+-- cat-file --batch -Z's stdout parsed as a list in the specs' order: content, or nil where the
 -- record's header was "<name> missing"/"<name> ambiguous" or the object isn't a blob
 local function batch_of(s, n)
   local got, pos = {}, 1
   for i = 1, n do
-    local eol = s:find("\n", pos, true)
+    local eol = s:find("\0", pos, true)
     if not eol then break end
     local kind, size = s:sub(pos, eol - 1):match("^%x+ (%S+) (%d+)$")
     if not kind then pos = eol + 1 -- "<name> missing" / "<name> ambiguous"
     else
       size = tonumber(size)
       if kind == "blob" then got[i] = s:sub(eol + 1, eol + size) end
-      pos = eol + size + 2 -- the content, then its "\n"
+      pos = eol + size + 2 -- the content, then its NUL
     end
   end
   return got
@@ -229,7 +248,7 @@ end
 -- cat-file --batch for specs, started not waited; files_wait's handle
 function M.files_start(root, specs)
   if #specs == 0 then return nil end
-  local p = start(root, { "cat-file", "--batch" }, { stdin = table.concat(specs, "\n") .. "\n" })
+  local p = start(root, { "cat-file", "--batch", "-Z" }, { stdin = table.concat(specs, "\0") .. "\0" })
   return p and { p = p, n = #specs } or nil
 end
 

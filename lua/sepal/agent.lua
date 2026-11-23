@@ -670,7 +670,7 @@ end
 local function entry(text, root, land, kind, agent)
   local check, title = M.parse(text)
   local btw = kind == "btw"
-  if btw then check = nil end -- a question has nothing to check (nor the check option); a plan's is its tasks'
+  -- a question has nothing to check (nor the check option); a plan's is its tasks'
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
     task = text, check = not btw and (check or C().check) or nil, time = os.time(),
     status = not readonly(kind) and full() and "queued" or "running",

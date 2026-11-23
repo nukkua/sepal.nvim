@@ -179,13 +179,13 @@ local function text(p)
   return r.code == 0 and r.stdout or ""
 end
 
--- stat and firsts of a -> b at once: the two diffs run concurrently. on_stat(st), if given, runs
+-- stat and firsts of a -> b at once: the two diffs run concurrently. on_stat(st) runs
 -- once the numstat is in, while the -U0 diff may still run — for work that only needs the paths;
 -- its return value is this call's third
 function M.review(root, a, b, on_stat)
   local num, uni = start(root, NUMSTAT(a, b)), start(root, FIRSTS(a, b))
   local st = stat_of(text(num))
-  local extra = on_stat and on_stat(st)
+  local extra = on_stat(st)
   return st, firsts_of(text(uni)), extra
 end
 

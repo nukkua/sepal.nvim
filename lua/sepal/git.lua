@@ -142,7 +142,10 @@ local function stat_of(s)
   local st = { files = 0, add = 0, del = 0, list = {}, paths = {} }
   for line in s:gmatch("[^%z]+") do
     local add, del, path = line:match("^(%S+)\t(%S+)\t(.*)$")
-    st.list[#st.list + 1] = path .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
+    local display = path:gsub("%c", function(c)
+      return ({ ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" })[c] or ("\\%03o"):format(c:byte())
+    end)
+    st.list[#st.list + 1] = display .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
     st.paths[#st.paths + 1] = path
     st.files, st.add, st.del = st.files + 1, st.add + (tonumber(add) or 0), st.del + (tonumber(del) or 0)
   end
@@ -225,19 +228,19 @@ local function writeb(path, s)
   f:write(s)
   f:close()
 end
--- cat-file --batch's stdout parsed as a list in the specs' order: content, or nil where the
+-- cat-file --batch -Z's stdout parsed as a list in the specs' order: content, or nil where the
 -- record's header was "<name> missing"/"<name> ambiguous" or the object isn't a blob
 local function batch_of(s, n)
   local got, pos = {}, 1
   for i = 1, n do
-    local eol = s:find("\n", pos, true)
+    local eol = s:find("\0", pos, true)
     if not eol then break end
     local kind, size = s:sub(pos, eol - 1):match("^%x+ (%S+) (%d+)$")
     if not kind then pos = eol + 1 -- "<name> missing" / "<name> ambiguous"
     else
       size = tonumber(size)
       if kind == "blob" then got[i] = s:sub(eol + 1, eol + size) end
-      pos = eol + size + 2 -- the content, then its "\n"
+      pos = eol + size + 2 -- the content, then its NUL
     end
   end
   return got
@@ -246,7 +249,7 @@ end
 -- cat-file --batch for specs, started not waited; files_wait's handle
 function M.files_start(root, specs)
   if #specs == 0 then return nil end
-  local p = start(root, { "cat-file", "--batch" }, { stdin = table.concat(specs, "\n") .. "\n" })
+  local p = start(root, { "cat-file", "--batch", "-Z" }, { stdin = table.concat(specs, "\0") .. "\0" })
   return p and { p = p, n = #specs } or nil
 end
 

@@ -189,10 +189,9 @@ function M.review(root, a, b, on_stat)
   return st, firsts_of(text(uni)), extra
 end
 
--- delete every ref under prefixes (one prefix string, or a list of them): one for-each-ref + one update-ref
+-- delete every ref under a list of prefixes: one for-each-ref + one update-ref
 function M.delete_refs(root, prefixes)
-  local refs = out(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" },
-    type(prefixes) == "table" and prefixes or { prefixes })) or ""
+  local refs = out(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" }, prefixes)) or ""
   if refs ~= "" then M.run(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }) end -- all of them in one go
 end
 

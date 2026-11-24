@@ -708,6 +708,7 @@ test("the inbox is edited like oil: dd drops on :w, u takes it back, yyp opens a
   eq(#inbox.list(work), 1) -- the copy is a draft, not a task yet
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), vim.split(newest().task, "\n"))
   eq(vim.api.nvim_get_current_buf(), task_buf()) -- focused, to change it
+  eq(vim.wo.wrap, true) -- not the inbox's nowrap: a long line would scroll sideways as you type
   vim.o.splitbelow = true -- closing the draft would focus the window above, not the inbox
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "x", false) -- discard it
   vim.o.splitbelow = false

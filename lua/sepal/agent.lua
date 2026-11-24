@@ -117,11 +117,11 @@ local function notes(e)
       "2. [model] short title", "   ...", "", "Assumptions:\n- <one per line>\n(or \"Assumptions: none\")" }, "\n")
   end
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
-    "- You're in a git worktree of the project. Work on your own: decide instead of asking questions."
-      .. " Edit the files here. Don't commit, push or switch branches." }
-  if e.check then n[#n + 1] = ("- Done when `%s` passes: run exactly that command (nothing added to it, it is the only one allowed), and keep fixing until it passes."):format(e.check) end
-  n[#n + 1] = "- Decide what the task leaves open. End your reply with the decisions a reviewer should know:"
-  n[#n + 1] = "Assumptions:\n- <one per line>\n(or \"Assumptions: none\")"
+    "- You're in a git worktree: edit here, decide instead of asking. Don't commit, push or switch branches." }
+  if e.check then n[#n + 1] = ("- Done when `%s` passes: run exactly that, no other command, and fix until it passes."):format(e.check) end
+  n[#n + 1] = "- End with only what the user must know, no summary of the work:"
+  n[#n + 1] = "Not done:\n- <left undone or unchecked; drop this section if nothing>"
+  n[#n + 1] = "Assumptions:\n- <a decision the task left open, one per line>\n(or \"Assumptions: none\")"
   return table.concat(n, "\n")
 end
 
@@ -296,7 +296,7 @@ local function check(e, wt)
     e.attempts = (e.attempts or 0) + 1
     e.status = "running"
     inbox.changed(e)
-    agent(e, ("`%s` failed (exit %d):\n```\n%s\n```\nFix it so it passes. Same rules as before, and end with Assumptions: again.")
+    agent(e, ("`%s` failed (exit %d):\n```\n%s\n```\nFix it so it passes. Same rules as before, and end the same way.")
       :format(e.check, out.code, e.check_out), wt)
   end))
   if not ok then return finish(e, wt, "error", { error = "could not run the check: " .. tostring(job):match("[^\n]*") }) end
@@ -1200,7 +1200,8 @@ function M.reply(e)
   local b = vim.api.nvim_create_buf(false, true)
   vim.bo[b].filetype, vim.bo[b].bufhidden = "markdown", "wipe"
   vim.b[b].sepal_reply = e.id
-  vim.api.nvim_open_win(b, true, { split = "above", win = -1, height = 6 })
+  local w = vim.api.nvim_open_win(b, true, { split = "above", win = -1, height = 6 })
+  vim.wo[w].wrap, vim.wo[w].cursorline = true, false -- not the inbox's nowrap (a split copies them)
   local ns = vim.api.nvim_create_namespace("sepal.reply")
   local function hint()
     vim.api.nvim_buf_clear_namespace(b, ns, 0, -1)

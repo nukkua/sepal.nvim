@@ -22,6 +22,7 @@ local C = {
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
+  skills = {},         -- name -> a SKILL.md path or its text; /name in a task sends the skill along: { how = "~/.claude/skills/how/SKILL.md" }
 }
 local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
 C.models = vim.tbl_extend("force", {}, MODELS)
@@ -292,6 +293,20 @@ function M.find_check(cwd)
   end
 end
 
+-- the task with each skill it names as /name (the skills option) appended, frontmatter dropped, once each
+function M.skills(text)
+  local out, seen = text, {}
+  for name in (" " .. text):gmatch("%s/([%w_%-]+)") do
+    local s = (C.skills or {})[name]
+    if type(s) == "string" and not seen[name] then
+      seen[name] = true
+      s = readf(vim.fn.expand(s)) or s
+      out = out .. "\n\nSkill /" .. name .. ":\n" .. vim.trim((s:gsub("^%-%-%-\n.-\n%-%-%-\n", "")))
+    end
+  end
+  return out
+end
+
 local function template(check)
   return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
@@ -480,7 +495,7 @@ function M.task(range, lines, kind, agent)
       M.notify(why .. "\nthe task is back in its buffer", vim.log.levels.ERROR)
       giveback(text, kind, agent)
     end
-    local e, why = require("sepal.agent").start(text, vim.fn.getcwd(), land, back, kind, agent)
+    local e, why = require("sepal.agent").start(M.skills(text), vim.fn.getcwd(), land, back, kind, agent)
     if not e then return back(why) end
     if e.status == "queued" then return M.notify("queued: " .. e.title .. " · it starts when a running task is done") end
     if btw then return M.notify("asking: " .. e.title .. " · :Sepal open watches") end

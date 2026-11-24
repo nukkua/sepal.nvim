@@ -129,6 +129,18 @@ local function clean() -- back to the first commit, nothing in the inbox
   for _, e in ipairs(vim.list_slice(inbox.list(work), 1)) do agent.drop(e) end
 end
 
+test("/name in a task sends the skill along: from a SKILL.md path (no frontmatter) or its text", function()
+  reset()
+  local skill = vim.fs.joinpath(T, "SKILL.md")
+  local f = assert(io.open(skill, "w")); f:write("---\nname: how\n---\n\n# How\nExplore it.\n"); f:close()
+  sepal.setup({ skills = { how = skill, why = "Ask why." } })
+  run({ "Goal: /how does a.txt load", "", "Files:", "- @src/how" })
+  sepal.setup({ skills = {} })
+  local p = prompts()
+  assert(p:find("Skill /how:\n# How\nExplore it.", 1, true), p)
+  assert(not p:find("name: how", 1, true) and not p:find("Ask why.", 1, true), p)
+end)
+
 test("a task runs in a worktree and lands as unstaged changes, with what the agent assumed", function()
   reset()
   vim.env.SEPAL_EDIT = [[printf 'one\nTWO\nthree\n' > a.txt; printf 'new\n' > b.txt]]

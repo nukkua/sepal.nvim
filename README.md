@@ -174,6 +174,7 @@ require("sepal").setup({
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
+  skills = {},         -- name -> SKILL.md path or text; /name in a task sends it along: { how = "~/.claude/skills/how/SKILL.md" }
 })
 ```
 

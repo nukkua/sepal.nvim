@@ -212,9 +212,6 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     s     split a planned orchestrate: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
-                    T     an answered btw as an implement draft: its
-                          question and answer as context (Asked:,
-                          Answer:), you write the Goal: and send it
                     m     the model of the plan item under the cursor (on
                           the orchestrate's own line: of every item), from
                           your |sepal-agents|' models, "default" or one you
@@ -225,7 +222,10 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim
                     yyp   a copied line opens, on :w, a new task with
-                          that task's text, to add to and send
+                          that task's text, to add to and send; an
+                          answered btw's opens an implement draft: its
+                          question and answer as context (Asked:,
+                          Answer:), you write the Goal: and send it
                     C     drop the tasks that are over (:Sepal clean)
                     j/k   next/previous task
                     za    expand/collapse a task's fold (zM/zR: all)

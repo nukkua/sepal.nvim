@@ -537,10 +537,10 @@ function M.task(range, lines, kind, agent)
   end, vim.tbl_extend("force", o, { desc = "Paste the clipboard's image into the task" }))
 end
 
--- T in the inbox on an answered btw: an implement draft with the question and its answer as
+-- yyp + :w in the inbox on an answered btw: an implement draft with the question and its answer as
 -- context (the question's files listed again), the check found as for a new task; you write the Goal
 function M.implement(e)
-  if e.kind ~= "btw" or not e.answer then return M.notify("T turns an answered btw into a task") end
+  if e.kind ~= "btw" or not e.answer then return M.notify("only an answered btw turns into a task") end
   local q, files = {}, nil
   for _, l in ipairs(vim.split(e.task, "\n")) do
     if l:match("^Files:") then files = {} end

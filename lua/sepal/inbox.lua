@@ -131,7 +131,7 @@ local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  T task  m model  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close"
 -- an orchestrate's plan item under it: "    2. [sonnet] title"; edit the model in it (or dd it) and :w
 local PLAN = "^%s+(%d+)%.%s*%[([^%]]*)%]"
 local function plan_line(i, p) return ("%d. [%s] %s"):format(i, p.model or "default", p.title) end
@@ -345,7 +345,7 @@ function M.current()
 end
 
 -- :w in the inbox: a task whose line is gone is dropped, a line put twice (yyp) opens a new task
--- with that task's text, to add to and send. Under a planned orchestrate, its plan is what its
+-- with that task's text, to add to and send (an answered btw: an implement draft, see sepal.implement). Under a planned orchestrate, its plan is what its
 -- plan lines say now: the [model] in each, their order, and a deleted line drops that task
 function M.write(b)
   local root, seen, copies = vim.b[b].sepal_inbox, {}, {}
@@ -391,7 +391,11 @@ function M.write(b)
   local e = copies[1] and M.find(root, copies[1])
   -- shortcut: one draft at a time (sepal.task), so only the first copy opens; more copies need a draft list
   -- scheduled: :w puts you back in the inbox after BufWriteCmd, the draft should keep focus
-  if e then vim.schedule(function() require("sepal").task(nil, vim.split(e.task, "\n"), e.kind) end) end
+  -- an answered btw copies into an implement draft, its question and answer as context
+  if e then vim.schedule(function()
+    local sepal = require("sepal")
+    if e.kind == "btw" and e.answer then sepal.implement(e) else sepal.task(nil, vim.split(e.task, "\n"), e.kind) end
+  end) end
   if #copies > 1 then require("sepal").notify("one task draft at a time: copied only " .. e.title) end
 end
 
@@ -457,7 +461,6 @@ function M.open(root)
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "s", on(agent.split), o("Split a planned orchestrate into its tasks"))
-    vim.keymap.set("n", "T", on(require("sepal").implement), o("Turn an answered btw into a task to implement"))
     vim.keymap.set("n", "m", M.pick_model, o("Set the model of a planned task (all of them on the plan's line)"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))

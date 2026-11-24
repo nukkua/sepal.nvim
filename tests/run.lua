@@ -1340,8 +1340,17 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   agent.show(e)
   eq({ vim.bo.filetype, vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] }, { "markdown", "Did it." })
   vim.cmd("tabclose")
-  -- T: the answer becomes the context of an implement draft
-  sepal.implement(e)
+  -- yyp + :w: the answer becomes the context of an implement draft
+  vim.cmd("Sepal inbox")
+  local ib = vim.api.nvim_get_current_buf()
+  for r = 1, vim.api.nvim_buf_line_count(ib) do
+    vim.api.nvim_win_set_cursor(0, { r, 0 })
+    if (inbox.current() or {}).id == e.id then break end
+  end
+  eq(inbox.current().id, e.id)
+  vim.cmd("normal yyp")
+  vim.cmd("write")
+  assert(vim.wait(1000, function() return task_buf() ~= nil end, 10), "no draft opened")
   local d = task_buf()
   eq(vim.b[d].sepal_kind, "implement")
   local l = vim.api.nvim_buf_get_lines(d, 0, -1, false)

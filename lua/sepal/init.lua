@@ -550,7 +550,7 @@ function M.implement(e)
   if vim.b.sepal_task then vim.api.nvim_win_set_cursor(0, { 1, #"Goal: " }) end
 end
 
--- :Sepal task: pick its kind first, i implement, b btw or o orchestrate (any other key cancels); an
+-- :Sepal task: pick its kind first, o orchestrate, i implement or b btw (any other key cancels); an
 -- open draft just gets the focus (and the range), whatever its kind
 local KINDS = { i = "implement", b = "btw", o = "orchestrate" }
 -- a one-line pick (here and the inbox's m): chunks echoed after "sepal ", the key you press (nil: <Esc>, <c-c>)
@@ -574,7 +574,7 @@ function M.pick(range)
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local chunks = {}
-  for _, k in ipairs({ "i", "b", "o" }) do
+  for _, k in ipairs({ "o", "i", "b" }) do
     vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. KINDS[k] } })
     if #agents < 2 then
       local l, m, name = who(KINDS[k])

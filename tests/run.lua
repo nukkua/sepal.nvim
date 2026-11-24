@@ -1477,8 +1477,8 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   local codex = draft()
   vim.api.nvim_echo = echo
   sepal.setup({ models = {}, agents = nil })
-  eq(shown, { "sepal i implement ✻ opus 5.5   b btw ✻ sonnet   o orchestrate ◇ sh   ",
-    "sepal i implement   b btw   o orchestrate   ",
+  eq(shown, { "sepal o orchestrate ◇ sh   i implement ✻ opus 5.5   b btw ✻ sonnet   ",
+    "sepal o orchestrate   i implement   b btw   ",
     "sepal 1 ✻ claude                                  2 ❖ devin  · opus 5.5 medium + swe 2 high   t ֎ codex  · gpt 5\n"
       .. "4 ❖ devin" })
   eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet  " }, { "֎", "SepalDim", " gpt 5  " } })

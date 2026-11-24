@@ -21,8 +21,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
    vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal task<cr>")
    vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>")
 <
-2. Select the code you mean (or don't) and press <leader>as. Pick `i`
-   implement, `b` btw (a question) or `o` orchestrate (a plan), then fill in
+2. Select the code you mean (or don't) and press <leader>as. Pick `o`
+   orchestrate (a plan), `i` implement or `b` btw (a question), then fill in
    the task. "Done when:" is a shell command to check, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
 4. "❀ landed: …" means it passed the check and is in your files, unstaged.

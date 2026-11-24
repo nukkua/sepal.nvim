@@ -167,13 +167,8 @@ require("sepal").setup({
   land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits for L in the inbox (Lua API; the task keys choose for themselves)
   prepare = nil,       -- shell command run in each new worktree first ($SEPAL_ROOT is your repo)
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
-<<<<<<< yours
-  task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
-  max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
-=======
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
-  max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
->>>>>>> sepal
+  max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors

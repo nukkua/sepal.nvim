@@ -46,13 +46,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
     land = "auto",
     prepare = nil,
     worktrees = vim.fn.stdpath("state") .. "/sepal",
-<<<<<<< yours
-    task_suggest = nil,
-    max_running = 3,
-=======
     task_sharpen = nil,
-    max_running = 2,
->>>>>>> sepal
+    max_running = 3,
     models = { btw = "sonnet" },
     agents = nil,
     sakura = true,

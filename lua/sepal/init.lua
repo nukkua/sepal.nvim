@@ -15,13 +15,8 @@ local C = {
   land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits in the inbox for L
   prepare = nil,       -- shell command run in each new worktree before the agent, $SEPAL_ROOT is your repo
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
-<<<<<<< yours
-  task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
-  max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-=======
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
-  max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
->>>>>>> sepal
+  max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
   models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors

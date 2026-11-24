@@ -1,11 +1,13 @@
 -- sepal.panel — :Sepal panel, a board at the right that only shows: each task as a card with its
 -- status, what the agent is doing right now and a short summary. It redraws with the inbox (and
--- spins while a task runs); o watches the task under the cursor, q closes it. To act, :Sepal inbox.
+-- while a task runs its icon spins and a light slides down its rail and over its status); o watches
+-- the task under the cursor, q closes it. To act, :Sepal inbox.
 
 local M = {}
 
 local inbox = require("sepal.inbox")
 local NS = vim.api.nvim_create_namespace("sepal.panel")
+local ANIM = vim.api.nvim_create_namespace("sepal.panel.anim") -- the light on a working card, redrawn each tick
 local WIDTH = 46
 -- the header's counts, in this order: { label, statuses, hl }
 local COUNTS = {
@@ -70,6 +72,8 @@ M.logo, M.model = logo, model -- :Sepal task's picker and draft show them too
 local panel_buf
 local drawn -- what it shows, spinners blanked: see render
 local spun = {} -- { row, col } of each spinner drawn
+local glows = {} -- a list of { row, col, end_col } of the "▎" of each drawn row, per card
+local shines = {} -- { row, col, text } of each live status label drawn
 local rows = {} -- row -> task id
 local function buf() return panel_buf and vim.api.nvim_buf_is_valid(panel_buf) and panel_buf or nil end
 local function win()
@@ -133,7 +137,7 @@ local function card(e, w)
   local st = inbox.STATUS[e.status] or { "?", e.status, "Normal" }
   local live = inbox.LIVE[e.status]
   local icon = live and inbox.spin() or require("sepal").icon(e.status, st[1])
-  local rail, age = { "▎ ", st[3] }, inbox.ago(e.time)
+  local rail, age = { "▎ ", st[3], pulse = live or nil }, inbox.ago(e.time)
   local inner = w - 2
   local pad = { " ", "Normal" }
   local out = {
@@ -153,7 +157,7 @@ local function card(e, w)
     end
   end
   -- status · try · check
-  local meta = { { st[2]:upper(), st[3] } }
+  local meta = { { st[2], st[3], shimmer = live } }
   if HINT[e.status] then meta[#meta + 1] = { "  " .. HINT[e.status], "SepalDim" } end
   local function add(t, hl) meta[#meta + 1] = { " · ", "SepalDim" }; meta[#meta + 1] = { t, hl or "SepalDim" } end
   if (e.attempts or 0) > 0 then add(("try %d/%d"):format(e.attempts + 1, (require("sepal").config().retries or 0) + 1)) end
@@ -198,6 +202,29 @@ local function card(e, w)
   return out
 end
 
+-- the light on a working card: only highlights, redrawn every tick — never the text, so the key
+-- render diffs on stays put
+local function animate(b)
+  vim.api.nvim_buf_clear_namespace(b, ANIM, 0, -1)
+  local t = inbox.tick()
+  for _, g in ipairs(glows) do -- a light two rows tall slides down the card's rail, then rests
+    local h = t % (#g + 4) + 1
+    for i, r in ipairs(g) do
+      if i == h or i == h - 1 then
+        vim.api.nvim_buf_set_extmark(b, ANIM, r[1], r[2], { end_col = r[3], hl_group = "SepalShimmer", priority = 4200 })
+      end
+    end
+  end
+  for _, s in ipairs(shines) do -- and a glint three chars wide sweeps its status label off both ends
+    local h = t % (#s[3] + 6) - 1
+    for k = 0, #s[3] - 1 do
+      if math.abs(k - h) <= 1 then
+        vim.api.nvim_buf_set_extmark(b, ANIM, s[1], s[2] + k, { end_col = s[2] + k + 1, hl_group = "SepalShimmer", priority = 4200 })
+      end
+    end
+  end
+end
+
 -- returns whether a task it shows is running, for the inbox's spinner timer
 function M.render()
   local w = win()
@@ -233,18 +260,25 @@ function M.render()
     end
   end
   local lines, marks, spins, key = {}, {}, {}, { w, root }
+  local glow, shine, last = {}, {}, nil -- this draw's rail groups and status labels
   for i, r in ipairs(out) do
     local text, k = "", tostring(rows[i])
     for _, c in ipairs(r) do
       marks[#marks + 1] = { i - 1, #text, #text + #c[1], c[2] }
       if c.spin then spins[#spins + 1] = { i - 1, #text } end
+      if c.pulse then -- the "▎" of a live card's row; the pulse is per card, so group by task
+        if last ~= rows[i] then glow[#glow + 1], last = {}, rows[i] end
+        local g = glow[#glow]
+        g[#g + 1] = { i - 1, #text, #text + #"▎" }
+      end
+      if c.shimmer then shine[#shine + 1] = { i - 1, #text, c[1] } end -- the status label
       k = k .. "\0" .. (c.spin and "\1" .. c[1]:sub(#inbox.spin() + 1) or c[1])
       text = text .. c[1]
     end
     lines[i], key[#key + 1] = text, k
   end
   key = table.concat(key, "\n")
-  spun = spins
+  spun, glows, shines = spins, glow, shine
   if key == drawn then M.spin(); return #spins > 0 end
   drawn = key
   local b = buf()
@@ -253,6 +287,7 @@ function M.render()
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
   for _, m in ipairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, m[1], m[2], { end_col = m[3], hl_group = m[4] }) end
+  animate(b) -- the lines were all replaced, so its marks were too; nothing live: this clears them
   return #spins > 0
 end
 
@@ -264,6 +299,7 @@ function M.spin()
   vim.bo[b].modifiable = true
   for _, s in ipairs(spun) do vim.api.nvim_buf_set_text(b, s[1], s[2], s[1], s[2] + #f, { f }) end
   vim.bo[b].modifiable, vim.bo[b].modified = false, false
+  animate(b)
 end
 
 -- :Sepal panel: shows the board of root's tasks at the right, or hides it

@@ -128,8 +128,9 @@ local STATUS = {
 }
 M.STATUS = STATUS
 M.LIVE = { running = true, checking = true } -- these spin in the inbox and the panel
-local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }, 1, nil
+local SPIN, frame, timer, ticks = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }, 1, nil, 0
 function M.spin() return SPIN[frame] end
+function M.tick() return ticks end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
 local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  m model  C clean  za fold  q close"
@@ -239,7 +240,7 @@ draw = function()
   if live and not timer then
     timer = assert(vim.uv.new_timer())
     timer:start(100, 100, vim.schedule_wrap(function()
-      frame = frame % #SPIN + 1
+      frame, ticks = frame % #SPIN + 1, ticks + 1
       -- every change redraws at once, so a tick only moves the spinners; once a turn (1s) a whole
       -- redraw moves the ages — only when one actually rolled over since the last draw
       if frame == 1 and clock() ~= clocked then return render() end

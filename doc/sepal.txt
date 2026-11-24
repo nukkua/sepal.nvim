@@ -131,7 +131,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              Groups and their default links: SepalTitle (Title),
              SepalAccent (Special), SepalInfo (DiagnosticInfo), SepalDim (Comment), SepalAdded (Added),
              SepalRemoved (Removed), SepalInboxFolded (empty), SepalPanelTitle
-             (@markup.strong), SepalAgent (SepalClaude: running subagents).
+             (@markup.strong), SepalAgent (SepalClaude: running subagents),
+             SepalShimmer (SepalPanelTitle: the light over a working task in the panel).
              SepalOk (green), SepalError (red) and SepalWarn (amber) are
              fixed colors, not the theme's. A colorscheme that defines one wins over the links and sakura.
                                                               *sepal-icons*

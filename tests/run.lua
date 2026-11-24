@@ -629,7 +629,7 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   assert(not lines[1]:find("▐", 1, true) and lines[1]:match("^ %S+ sepal"), lines[1]) -- no mascot: the title at the cards' indent
   assert(lines[6]:match("^ ▎ ✔ carded%s+now$"), lines[6])
   eq(lines[7], " ▎ ✻ opus 5.5") -- the model and its provider's logo, between the name and the status
-  eq(lines[8], " ▎ LANDED  in your work tree")
+  eq(lines[8], " ▎ landed  in your work tree")
   eq(lines[9], " ▎ 1 file +1 −3")
   eq(lines[10], " ▎ Did it.")
   eq(lines[11], " ▎ · 2 decisions to read")
@@ -654,6 +654,13 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   vim.wait(350, function() return not vim.api.nvim_buf_get_lines(b, 5, 6, false)[1]:match("⠋") end)
   assert(not vim.api.nvim_buf_get_lines(b, 5, 6, false)[1]:match("⠋"), "the panel's spinner moves on its own")
   assert(vim.api.nvim_buf_get_lines(b, 5, 6, false)[1]:match("^ ▎ %S+ carded%s+now$"), "a tick rewrites only the spinner")
+  local anim = vim.api.nvim_create_namespace("sepal.panel.anim")
+  local function lit() return vim.inspect(vim.tbl_map(function(m) return { m[2], m[3] } end, vim.api.nvim_buf_get_extmarks(b, anim, 0, -1, {}))) end
+  vim.wait(1500, function() return lit() ~= "{}" end)
+  local l0 = lit()
+  assert(l0 ~= "{}", "its rail and label light up while it runs")
+  vim.wait(350, function() return lit() ~= l0 end)
+  assert(lit() ~= l0, "and the light moves")
   vim.cmd("Sepal inbox")
   local ib = vim.api.nvim_get_current_buf()
   local f0 = inbox.spin()
@@ -663,6 +670,7 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   assert(vim.api.nvim_buf_get_lines(ib, 2, 3, false)[1]:match("^%S+ running%s+now  carded"), "a tick rewrites only the spinner")
   vim.cmd("close")
   e.status = "landed"; inbox.changed(e)
+  eq(lit(), "{}") -- done: the light is off
   vim.cmd("Sepal panel") -- a toggle
   eq(vim.fn.bufwinid(b), -1)
 end)

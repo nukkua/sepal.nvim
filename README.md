@@ -202,7 +202,8 @@ agents = {
 ### Colors
 
 Everything sepal draws uses its own groups, linked to your colorscheme's: `SepalTitle` (Title),
-`SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong), and `SepalAgent` (SepalClaude, running subagents). With
+`SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong), `SepalAgent` (SepalClaude, running subagents), and
+`SepalShimmer` (SepalPanelTitle: the light running over a working task in the panel). With
 `sakura = true` (the default) the title, accent and info groups are cherry-blossom pinks, a
 lighter set on a dark background and a deeper one on a light background. The states don't follow
 the theme: `SepalOk` (✔ landed, ready) is green, `SepalError` (✘) red and `SepalWarn` (▲) amber,

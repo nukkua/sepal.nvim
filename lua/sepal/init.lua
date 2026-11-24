@@ -48,14 +48,14 @@ end
 local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = false,
   SepalWarn = false, SepalError = false, SepalDim = "Comment", SepalAdded = "Added",
   SepalRemoved = "Removed", SepalInboxFolded = false, SepalPanelTitle = "@markup.strong",
-  SepalClaude = false, SepalAgent = "SepalClaude" }
+  SepalClaude = false, SepalAgent = "SepalClaude", SepalShimmer = "SepalPanelTitle" }
 -- groups with a color of their own instead of a link, whatever the theme or sakura: { on dark, on light }.
 -- The states (✔ landed, ✘ failed, ▲ needs you) must read as green, red and amber everywhere
 local FG = { SepalClaude = { "#d97757", "#d97757" }, SepalOk = { "#7ed491", "#1e8e3e" },
   SepalError = { "#f2777a", "#d32f2f" }, SepalWarn = { "#f0c674", "#b26a00" } }
 -- sakura: { on a dark background, on a light one }
 local SAKURA = { SepalTitle = { "#ffb6c1", "#c2185b", bold = true }, SepalAccent = { "#ffb6c1", "#d81b60" },
-  SepalInfo = { "#c49aa6", "#ad1457" } }
+  SepalInfo = { "#c49aa6", "#ad1457" }, SepalShimmer = { "#fff0f5", "#880e4f", bold = true } }
 -- what sepal set each group to: a group that's empty or still sepal's is redefined, one your
 -- colorscheme (or :hi) set is left alone, so setup() after :colorscheme doesn't undo it
 local mine = {}

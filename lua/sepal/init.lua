@@ -397,6 +397,8 @@ end
 -- the task's keys, a dim line and a blank on top of it like the inbox's: virtual lines, so never sent;
 -- the provider's logo and model first, so you see who'll work on it
 local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
+local SPIN = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local BUSY = {} -- buf -> { label, frame }: task_sharpen is at work on it, a spinner after who works on it
 local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
   local kind = vim.b[buf].sepal_kind
@@ -406,6 +408,8 @@ local function keys(buf)
   vim.list_extend(help, { "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
   local items = vim.tbl_map(function(s) return { { s, "SepalDim" } } end, help)
   local w = vim.b[buf].sepal_who
+  local b = BUSY[buf]
+  if b then table.insert(items, 1, { { SPIN[b[2]] .. " ", "SepalAccent" }, { b[1], "SepalTitle" } }) end
   if w then table.insert(items, 1, { { w[1], w[2] }, { " " .. w[3], "SepalDim" } }) end
   -- virt_lines don't wrap: the items go on as many lines as the narrowest window needs
   local width = math.huge
@@ -429,6 +433,23 @@ local function keys(buf)
     -- lines above line 1 only show with topfill
     vim.api.nvim_win_call(win, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = #lines }) end end)
   end
+end
+
+-- a spinner and label in buf's keys until the returned stop() (or buf is gone)
+local function busy(buf, label)
+  local b, timer = { label, 1 }, vim.uv.new_timer()
+  BUSY[buf] = b
+  keys(buf)
+  local function stop()
+    if BUSY[buf] == b then BUSY[buf] = nil; keys(buf) end
+    if not timer:is_closing() then timer:stop(); timer:close() end
+  end
+  timer:start(100, 100, vim.schedule_wrap(function()
+    if BUSY[buf] ~= b or not vim.api.nvim_buf_is_valid(buf) then return stop() end
+    b[2] = b[2] % #SPIN + 1
+    keys(buf)
+  end))
+  return stop
 end
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
@@ -549,7 +570,9 @@ function M.task(range, lines, kind, agent)
       text = SHARPEN .. table.concat(filled, "\n")
     end
     vim.cmd.stopinsert()
-    local tick, done = vim.b[buf].changedtick, progress(kind == "implement" and "sharpening the task" or "writing the task")
+    local label = kind == "implement" and "sharpening the task" or "writing the task"
+    local tick, finish, stop = vim.b[buf].changedtick, progress(label), busy(buf, label .. "…")
+    local function done(final) stop(); finish(final) end
     local ok, j = pcall(vim.system, C.task_sharpen, { stdin = text, text = true }, vim.schedule_wrap(function(r)
       job = nil
       if not vim.api.nvim_buf_is_valid(buf) then return done() end

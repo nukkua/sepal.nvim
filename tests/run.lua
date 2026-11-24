@@ -977,6 +977,22 @@ test("with task_sharpen a short feat keeps its fields; a large feat starts as th
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
+test("<c-c><c-s> shows a spinner in the task's keys while it sharpens", function()
+  local function top(b)
+    local m = vim.api.nvim_buf_get_extmarks(b, -1, 0, 0, { details = true, type = "virt_lines" })[1]
+    return table.concat(vim.tbl_map(function(c) return c[1] end, m[4].virt_lines[1]))
+  end
+  sepal.task(nil, { "Goal: retry flaky uploads", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.lua" })
+  local b = task_buf()
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
+  assert(top(b):find("sharpening the task…", 1, true), top(b))
+  local first = top(b)
+  assert(vim.wait(1000, function() return top(b) ~= first end, 20), "the spinner doesn't turn")
+  assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "not sharpened")
+  assert(not top(b):find("sharpening", 1, true), top(b))
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+end)
+
 test("<c-c><c-s> sharpens a short feat's filled-in fields; a large feat's goes as written", function()
   sepal.task(nil, { "Goal: retry flaky uploads", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.lua" })
   local b = task_buf()

@@ -117,7 +117,8 @@ local function notes(e)
       "2. [model] short title", "   ...", "", "Assumptions:\n- <one per line>\n(or \"Assumptions: none\")" }, "\n")
   end
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
-    "- You're in a git worktree: edit here, decide instead of asking. Don't commit, push or switch branches." }
+    "- You're in a git worktree: edit here, decide instead of asking. Don't commit, push or switch branches.",
+    "- Your shell already starts in the worktree: run commands as they are, never `cd` to its path." }
   if e.check then n[#n + 1] = ("- Done when `%s` passes: run exactly that, no other command, and fix until it passes."):format(e.check) end
   n[#n + 1] = "- End with only what the user must know, no summary of the work:"
   n[#n + 1] = "Not done:\n- <left undone or unchecked; drop this section if nothing>"
@@ -305,8 +306,11 @@ end
 
 -- Claude Code reports back through hooks: each one appends its input (a JSON line) to $SEPAL_EVENTS
 local HOOK = { { hooks = { { type = "command", command = [[{ tr -d '\n'; echo; } >> "$SEPAL_EVENTS"]] } } } }
-local SETTINGS = vim.json.encode({ hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
-  Notification = HOOK, Stop = HOOK, SubagentStart = HOOK, SubagentStop = HOOK } })
+-- allow: rules that would otherwise stop the turn for approval (read-only git, the check behind a `cd`)
+local function settings(allow)
+  return vim.json.encode({ permissions = { allow = allow }, hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
+    Notification = HOOK, Stop = HOOK, SubagentStart = HOOK, SubagentStop = HOOK } })
+end
 
 -- Devin reads hooks and permissions from its config file only: yours plus sepal's hooks and allow rules, at path
 -- shortcut: a config.json with comments (JSONC) doesn't decode and is replaced, not merged; strip them if that bites
@@ -400,7 +404,8 @@ agent = function(e, prompt, wt)
   local asked -- the --model it runs with: Devin's SessionStart names a fusion's lead model only, so it keeps that
   for i, a in ipairs(argv) do if a == "--model" and argv[i + 1] then e.model, asked = argv[i + 1], dv end end -- till SessionStart says
   if e.session then vim.list_extend(argv, { dv and "-r" or "--resume", e.session }) end
-  vim.list_extend(argv, dv and { "--", prompt } or { "--settings", SETTINGS, prompt })
+  vim.list_extend(argv, dv and { "--", prompt } or { "--settings", settings(vim.list_extend({ "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)" },
+    e.check and wt and { ("Bash(cd %s && %s)"):format(wt, e.check) } or {})), prompt })
   local b = vim.api.nvim_create_buf(false, true)
   local started, over, timer = false, false, vim.uv.new_timer()
   local function close()

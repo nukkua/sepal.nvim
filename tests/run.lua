@@ -26,7 +26,7 @@ n=$#; i=0; logged=; skip=
 for a; do
   i=$((i+1))
   if [ $i -eq $n ]; then prompt=$a
-  elif [ -n "$skip" ]; then skip=
+  elif [ -n "$skip" ]; then skip=; printf '%s' "$a" > "$SEPAL_T/settings"
   elif [ "$a" = --settings ]; then skip=1
   else logged="$logged${logged:+ }$a"; fi
 done
@@ -66,6 +66,7 @@ sepal.setup({ cmd = { "sh", "-c", fake, "sh" }, worktrees = vim.fs.joinpath(T, "
 
 local fails, n = 0, 0
 local function test(name, fn)
+  if vim.env.SEPAL_TEST and not name:find(vim.env.SEPAL_TEST, 1, true) then return end -- SEPAL_TEST=<part of a name>: just those
   n = n + 1
   local ok, err = pcall(fn)
   if not ok then
@@ -339,6 +340,9 @@ test("sepal runs the check itself; when it fails the agent gets the output and t
   eq(got[#got], "landed: fix it · 1 file +1 −3 · grep -q fixed a.txt ✔\n· kept the old API\n· no new deps")
   local a = args()
   eq(a[1], "--permission-mode acceptEdits --allowedTools Bash(grep -q fixed a.txt)")
+  local allow = vim.json.decode(read(T .. "/settings")).permissions.allow
+  eq({ allow[1], allow[#allow]:match("^Bash%(cd .+ && grep %-q fixed a%.txt%)$") ~= nil }, { "Bash(git status:*)", true })
+  assert(prompts():find("never `cd` to its path", 1, true), prompts())
   eq(vim.endswith(a[2], "--resume s1"), true, a[2])
   assert(prompts():find("`grep -q fixed a.txt` failed (exit 1)", 1, true), "the agent never got the failure")
   eq(file("a.txt"), "fixed\n")

@@ -526,7 +526,7 @@ test("the inbox lists the tasks and survives a restart", function()
   run({ "Goal: listed" })
   vim.cmd("Sepal inbox")
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  assert(lines[3]:match("^❀ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
+  assert(lines[3]:match("^✓ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
   eq(vim.list_slice(lines, 4), { "    · kept the old API", "    · no new deps", "      a.txt +1 −3" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
   eq(inbox.current().title, "listed")
@@ -615,7 +615,7 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   assert(lines[2]:match("1 landed"), lines[2])
   assert(not lines[1]:find("▐", 1, true) and lines[1]:match("^ %S+ sepal"), lines[1]) -- no mascot: the title at the cards' indent
-  assert(lines[6]:match("^ ▎ ❀ carded%s+now$"), lines[6])
+  assert(lines[6]:match("^ ▎ ✓ carded%s+now$"), lines[6])
   eq(lines[7], " ▎ ✻ opus 5.5") -- the model and its provider's logo, between the name and the status
   eq(lines[8], " ▎ LANDED  in your work tree")
   eq(lines[9], " ▎ 1 file +1 −3")
@@ -1163,7 +1163,7 @@ test("status: what's running, ready and needs you, for the statusline; User Sepa
   vim.api.nvim_del_autocmd(au)
   panel.render = prender
   eq(seen["~1"], true, vim.inspect(seen))
-  eq(sepal.status(), "✿1")
+  eq(sepal.status(), "●1")
   print(("  measured: %d renders, %d SepalChanged"):format(renders, events))
   assert(events < renders and events <= 4, events .. " events for " .. renders .. " renders")
   newest().status = "needs"
@@ -1243,7 +1243,7 @@ test("colors: sakura pinks or your theme's links, the highlights option over bot
   eq(hl("SepalTitle").fg, 0xabcdef)
   vim.o.background = "dark"
   sepal.setup({ sakura = true, highlights = {}, icons = {} })
-  eq(sepal.icon("landed", "✓"), "❀")
+  eq(sepal.icon("landed", "✓"), "✓")
 end)
 
 test("c continues a task nvim quit on: what its worktree had is kept, the agent resumes its chat", function()
@@ -1367,6 +1367,16 @@ test("a plan is read from the end of an orchestrate's reply: each task, its mode
   eq(vim.split(agent.subtask(e, 2), "\n")[3], "Done when: make test") -- the orchestrate's check when it has none
 end)
 
+test("the orchestrate demo's self-check passes (tests/demo.lua, when it is there)", function()
+  local demo = vim.fs.joinpath(vim.opt.rtp:get()[1], "tests/demo.lua") -- the repo root; cwd is a temp dir by now
+  if not vim.uv.fs_stat(demo) then
+    print("skip: tests/demo.lua not found")
+    return
+  end
+  local r = vim.system({ vim.v.progpath, "--headless", "-u", demo }, { env = { SEPAL_DEMO_CHECK = "1" }, text = true }):wait(60000)
+  assert(r.code == 0, ("demo self-check exited %d\nstdout:\n%s\nstderr:\n%s"):format(r.code, r.stdout or "", r.stderr or ""))
+end)
+
 test("o orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
   clean(); reset()
   local cmd = sepal.config().cmd
@@ -1392,7 +1402,7 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
   eq(args(), { "--permission-mode plan --allowedTools Bash(true)" }) -- read-only, in your repo
   eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work)
   assert(prompts():find("only from these: opus, sonnet, haiku (or default", 1, true), prompts())
-  eq(sepal.status(), "✿1") -- waits for you, like a task ready to land
+  eq(sepal.status(), "●1") -- waits for you, like a task ready to land
   vim.cmd("Sepal panel")
   local pl = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
   assert(vim.tbl_contains(pl, " ▎ 1. [opus] Shout two") and vim.tbl_contains(pl, " ▎ 2. [haiku] Add b"), vim.inspect(pl))

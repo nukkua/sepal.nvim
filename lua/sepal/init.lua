@@ -19,7 +19,7 @@ local C = {
   max_running = 2,     -- tasks running at once, the rest wait in a queue; nil: no limit
   models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
-  sakura = true,       -- blossom pinks for sepal's accents and ❀ for landed tasks; false: only your colorscheme's colors
+  sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
 }
@@ -72,11 +72,10 @@ highlight()
 vim.api.nvim_create_autocmd("ColorScheme", { group = vim.api.nvim_create_augroup("sepal.hl", {}), callback = function() highlight() end })
 vim.api.nvim_create_autocmd("OptionSet", { group = "sepal.hl", pattern = "background", callback = function() highlight() end })
 
--- a status's icon in the inbox: the icons option, then sakura's blossoms, then def
-local BLOSSOM = { landed = "❀", ready = "✿" }
-function M.icon(status, def) return (C.icons or {})[status] or (C.sakura and BLOSSOM[status]) or def end
+-- a status's icon in the inbox: the icons option, else def
+function M.icon(status, def) return (C.icons or {})[status] or def end
 
--- for your statusline: "~2 ✿1 ▲1" (running, ready to land, needs you) for the repo you're in, "" when
+-- for your statusline: "~2 ●1 ▲1" (running, ready to land, needs you) for the repo you're in, "" when
 -- none. Cheap, it reads what's loaded; User SepalChanged fires (and the statusline redraws) when it moves
 local loading = {} -- cwd -> true: its inbox is being loaded, once
 function M.status()

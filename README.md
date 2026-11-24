@@ -150,6 +150,9 @@ The plan waits in the inbox, unfolded:
   themselves, `<c-c><c-w>` on `L`).
 - `r` asks for a different plan, `<CR>` reads the agent's whole reply.
 
+To try it by hand, run `nvim -u tests/demo.lua`: a throwaway repo with a fake agent that plans two
+tasks. `SEPAL_DEMO_REAL=1 nvim -u tests/demo.lua` uses the real Claude Code instead.
+
 ## Setup
 
 `setup()` is optional. These are the defaults:
@@ -168,7 +171,7 @@ require("sepal").setup({
   max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
-  sakura = true,       -- blossom pinks and ❀ for landed tasks; false: only your colorscheme's colors
+  sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
 })
@@ -208,7 +211,7 @@ and the `highlights` option wins over everything.
 ### Statusline
 
 `require("sepal").status()` shows the tasks of the repo you're in: running (`~`), ready to land
-(`●`, `✿` with sakura) and needing you (`▲`), e.g. `~2 ✿1 ▲1`, or nothing when there are none. A
+(`●`) and needing you (`▲`), e.g. `~2 ●1 ▲1`, or nothing when there are none. A
 missed notification still shows there. sepal fires `User SepalChanged` and redraws the statusline
 when the counts move.
 Running includes queued and checking tasks; ready includes planned orchestrates; needing you

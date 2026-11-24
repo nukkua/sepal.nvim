@@ -231,7 +231,7 @@ end
 local function facts(e)
   local f = {}
   if e.stat and e.stat.files > 0 then f[#f + 1] = ("%s +%d −%d"):format(plural(e.stat.files, "file"), e.stat.add, e.stat.del) end
-  if e.check and e.checked ~= nil then f[#f + 1] = e.check .. (e.checked and " ✓" or " ✗") end
+  if e.check and e.checked ~= nil then f[#f + 1] = e.check .. (e.checked and " ✔" or " ✘") end
   return #f > 0 and " · " .. table.concat(f, " · ") or ""
 end
 local function with_assumptions(msg, e)
@@ -256,10 +256,10 @@ local function finish(e, wt, status, extra)
   inbox.changed(e)
   if j and j.done then j.done(true) end
   if status == "stopped" then notify("stopped: " .. e.title)
-  elseif status == "error" then notify("✗ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
+  elseif status == "error" then notify("✘ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
   elseif status == "failed" then
     local tries = (e.attempts or 0) + 1
-    notify(("✗ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
+    notify(("✘ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   elseif status == "answered" then notify("● " .. e.title .. ": " .. tostring(e.summary) .. " · <CR> in :Sepal inbox reads it")
   elseif status == "planned" then
@@ -848,7 +848,7 @@ function M.land(e, auto)
   if #conflicts > 0 then
     return notify(msg .. "\nconflict markers in " .. table.concat(conflicts, ", "), WARN)
   end
-  notify(msg, vim.log.levels.INFO, { icon = { require("sepal").icon("landed", "✓"), "SepalOk" } })
+  notify(msg, vim.log.levels.INFO, { icon = { require("sepal").icon("landed", "✔"), "SepalOk" } })
 end
 
 -- take a landed task back out of your work tree (again a merge: your edits since stay)

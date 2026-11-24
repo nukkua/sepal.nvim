@@ -47,7 +47,7 @@ function M.check()
   end
   h.ok(C.sakura and "sakura: blossom pinks for sepal's accents" or "sakura off: your colorscheme's colors")
   if type(C.highlights) ~= "table" then h.error("highlights must be a table: { SepalOk = { fg = \"#a3be8c\" } }") end
-  if type(C.icons) ~= "table" then h.error("icons must be a table: { landed = \"✓\" }") end
+  if type(C.icons) ~= "table" then h.error("icons must be a table: { landed = \"✔\" }") end
   h.info("Claude Code may ask to trust a task's new worktree: sepal warns, answer it in :Sepal open")
   if pcall(require, "fidget") then h.ok("fidget.nvim found: progress spinners") else h.info("fidget.nvim not found: plain notifications") end
   if pcall(require, "fff") then h.ok("fff.nvim found: <c-c><c-f> in a task picks files with it") else h.info("fff.nvim not found: <c-c><c-f> in a task prompts for a path") end

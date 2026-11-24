@@ -21,7 +21,7 @@ local C = {
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
-  icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
+  icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
 }
 local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
 C.models = vim.tbl_extend("force", {}, MODELS)
@@ -44,15 +44,17 @@ end
 
 -- sepal's colors are its own groups, linked to your colorscheme's by default: a colorscheme (or
 -- :hi) that sets a Sepal* group wins over the links and over sakura; the highlights option wins over all
-local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = "DiagnosticOk",
-  SepalWarn = "DiagnosticWarn", SepalError = "DiagnosticError", SepalDim = "Comment", SepalAdded = "Added",
+local LINKS = { SepalTitle = "Title", SepalAccent = "Special", SepalInfo = "DiagnosticInfo", SepalOk = false,
+  SepalWarn = false, SepalError = false, SepalDim = "Comment", SepalAdded = "Added",
   SepalRemoved = "Removed", SepalInboxFolded = false, SepalPanelTitle = "@markup.strong",
   SepalClaude = false, SepalAgent = "SepalClaude" }
--- groups with a color of their own instead of a link
-local FG = { SepalClaude = "#d97757" }
--- sakura: { on a dark background, on a light one }. Warnings and errors keep your theme's: they must read as such
+-- groups with a color of their own instead of a link, whatever the theme or sakura: { on dark, on light }.
+-- The states (✔ landed, ✘ failed, ▲ needs you) must read as green, red and amber everywhere
+local FG = { SepalClaude = { "#d97757", "#d97757" }, SepalOk = { "#7ed491", "#1e8e3e" },
+  SepalError = { "#f2777a", "#d32f2f" }, SepalWarn = { "#f0c674", "#b26a00" } }
+-- sakura: { on a dark background, on a light one }
 local SAKURA = { SepalTitle = { "#ffb6c1", "#c2185b", bold = true }, SepalAccent = { "#ffb6c1", "#d81b60" },
-  SepalInfo = { "#c49aa6", "#ad1457" }, SepalOk = { "#ffb6c1", "#c2477a" } }
+  SepalInfo = { "#c49aa6", "#ad1457" } }
 -- what sepal set each group to: a group that's empty or still sepal's is redefined, one your
 -- colorscheme (or :hi) set is left alone, so setup() after :colorscheme doesn't undo it
 local mine = {}
@@ -60,8 +62,8 @@ highlight = function()
   for name, link in pairs(LINKS) do
     local cur = vim.api.nvim_get_hl(0, { name = name })
     if vim.tbl_isempty(cur) or vim.deep_equal(cur, mine[name]) then
-      local s = C.sakura and SAKURA[name]
-      vim.api.nvim_set_hl(0, name, s and { fg = s[vim.o.background == "light" and 2 or 1], bold = s.bold } or FG[name] and { fg = FG[name] } or { link = link or nil })
+      local s = C.sakura and SAKURA[name] or FG[name]
+      vim.api.nvim_set_hl(0, name, s and { fg = s[vim.o.background == "light" and 2 or 1], bold = s.bold } or { link = link or nil })
       mine[name] = vim.api.nvim_get_hl(0, { name = name })
     end
   end
@@ -106,7 +108,7 @@ end
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
 -- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
-local ICON = { [vim.log.levels.ERROR] = { "✗", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
+local ICON = { [vim.log.levels.ERROR] = { "✘", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
 -- while you're in the agent (or a chat) they wait, shown once you leave it
 local held = {}
 function M.notify(msg, lvl, o)
@@ -356,7 +358,7 @@ local function check_hint(buf)
     if v then
       local found = vim.b[buf].sepal_found
       local chunks = v == "" and { { "  a command that proves it's done; empty: not checked", "SepalDim" } }
-        or { { "  " }, { "✓ green", "SepalAdded" }, { " lands  ", "SepalDim" }, { "✗ red", "SepalRemoved" },
+        or { { "  " }, { "✔ green", "SepalOk" }, { " lands  ", "SepalDim" }, { "✘ red", "SepalError" },
           { " goes back to the agent" .. (found and v == found[1] and "  · found in " .. found[2] .. ", dd: no check" or ""), "SepalDim" } }
       return vim.api.nvim_buf_set_extmark(buf, CHECK_NS, i - 1, 0, { virt_text = chunks, virt_text_pos = "eol" })
     end

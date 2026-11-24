@@ -63,7 +63,7 @@ anything. Leave it empty or delete it to use the `check` option (unset by defaul
 A new task starts with your project's test command already there, found in this order: a
 `Tests:` line with a command in backticks in `AGENTS.md` or `CLAUDE.md`, a Makefile `test` target
 (`make test`), a `test` script in `package.json` (`npm test`), `Cargo.toml` (`cargo test`), `go.mod`
-(`go test ./...`), pytest (`pytest`). Its line says so: `✓ green lands  ✗ red goes back to the agent
+(`go test ./...`), pytest (`pytest`). Its line says so: `✔ green lands  ✘ red goes back to the agent
 · found in AGENTS.md, dd: no check`. Delete the line to skip the detected check (unless you've set
 `check`). `<c-c><c-f>` adds more files. Pytest is detected from `pytest.ini` or a `[tool.pytest…]`
 section in `pyproject.toml`.
@@ -74,7 +74,7 @@ Keep coding. You can send more tasks, and they run in parallel, each in its own 
 **4. It lands.** When the check passes:
 
 ```
-✓ landed: Finish queued tasks… · 2 files +31 −4 · make test ✓
+✔ landed: Finish queued tasks… · 2 files +31 −4 · make test ✔
 · shutdown() blocks until the queue is empty
 · tasks submitted after shutdown() throw std::runtime_error
 ```
@@ -93,9 +93,9 @@ buffers for affected files before landing or undoing.
 ```
 <CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close
 
-✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
+✔ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✔
     · shutdown() blocks until the queue is empty
-✗ check failed 5m   flaky test             make test ✗
+✘ check failed 5m   flaky test             make test ✘
     │ FAIL test_timeout (expected 100ms, got 140ms)
 ▲ needs you    9m   rename Config          4 files +40 −40
     it overlaps your edits in src/config.rs: L lands it with conflict markers
@@ -173,7 +173,7 @@ require("sepal").setup({
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
-  icons = {},          -- inbox status -> icon: { landed = "✓", running = "~" }
+  icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
 })
 ```
 
@@ -201,11 +201,11 @@ agents = {
 ### Colors
 
 Everything sepal draws uses its own groups, linked to your colorscheme's: `SepalTitle` (Title),
-`SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalOk` (DiagnosticOk), `SepalWarn`,
-`SepalError`, `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong), and `SepalAgent` (SepalClaude, running subagents). With
-`sakura = true` (the default) the title, accent, info and ok groups are cherry-blossom pinks, a
-lighter set on a dark background and a deeper one on a light background. Warnings and errors
-always use your theme's colors. A colorscheme that defines a `Sepal*` group wins over both,
+`SepalAccent` (Special), `SepalInfo` (DiagnosticInfo), `SepalDim` (Comment), `SepalAdded`, `SepalRemoved`, `SepalInboxFolded`, `SepalPanelTitle` (@markup.strong), and `SepalAgent` (SepalClaude, running subagents). With
+`sakura = true` (the default) the title, accent and info groups are cherry-blossom pinks, a
+lighter set on a dark background and a deeper one on a light background. The states don't follow
+the theme: `SepalOk` (✔ landed, ready) is green, `SepalError` (✘) red and `SepalWarn` (▲) amber,
+lighter on a dark background. A colorscheme that defines a `Sepal*` group wins over both,
 and the `highlights` option wins over everything.
 
 ### Statusline

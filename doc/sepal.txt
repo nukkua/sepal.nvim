@@ -25,7 +25,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
    orchestrate (a plan), `i` implement or `b` btw (a question), then fill in
    the task. "Done when:" is a shell command to check, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
-4. "✓ landed: …" means it passed the check and is in your files, unstaged.
+4. "✔ landed: …" means it passed the check and is in your files, unstaged.
    The "·" lines under it are the decisions the agent made alone: read them.
 5. Review with `git diff`, gitsigns, fugitive. |:Sepal-undo| takes it back.
 6. A warning means it needs you: <leader>ai shows why; `r` replies to the
@@ -115,22 +115,20 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              Files:) and prints the finished task. <c-c><c-s> runs it. For
              Claude Code, pass -p and --no-session-persistence.
                                                              *sepal-sakura*
-`sakura`     true: cherry-blossom pinks for SepalTitle, SepalAccent,
-             SepalInfo and SepalOk (lighter on a dark 'background', deeper
+`sakura`     true: cherry-blossom pinks for SepalTitle, SepalAccent
+             and SepalInfo (lighter on a dark 'background', deeper
              on a light one). false: those groups link to your colorscheme's.
                                                          *sepal-highlights*
 `highlights` group -> |nvim_set_hl()| spec, applied over everything:
              `{ SepalOk = { fg = "#a3be8c" }, SepalDim = { link = "NonText" } }`
              Groups and their default links: SepalTitle (Title),
-             SepalAccent (Special), SepalInfo (DiagnosticInfo), SepalOk
-             (DiagnosticOk), SepalWarn (DiagnosticWarn), SepalError
-             (DiagnosticError), SepalDim (Comment), SepalAdded (Added),
+             SepalAccent (Special), SepalInfo (DiagnosticInfo), SepalDim (Comment), SepalAdded (Added),
              SepalRemoved (Removed), SepalInboxFolded (empty), SepalPanelTitle
              (@markup.strong), SepalAgent (SepalClaude: running subagents).
-             A colorscheme
-             that defines one wins over the links and sakura.
+             SepalOk (green), SepalError (red) and SepalWarn (amber) are
+             fixed colors, not the theme's. A colorscheme that defines one wins over the links and sakura.
                                                               *sepal-icons*
-`icons`      inbox status -> icon: `{ landed = "✓", running = "~" }`.
+`icons`      inbox status -> icon: `{ landed = "✔", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
              failed, error, needs, stopped, interrupted, undone, answered,
              planned, split.
@@ -225,7 +223,10 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           that task's text, to add to and send; an
                           answered btw's opens an implement draft: its
                           question and answer as context (Asked:,
-                          Answer:), you write the Goal: and send it
+                          Answer:), you write the Goal: and send it.
+                          Several copies open their drafts one after
+                          another, each once the one before is sent or
+                          discarded
                     C     drop the tasks that are over (:Sepal clean)
                     j/k   next/previous task
                     za    expand/collapse a task's fold (zM/zR: all)

@@ -324,7 +324,7 @@ test("sepal runs the check itself; when it fails the agent gets the output and t
   clean(); reset()
   vim.env.SEPAL_EDIT, vim.env.SEPAL_FIX = [[echo broken > a.txt]], [[echo fixed > a.txt]]
   local got = run({ "Goal: fix it", "Done when: grep -q fixed a.txt" })
-  eq(got[#got], "landed: fix it · 1 file +1 −3 · grep -q fixed a.txt ✓\n· kept the old API\n· no new deps")
+  eq(got[#got], "landed: fix it · 1 file +1 −3 · grep -q fixed a.txt ✔\n· kept the old API\n· no new deps")
   local a = args()
   eq(a[1], "--permission-mode acceptEdits --allowedTools Bash(grep -q fixed a.txt)")
   eq(vim.endswith(a[2], "--resume s1"), true, a[2])
@@ -336,7 +336,7 @@ test("a task whose check keeps failing doesn't land", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo broken > a.txt]]
   local got = notified(function() send({ "Goal: never", "Done when: echo nope; exit 1" }); idle() end)
-  eq(got[#got], { "✗ never: `echo nope; exit 1` still fails after 2 tries · :Sepal inbox", vim.log.levels.WARN })
+  eq(got[#got], { "✘ never: `echo nope; exit 1` still fails after 2 tries · :Sepal inbox", vim.log.levels.WARN })
   eq(file("a.txt"), "one\ntwo\nthree\n")
   local e = newest()
   eq({ e.status, e.checked, vim.trim(e.check_out) }, { "failed", false, "nope" })
@@ -428,10 +428,10 @@ test("no changes, an agent that quits, one that never started, and one that asks
   eq(run({ "Goal: nothing" }), { "working on it: nothing · :Sepal open watches", "no changes: nothing: Did it." })
   vim.env.SEPAL_FAIL = "quit"
   local got = notified(function() send({ "Goal: quits" }); idle() end)
-  eq(got[2], { "✗ quits: the agent quit before it was done (exit 1) · :Sepal inbox", vim.log.levels.ERROR })
+  eq(got[2], { "✘ quits: the agent quit before it was done (exit 1) · :Sepal inbox", vim.log.levels.ERROR })
   vim.env.SEPAL_FAIL = "start"
   got = notified(function() send({ "Goal: no start" }); idle() end)
-  eq(got[2], { "✗ no start: the agent didn't start: boom · :Sepal inbox", vim.log.levels.ERROR })
+  eq(got[2], { "✘ no start: the agent didn't start: boom · :Sepal inbox", vim.log.levels.ERROR })
   vim.env.SEPAL_FAIL, vim.env.SEPAL_ASK = nil, "1"
   got = notified(function() send({ "Goal: asks" }); idle() end)
   eq(got[2], { "▲ asks: Claude needs your permission to use Bash · :Sepal open", vim.log.levels.WARN })
@@ -526,7 +526,7 @@ test("the inbox lists the tasks and survives a restart", function()
   run({ "Goal: listed" })
   vim.cmd("Sepal inbox")
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  assert(lines[3]:match("^✓ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
+  assert(lines[3]:match("^✔ landed%s+now%s+listed%s+1 file %+1 −3$"), lines[3])
   eq(vim.list_slice(lines, 4), { "    · kept the old API", "    · no new deps", "      a.txt +1 −3" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
   eq(inbox.current().title, "listed")
@@ -615,7 +615,7 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   assert(lines[2]:match("1 landed"), lines[2])
   assert(not lines[1]:find("▐", 1, true) and lines[1]:match("^ %S+ sepal"), lines[1]) -- no mascot: the title at the cards' indent
-  assert(lines[6]:match("^ ▎ ✓ carded%s+now$"), lines[6])
+  assert(lines[6]:match("^ ▎ ✔ carded%s+now$"), lines[6])
   eq(lines[7], " ▎ ✻ opus 5.5") -- the model and its provider's logo, between the name and the status
   eq(lines[8], " ▎ LANDED  in your work tree")
   eq(lines[9], " ▎ 1 file +1 −3")
@@ -1143,7 +1143,7 @@ test("a new task's Done when: is the project's test command, found and said so; 
   eq(vim.api.nvim_buf_get_lines(b, 5, 6, false), { "Done when: grep -q one a.txt" })
   local hint = vim.api.nvim_buf_get_extmarks(b, vim.api.nvim_create_namespace("sepal.check"), 0, -1, { details = true })[1]
   local text = table.concat(vim.tbl_map(function(c) return c[1] end, hint[4].virt_text))
-  eq({ hint[2], text }, { 5, "  ✓ green lands  ✗ red goes back to the agent  · found in AGENTS.md, dd: no check" })
+  eq({ hint[2], text }, { 5, "  ✔ green lands  ✘ red goes back to the agent  · found in AGENTS.md, dd: no check" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   os.remove(vim.fs.joinpath(work, "AGENTS.md"))
   put("Makefile", "all:\n\ttrue\ntest:\n\ttrue\n")
@@ -1242,14 +1242,16 @@ end)
 test("colors: sakura pinks or your theme's links, the highlights option over both; icons", function()
   local function hl(n) return vim.api.nvim_get_hl(0, { name = n }) end
   vim.o.background = "dark"
-  eq(hl("SepalOk").fg, 0xffb6c1)
-  eq(hl("SepalWarn").link, "DiagnosticWarn") -- warnings keep the theme's, sakura or not
+  eq(hl("SepalTitle").fg, 0xffb6c1)
+  eq({ hl("SepalOk").fg, hl("SepalError").fg }, { 0x7ed491, 0xf2777a }) -- states: green and red, whatever the theme
   vim.o.background = "light"
-  eq(hl("SepalOk").fg, 0xc2477a)
+  eq(hl("SepalTitle").fg, 0xc2185b)
+  eq(hl("SepalOk").fg, 0x1e8e3e)
   sepal.setup({ sakura = false, highlights = { SepalDim = { fg = "#123456" } }, icons = { running = "~" } })
-  eq(hl("SepalOk").link, "DiagnosticOk")
+  eq(hl("SepalTitle").link, "Title")
+  eq({ hl("SepalOk").fg, hl("SepalWarn").fg }, { 0x1e8e3e, 0xb26a00 })
   eq(hl("SepalDim").fg, 0x123456)
-  eq({ sepal.icon("running", "⋯"), sepal.icon("landed", "✓") }, { "~", "✓" })
+  eq({ sepal.icon("running", "⋯"), sepal.icon("landed", "✔") }, { "~", "✔" })
   vim.api.nvim_set_hl(0, "SepalTitle", { fg = "#abcdef" }) -- as a colorscheme would
   vim.api.nvim_exec_autocmds("ColorScheme", {})
   sepal.setup({ sakura = false }) -- a setup() after the colorscheme doesn't undo it
@@ -1257,7 +1259,7 @@ test("colors: sakura pinks or your theme's links, the highlights option over bot
   eq(hl("SepalTitle").fg, 0xabcdef)
   vim.o.background = "dark"
   sepal.setup({ sakura = true, highlights = {}, icons = {} })
-  eq(sepal.icon("landed", "✓"), "✓")
+  eq(sepal.icon("landed", "✔"), "✔")
 end)
 
 test("c continues a task nvim quit on: what its worktree had is kept, the agent resumes its chat", function()
@@ -1340,22 +1342,31 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   agent.show(e)
   eq({ vim.bo.filetype, vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] }, { "markdown", "Did it." })
   vim.cmd("tabclose")
-  -- yyp + :w: the answer becomes the context of an implement draft
+  -- yyp + :w: the answer becomes the context of an implement draft; copying a task too opens its
+  -- draft once that one is discarded
   vim.cmd("Sepal inbox")
   local ib = vim.api.nvim_get_current_buf()
-  for r = 1, vim.api.nvim_buf_line_count(ib) do
-    vim.api.nvim_win_set_cursor(0, { r, 0 })
-    if (inbox.current() or {}).id == e.id then break end
+  local function copy(id)
+    for r = 1, vim.api.nvim_buf_line_count(ib) do
+      vim.api.nvim_win_set_cursor(0, { r, 0 })
+      if (inbox.current() or {}).id == id then break end
+    end
+    eq(inbox.current().id, id)
+    vim.cmd("normal yyp")
   end
-  eq(inbox.current().id, e.id)
-  vim.cmd("normal yyp")
-  vim.cmd("write")
+  local hog = vim.iter(inbox.list(work)):find(function(x) return x.task == "Goal: hogs the slot" end)
+  copy(e.id)
+  copy(hog.id)
+  eq(msgs(notified(function() vim.cmd("write") end))[1], "2 copies: each opens its draft once the one before is sent or discarded")
   assert(vim.wait(1000, function() return task_buf() ~= nil end, 10), "no draft opened")
   local d = task_buf()
   eq(vim.b[d].sepal_kind, "implement")
   local l = vim.api.nvim_buf_get_lines(d, 0, -1, false)
   eq({ l[1], l[8], l[9], l[11], l[12], l[#l] }, { "Goal: ", "Asked:", "how does landing work?", "Answer:", "Did it.", "Files:" })
   vim.api.nvim_buf_delete(d, { force = true })
+  assert(vim.wait(1000, function() return task_buf() ~= nil end, 10), "the second copy's draft never opened")
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), { "Goal: hogs the slot" })
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
   clean(); reset()
   sepal.setup({ models = { implement = "opus" } })
   eq(sepal.config().models.btw, "sonnet") -- setting one keeps the other's default
@@ -1572,7 +1583,7 @@ while :; do sleep 1; done
   local c = vim.json.decode(read(T .. "/devin.json"))
   eq({ c.permissions.allow, c.hooks.Stop ~= nil, c.hooks.PermissionRequest ~= nil }, { { "Exec(true)" }, true, true })
   assert(vim.tbl_contains(got, "▲ by devin: asks to run exec rm -rf x · :Sepal open"), vim.inspect(got))
-  assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3 · true ✓\n· used devin"), vim.inspect(got))
+  assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3 · true ✔\n· used devin"), vim.inspect(got))
   -- its chat: devin's "resume where?" prompt (the worktree's gone) is answered: here, this once
   vim.cmd("Sepal open")
   vim.wait(4000, function() return vim.uv.fs_stat(T .. "/resume_answer") ~= nil end)

@@ -112,11 +112,11 @@ local STATUS = {
   queued = { "…", "queued", "SepalDim" },
   running = { "⋯", "running", "SepalAccent" },
   checking = { "⋯", "checking", "SepalAccent" },
-  landed = { "✓", "landed", "SepalOk" },
+  landed = { "✔", "landed", "SepalOk" },
   ready = { "●", "ready", "SepalOk" },
   nochange = { "○", "no changes", "SepalDim" },
-  failed = { "✗", "check failed", "SepalError" },
-  error = { "✗", "failed", "SepalError" },
+  failed = { "✘", "check failed", "SepalError" },
+  error = { "✘", "failed", "SepalError" },
   needs = { "▲", "needs you", "SepalWarn" },
   stopped = { "○", "stopped", "SepalDim" },
   interrupted = { "○", "interrupted", "SepalDim" },
@@ -158,11 +158,11 @@ end
 
 M.ago, M.fit = ago, fit
 
--- the facts after the title as columns: { "3 files", "+42", "−8", "make test ✓" }
+-- the facts after the title as columns: { "3 files", "+42", "−8", "make test ✔" }
 local function facts(e)
   local s, f = e.stat and e.stat.files > 0 and e.stat, {}
   if e.check then
-    local mark = e.checked == true and " ✓" or e.checked == false and " ✗" or ""
+    local mark = e.checked == true and " ✔" or e.checked == false and " ✘" or ""
     f[#f + 1] = e.check .. mark
   end
   if e.status == "running" and e.activity then f[#f + 1] = e.activity end
@@ -274,6 +274,8 @@ draw = function()
     spans[#spans + 1] = { #lines, #head, #head + 3, "SepalDim" }
     for a, z in f:gmatch("()%+%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAdded" } end
     for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalRemoved" } end
+    for a, z in f:gmatch("()✔()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalOk" } end
+    for a, z in f:gmatch("()✘()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalError" } end
     for a, z in f:gmatch("()↳ %d+ subagents?()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAgent" } end
     for _, d in ipairs(details(e)) do
       lines[#lines + 1] = "    " .. d; rows[#lines] = e.id
@@ -344,6 +346,23 @@ function M.current()
   return id and M.find(vim.b[b].sepal_inbox, id)
 end
 
+-- the copies of a :w, in order, as drafts one at a time (sepal.task holds one): the next opens
+-- once the open draft (also one you had before the :w) is sent or discarded. An answered btw
+-- copies into an implement draft, its question and answer as context
+local function drafts(queue)
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.b[b].sepal_task then
+      return vim.api.nvim_create_autocmd("BufWipeout", { buffer = b, once = true,
+        callback = function() vim.schedule(function() drafts(queue) end) end })
+    end
+  end
+  local e = table.remove(queue, 1)
+  if not e then return end
+  local sepal = require("sepal")
+  if e.kind == "btw" and e.answer then sepal.implement(e) else sepal.task(nil, vim.split(e.task, "\n"), e.kind) end
+  if queue[1] then drafts(queue) end
+end
+
 -- :w in the inbox: a task whose line is gone is dropped, a line put twice (yyp) opens a new task
 -- with that task's text, to add to and send (an answered btw: an implement draft, see sepal.implement). Under a planned orchestrate, its plan is what its
 -- plan lines say now: the [model] in each, their order, and a deleted line drops that task
@@ -388,15 +407,11 @@ function M.write(b)
   agent.drop_many(dropping) -- a running one stays
   drawn = nil
   render()
-  local e = copies[1] and M.find(root, copies[1])
-  -- shortcut: one draft at a time (sepal.task), so only the first copy opens; more copies need a draft list
+  local queue = {}
+  for _, id in ipairs(copies) do queue[#queue + 1] = M.find(root, id) end
   -- scheduled: :w puts you back in the inbox after BufWriteCmd, the draft should keep focus
-  -- an answered btw copies into an implement draft, its question and answer as context
-  if e then vim.schedule(function()
-    local sepal = require("sepal")
-    if e.kind == "btw" and e.answer then sepal.implement(e) else sepal.task(nil, vim.split(e.task, "\n"), e.kind) end
-  end) end
-  if #copies > 1 then require("sepal").notify("one task draft at a time: copied only " .. e.title) end
+  if queue[1] then vim.schedule(function() drafts(queue) end) end
+  if #queue > 1 then require("sepal").notify(#queue .. " copies: each opens its draft once the one before is sent or discarded") end
 end
 
 -- m: the model of the plan item under the cursor (on the orchestrate's own line: of all of them),

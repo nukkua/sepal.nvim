@@ -158,7 +158,7 @@ local function card(e, w)
   local function add(t, hl) meta[#meta + 1] = { " · ", "SepalDim" }; meta[#meta + 1] = { t, hl or "SepalDim" } end
   if (e.attempts or 0) > 0 then add(("try %d/%d"):format(e.attempts + 1, (require("sepal").config().retries or 0) + 1)) end
   if e.check then
-    add(e.check .. (e.checked == true and " ✓" or e.checked == false and " ✗" or ""),
+    add(e.check .. (e.checked == true and " ✔" or e.checked == false and " ✘" or ""),
       e.checked == true and "SepalOk" or e.checked == false and "SepalError" or "SepalDim")
   end
   row(unpack(meta))

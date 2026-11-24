@@ -235,8 +235,11 @@ function M.render()
   local out = { { { " ", "Normal" }, { require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" },
     { "  " .. vim.fs.basename(root), "SepalDim" } } }
   local counts = { { " ", "Normal" } }
+  local by = {}
+  for _, e in ipairs(list) do by[e.status] = (by[e.status] or 0) + 1 end
   for _, c in ipairs(COUNTS) do
-    local k = #vim.tbl_filter(function(e) return c[2][e.status] end, list)
+    local k = 0
+    for s in pairs(c[2]) do k = k + (by[s] or 0) end
     if k > 0 then
       if #counts > 1 then counts[#counts + 1] = { " · ", "SepalDim" } end
       counts[#counts + 1] = { k .. " " .. c[1], c[3] }
@@ -262,20 +265,21 @@ function M.render()
   local lines, marks, spins, key = {}, {}, {}, { w, root }
   local glow, shine, last = {}, {}, nil -- this draw's rail groups and status labels
   for i, r in ipairs(out) do
-    local text, k = "", tostring(rows[i])
+    local text, k, at = {}, { tostring(rows[i]) }, 0
     for _, c in ipairs(r) do
-      marks[#marks + 1] = { i - 1, #text, #text + #c[1], c[2] }
-      if c.spin then spins[#spins + 1] = { i - 1, #text } end
+      marks[#marks + 1] = { i - 1, at, at + #c[1], c[2] }
+      if c.spin then spins[#spins + 1] = { i - 1, at } end
       if c.pulse then -- the "▎" of a live card's row; the pulse is per card, so group by task
         if last ~= rows[i] then glow[#glow + 1], last = {}, rows[i] end
         local g = glow[#glow]
-        g[#g + 1] = { i - 1, #text, #text + #"▎" }
+        g[#g + 1] = { i - 1, at, at + #"▎" }
       end
-      if c.shimmer then shine[#shine + 1] = { i - 1, #text, c[1] } end -- the status label
-      k = k .. "\0" .. (c.spin and "\1" .. c[1]:sub(#inbox.spin() + 1) or c[1])
-      text = text .. c[1]
+      if c.shimmer then shine[#shine + 1] = { i - 1, at, c[1] } end -- the status label
+      k[#k + 1] = c.spin and "\1" .. c[1]:sub(#inbox.spin() + 1) or c[1]
+      text[#text + 1] = c[1]
+      at = at + #c[1]
     end
-    lines[i], key[#key + 1] = text, k
+    lines[i], key[#key + 1] = table.concat(text), table.concat(k, "\0")
   end
   key = table.concat(key, "\n")
   spun, glows, shines = spins, glow, shine

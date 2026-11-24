@@ -110,6 +110,16 @@ end
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
 -- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
 local ICON = { [vim.log.levels.ERROR] = { "✘", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
+local missing = {} -- module -> 'runtimepath' when require failed
+local function optional(name)
+  local m = package.loaded[name]
+  if m ~= nil then return m end
+  local rtp = vim.o.runtimepath
+  if missing[name] == rtp then return nil end
+  local ok, mod = pcall(require, name)
+  if ok then missing[name] = nil; return mod end
+  missing[name] = rtp
+end
 -- while you're in the agent (or a chat) they wait, shown once you leave it
 local held = {}
 function M.notify(msg, lvl, o)
@@ -127,8 +137,8 @@ function M.notify(msg, lvl, o)
     return
   end
   lvl, o = lvl or vim.log.levels.INFO, o or {}
-  local ok, fidget = pcall(require, "fidget")
-  if ok and lvl <= vim.log.levels.INFO then
+  local fidget = optional("fidget")
+  if fidget and lvl <= vim.log.levels.INFO then
     return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal", key = o.key, ttl = o.ttl })
   end
   if not (debug.getinfo(vim.notify, "S").source or ""):match("^@?vim/") then return vim.notify(msg, lvl, { title = "sepal" }) end
@@ -140,8 +150,8 @@ end
 -- done(true) ends it quietly (another notification follows), done() cancels it (a failure, which
 -- gets its own warning). Without fidget: no spinner, done(msg) is a plain notification
 local function progress(msg)
-  local ok, fp = pcall(require, "fidget.progress")
-  if not ok then return function(final) if type(final) == "string" then M.notify(final) end end, function() end end
+  local fp = optional("fidget.progress")
+  if not fp then return function(final) if type(final) == "string" then M.notify(final) end end, function() end end
   local h = fp.handle.create({ title = "sepal", message = msg, lsp_client = { name = "sepal" } })
   return function(final)
     if not final then return h:cancel() end
@@ -159,8 +169,8 @@ function M.fidget()
   local panel = package.loaded["sepal.panel"]
   local hide = vim.b.sepal_agent == true or vim.bo.filetype == "sepal-inbox" or (panel ~= nil and panel.shown())
   if hide == hid_fidget then return end -- only flip on a change, so your own suppress() isn't undone
-  local ok, n = pcall(require, "fidget.notification")
-  if ok then n.suppress(hide); hid_fidget = hide end
+  local n = optional("fidget.notification")
+  if n then n.suppress(hide); hid_fidget = hide end
 end
 vim.api.nvim_create_autocmd({ "BufEnter", "WinClosed" }, { group = vim.api.nvim_create_augroup("sepal.fidget", {}),
   callback = vim.schedule_wrap(function() M.fidget() end) }) -- scheduled: on WinClosed the window is still there
@@ -178,14 +188,16 @@ function M.close()
   end
 end
 
+local draft_buf
+function M.draft() return draft_buf and vim.api.nvim_buf_is_valid(draft_buf) and vim.b[draft_buf].sepal_task and draft_buf or nil end
+
 -- a task that didn't run goes back to the task buffer (below the open draft, if there is one)
 local function giveback(text, kind, agent)
   local lines = vim.split(text, "\n")
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.b[b].sepal_task then
-      vim.api.nvim_buf_set_lines(b, -1, -1, false, vim.list_extend({ "" }, lines))
-      return M.task()
-    end
+  local b = M.draft()
+  if b then
+    vim.api.nvim_buf_set_lines(b, -1, -1, false, vim.list_extend({ "" }, lines))
+    return M.task()
   end
   M.task(nil, lines, kind, agent)
 end
@@ -397,6 +409,7 @@ end
 -- the task's keys, a dim line and a blank on top of it like the inbox's: virtual lines, so never sent;
 -- the provider's logo and model first, so you see who'll work on it
 local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
+local KEYS_SIG = {}
 local SPIN = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 local BUSY = {} -- buf -> { label, frame }: task_sharpen is at work on it, a spinner after who works on it
 local function keys(buf)
@@ -416,6 +429,15 @@ local function keys(buf)
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     width = math.min(width, vim.api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff)
   end
+  local sig = { width }
+  for _, item in ipairs(items) do
+    for _, c in ipairs(item) do sig[#sig + 1] = c[1]; sig[#sig + 1] = c[2] or "" end
+  end
+  sig = table.concat(sig, "\0")
+  if sig == KEYS_SIG[buf] then
+    local m = vim.api.nvim_buf_get_extmarks(buf, KEYS_NS, 0, -1, {})
+    if #m == 1 and m[1][2] == 0 and m[1][3] == 0 then return end
+  end
   local lines, used = { {} }, 0
   for _, item in ipairs(items) do
     local iw = 0
@@ -433,6 +455,7 @@ local function keys(buf)
     -- lines above line 1 only show with topfill
     vim.api.nvim_win_call(win, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = #lines }) end end)
   end
+  KEYS_SIG[buf] = sig
 end
 
 -- a spinner and label in buf's keys until the returned stop() (or buf is gone)
@@ -469,15 +492,15 @@ function M.task(range, lines, kind, agent)
   local btw = kind == "btw"
   local block, path
   if range then block, path = selection(range[1], range[2]) end
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.b[b].sepal_task then
-      local w = vim.fn.win_findbuf(b)[1] -- only a draft in a window exists (bufhidden=wipe)
-      if block then add_selection(b, block, path) end -- a draft is open: the selection joins it
-      keys(b)
-      return vim.api.nvim_set_current_win(w)
-    end
+  local b = M.draft()
+  if b then
+    local w = vim.fn.win_findbuf(b)[1] -- only a draft in a window exists (bufhidden=wipe)
+    if block then add_selection(b, block, path) end -- a draft is open: the selection joins it
+    keys(b)
+    return vim.api.nvim_set_current_win(w)
   end
   local buf = vim.api.nvim_create_buf(false, true)
+  draft_buf = buf
   vim.b[buf].sepal_task, vim.b[buf].sepal_kind = true, kind
   local l, m, name = who(kind, agent)
   vim.b[buf].sepal_who = { l[1], l[2], m or name }
@@ -597,8 +620,8 @@ function M.task(range, lines, kind, agent)
   end, vim.tbl_extend("force", o, { desc = kind == "implement" and "Sharpen the task with task_sharpen" or "Write the task with task_sharpen" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-f>", function()
     vim.cmd.stopinsert()
-    local ok, fff = pcall(require, "fff")
-    if ok then return fff.find_files({ on_submit = function(_, ctx) add_file(buf, ctx.relative_path) end }) end
+    local fff = optional("fff")
+    if fff then return fff.find_files({ on_submit = function(_, ctx) add_file(buf, ctx.relative_path) end }) end
     vim.ui.input({ prompt = "File: ", completion = "file" }, function(p) add_file(buf, p) end)
   end, vim.tbl_extend("force", o, { desc = "Add a file to the task" }))
   -- the clipboard's image (a screenshot, a mockup), saved under the cache so it outlives Neovim for r
@@ -659,7 +682,7 @@ function M.choose(chunks)
   return ok and c or nil
 end
 function M.pick(range)
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return M.task(range) end end
+  if M.draft() then return M.task(range) end
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local chunks = {}

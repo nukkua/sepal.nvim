@@ -91,9 +91,11 @@ local function reset()
   for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT", "SEPAL_SUB", "SEPAL_REPLY" }) do vim.env[k] = nil end
 end
 local function idle()
-  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 end, 10), "the task never finished")
+  assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 and next(agent._t.landing) == nil end, 10), "the task never finished")
   vim.wait(30)
 end
+-- an explicit land/undo finishes: its plan ran off the main loop
+local function settled() assert(vim.wait(10000, function() return next(agent._t.landing) == nil end, 10), "never landed") end
 -- notifications while fn runs: { msg, level }
 local function notified(fn)
   local got, notify = {}, vim.notify
@@ -125,6 +127,13 @@ local function run(lines, key) return msgs(notified(function() send(lines, key);
 local function file(p) return read(vim.fs.joinpath(work, p)) end
 local function put(p, s) local f = assert(io.open(vim.fs.joinpath(work, p), "w")); f:write(s); f:close() end
 local function newest() return inbox.list(work)[1] end
+-- what a -> b would change, from the async plan_bg
+local function plan(root, a, b)
+  local done, out
+  require("sepal.git").plan_bg(root, a, b, function(c) done, out = true, c end)
+  assert(vim.wait(10000, function() return done end, 10), "plan never came back")
+  return out
+end
 local function clean() -- back to the first commit, nothing in the inbox
   sh("git checkout -q -- . && git clean -qfd")
   for _, e in ipairs(vim.list_slice(inbox.list(work), 1)) do agent.drop(e) end
@@ -247,12 +256,12 @@ test("manual landing and undo preserve executable modes", function()
   vim.env.SEPAL_EDIT = [[chmod +x script.sh; printf '#!/bin/sh\necho new\n' > added.sh; chmod +x added.sh]]
   run({ "Goal: executable scripts" }, "<c-c><c-w>")
   local e = newest()
-  notified(function() agent.land(e) end)
+  notified(function() agent.land(e); settled() end)
   eq(vim.fn.executable(work .. "/script.sh"), 1, "mode-only change was lost")
   eq(vim.fn.executable(work .. "/added.sh"), 1, "new executable mode was lost")
   eq(file("added.sh"), "#!/bin/sh\necho new\n")
-  eq(require("sepal.git").plan(work, e.base, e.result), {})
-  notified(function() agent.undo(e) end)
+  eq(plan(work, e.base, e.result), {})
+  notified(function() agent.undo(e); settled() end)
   eq(vim.fn.executable(work .. "/script.sh"), 0)
   eq(file("added.sh"), nil)
 end)
@@ -267,7 +276,7 @@ test("manual landing and undo create, change and delete links without touching t
   vim.env.SEPAL_EDIT = [[rm link removed to-file regular; ln -s elsewhere link; ln -s target added; ln -s target regular; printf 'plain\n' > to-file]]
   run({ "Goal: update links" }, "<c-c><c-w>")
   local e = newest()
-  notified(function() agent.land(e) end)
+  notified(function() agent.land(e); settled() end)
   eq(vim.uv.fs_readlink(work .. "/link"), "elsewhere", "link was not landed as a link")
   eq(vim.uv.fs_readlink(work .. "/added"), "target")
   eq(vim.uv.fs_readlink(work .. "/regular"), "target")
@@ -275,7 +284,7 @@ test("manual landing and undo create, change and delete links without touching t
   eq(vim.uv.fs_lstat(work .. "/to-file").type, "file")
   eq(file("to-file"), "plain\n")
   eq(file("target"), "original\n")
-  notified(function() agent.undo(e) end)
+  notified(function() agent.undo(e); settled() end)
   eq(vim.uv.fs_readlink(work .. "/link"), "target")
   eq(vim.uv.fs_readlink(work .. "/removed"), "target")
   eq(vim.uv.fs_readlink(work .. "/to-file"), "target")
@@ -294,7 +303,7 @@ test("a conflicting symlink is reported and left untouched on manual land", func
   assert(vim.uv.fs_unlink(work .. "/link"))
   assert(vim.uv.fs_symlink("mine", work .. "/link"))
   local e = newest()
-  notified(function() agent.land(e) end)
+  notified(function() agent.land(e); settled() end)
   eq(file("mine"), "my target\n", "land wrote through the conflicting symlink")
   eq(file("target"), "original\n")
   eq(vim.uv.fs_readlink(work .. "/link"), "mine")
@@ -312,10 +321,75 @@ test("manual landing never writes through a symlinked parent directory", functio
   vim.fn.delete(work .. "/dir", "rf")
   assert(vim.uv.fs_symlink("mine", work .. "/dir"))
   local e = newest()
-  notified(function() agent.land(e) end)
+  notified(function() agent.land(e); settled() end)
   eq(file("mine/file"), "original\n", "land wrote through a parent symlink")
   eq(vim.uv.fs_readlink(work .. "/dir"), "mine")
   eq(e.conflicts, { "dir/file" })
+end)
+
+test("landing runs off the main loop: the file is yours until the plan is checked fresh", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo landed-async > a.txt]]
+  run({ "Goal: async" }, "<c-c><c-w>")
+  local e = newest()
+  notified(function() agent.land(e) end)
+  eq(agent._t.landing[e.id], "being landed")
+  eq(file("a.txt"), "one\ntwo\nthree\n", "land wrote before its plan came back")
+  settled()
+  eq(file("a.txt"), "landed-async\n")
+  eq(e.status, "landed")
+end)
+
+test("a second land, or a drop, while landing is told to wait and doesn't run", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo once > a.txt]]
+  run({ "Goal: once" }, "<c-c><c-w>")
+  local e = newest()
+  local got = notified(function()
+    agent.land(e)
+    agent.land(e) -- already planning: told, not run again
+    agent.drop(e) -- dropping deletes the refs the plan reads
+    settled()
+  end)
+  eq(msgs(got), { "a moment: it's being landed", "a moment: it's being landed",
+    "landed: once · 1 file +1 −3\n· kept the old API\n· no new deps" })
+  eq(newest().status, "landed")
+  eq(#inbox.list(work), 1)
+end)
+
+test("an edit made while landing is kept: the freshness check re-plans instead of overwriting", function()
+  clean(); reset()
+  put("a.txt", "one\ntwo\nthree\nfour\nfive\n")
+  vim.env.SEPAL_EDIT = [[printf 'one\ntwo\nthree\nfour\nAGENT\n' > a.txt]]
+  run({ "Goal: merge race" }, "<c-c><c-w>")
+  put("a.txt", "ONE\ntwo\nthree\nfour\nfive\n") -- your line 1 meanwhile: landing needs a merge
+  local e = newest()
+  local system, fired = vim.system, false
+  vim.system = function(argv, o, cb)
+    if not fired and vim.tbl_contains(argv, "merge-file") then
+      fired = true
+      put("a.txt", "ONE\ntwo\nTWO\nfour\nfive\n") -- your line 3 too, while the merge runs
+    end
+    return system(argv, o, cb)
+  end
+  notified(function() agent.land(e); settled() end)
+  vim.system = system
+  eq(file("a.txt"), "ONE\ntwo\nTWO\nfour\nAGENT\n") -- your lines 1 and 3, its line 5
+  eq(e.status, "landed")
+end)
+
+test("undoing runs off the main loop too", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[echo landed > a.txt]]
+  run({ "Goal: async undo" })
+  local e = newest()
+  eq(e.status, "landed")
+  notified(function() agent.undo(e) end)
+  eq(agent._t.landing[e.id], "being taken back")
+  eq(file("a.txt"), "landed\n", "undo wrote before its plan came back")
+  settled()
+  eq(file("a.txt"), "one\ntwo\nthree\n")
+  eq(e.status, "undone")
 end)
 
 test("your edits since the task started are kept; u takes the task back out", function()
@@ -328,7 +402,7 @@ test("your edits since the task started are kept; u takes the task back out", fu
     idle()
   end)
   eq(file("a.txt"), "ONE\ntwo\nTHREE\n")
-  eq(msgs(notified(function() vim.cmd("Sepal undo") end)), { "took back: shout three" })
+  eq(msgs(notified(function() vim.cmd("Sepal undo"); settled() end)), { "took back: shout three" })
   eq(file("a.txt"), "ONE\ntwo\nthree\n")
   eq(newest().status, "undone")
 end)
@@ -382,7 +456,7 @@ test("a task that overlaps your edits waits for you; L lands it with conflict ma
   assert(got[#got][1]:find("it overlaps your edits in a.txt", 1, true), got[#got][1])
   eq(file("a.txt"), "one\nMINE\nthree\n")
   eq(newest().status, "needs")
-  notified(function() vim.cmd("Sepal land") end)
+  notified(function() vim.cmd("Sepal land"); settled() end)
   assert(file("a.txt"):find("<<<<<<< yours\nMINE\n=======\nAGENT\n>>>>>>> sepal", 1, true), file("a.txt"))
   eq(newest().conflicts, { "a.txt" })
 end)
@@ -396,7 +470,7 @@ test("a file with unsaved changes in a buffer isn't landed on", function()
   assert(got[#got]:find("unsaved changes in a.txt", 1, true), got[#got])
   eq(file("a.txt"), "one\ntwo\nthree\n")
   vim.cmd("silent edit!")
-  notified(function() vim.cmd("Sepal land") end)
+  notified(function() vim.cmd("Sepal land"); settled() end)
   eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "agent" }, "the buffer wasn't reloaded")
   vim.cmd("bwipeout!")
 end)
@@ -409,7 +483,7 @@ test("land = manual: a task started without a choice waits in the inbox until :S
   sepal.setup({ land = "auto" })
   eq(got[#got], "● ready to land: by hand · 1 file +1 −3 · :Sepal inbox\n· kept the old API\n· no new deps")
   eq(file("a.txt"), "one\ntwo\nthree\n")
-  notified(function() vim.cmd("Sepal land") end)
+  notified(function() vim.cmd("Sepal land"); settled() end)
   eq(file("a.txt"), "manual\n")
 end)
 
@@ -908,7 +982,8 @@ end)
 test(":Sepal clean drops the tasks that are over", function()
   notified(function() vim.cmd("Sepal clean") end)
   eq(inbox.list(work), {})
-  eq(sh("git for-each-ref refs/sepal").stdout, "")
+  -- the refs go with a background for-each-ref + update-ref
+  assert(vim.wait(10000, function() return sh("git for-each-ref refs/sepal").stdout == "" end, 20), "refs left behind")
 end)
 
 test("assumptions are read from the end of a reply", function()
@@ -939,6 +1014,14 @@ test("a reply is read from the transcript's end, past a line that spans a read c
   table.remove(lines, #lines)
   eq(reply_of({ transcript_path = tr(lines) }), "early")
   eq(reply_of({ last_assistant_message = "from the hook", transcript_path = tr(lines) }), "from the hook")
+end)
+
+test("a tool call's activity is its name and first string field: a Bash command counts", function()
+  local about = agent._t.about
+  eq(about({ name = "Bash", input = { command = "make test", description = "run tests" } }, work), "Bash make test")
+  eq(about({ name = "Task", input = { description = "explore" } }, work), "Task explore")
+  eq(about({ name = "Edit", input = { file_path = work .. "/a.txt" } }, work), "Edit a.txt")
+  eq(about({ name = "Read", input = {} }, work), "Read")
 end)
 
 test("a removed worktree's path is free at once; the checkout and git's record of it go in the background", function()

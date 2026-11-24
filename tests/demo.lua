@@ -104,7 +104,7 @@ vim.schedule(function()
     assert(e.status == "planned" and #(e.plan or {}) == 2,
       ("expected a 2-task plan, got %s%s"):format(tostring(e and e.status), e and e.error and ": " .. e.error or ""))
     agent.swarm(e)
-    local function done(x) return not vim.tbl_contains({ "running", "queued", "checking" }, x.status) end
+    local function done(x) return not vim.tbl_contains({ "running", "queued", "checking", "ready" }, x.status) end -- ready: being landed
     assert(vim.wait(60000, function()
       local l = inbox.list(root)
       return l[1] and l[2] and done(l[1]) and done(l[2])

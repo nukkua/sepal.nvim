@@ -40,7 +40,7 @@ end
 
 -- git in dir off the main loop: on_done(r) runs on it
 local function bg(dir, args, o, on_done)
-  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = true, env = o and o.env, stdin = o and o.stdin }, vim.schedule_wrap(on_done))
+  local ok, err = pcall(vim.system, vim.list_extend({ "git", "-C", dir }, args), { text = not (o and o.binary), env = o and o.env, stdin = o and o.stdin }, vim.schedule_wrap(on_done))
   if not ok then vim.schedule(function() on_done({ code = -1, stdout = "", stderr = tostring(err) }) end) end
 end
 
@@ -141,13 +141,13 @@ function M.result(root, wt, base, ref, exclude, on_done)
 end
 
 -- the numstat of a -> b parsed: { files, add, del, list = { "path +1 −3", ... }, paths = { "path", ... } }
+local ESC = { ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+local function esc(c) return ESC[c] or ("\\%03o"):format(c:byte()) end
 local function stat_of(s)
   local st = { files = 0, add = 0, del = 0, list = {}, paths = {} }
   for line in s:gmatch("[^%z]+") do
     local add, del, path = line:match("^(%S+)\t(%S+)\t(.*)$")
-    local display = path:gsub("%c", function(c)
-      return ({ ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" })[c] or ("\\%03o"):format(c:byte())
-    end)
+    local display = path:find("%c") and (path:gsub("%c", esc)) or path
     st.list[#st.list + 1] = display .. (tonumber(add) and (" +%s −%s"):format(add, del) or " binary")
     st.paths[#st.paths + 1] = path
     st.files, st.add, st.del = st.files + 1, st.add + (tonumber(add) or 0), st.del + (tonumber(del) or 0)
@@ -175,10 +175,14 @@ end
 local function firsts_of(s)
   local t, path = {}, nil
   for l in s:gmatch("[^\n]+") do
-    local header = l:match("^%+%+%+ (.*)$")
-    if header then path = unquote((header:gsub("\t$", ""))):match("^b/(.*)$") end
-    local n = l:match("^@@ %-%S+ %+(%d+)")
-    if n and path and not t[path] then t[path] = math.max(1, tonumber(n)) end
+    local b = l:byte(1)
+    if b == 43 then
+      local header = l:match("^%+%+%+ (.*)$")
+      if header then path = unquote((header:gsub("\t$", ""))):match("^b/(.*)$") end
+    elseif b == 64 then
+      local n = l:match("^@@ %-%S+ %+(%d+)")
+      if n and path and not t[path] then t[path] = math.max(1, tonumber(n)) end
+    end
   end
   return t
 end
@@ -211,10 +215,22 @@ function M.review(root, a, b, on_stat)
   return st, firsts_of(text(uni)), extra
 end
 
--- delete every ref under a list of prefixes: one for-each-ref + one update-ref
-function M.delete_refs(root, prefixes)
-  local refs = out(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" }, prefixes)) or ""
-  if refs ~= "" then M.run(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }) end -- all of them in one go
+-- delete every ref under a list of prefixes, then cb() (at once when there is nothing): one
+-- for-each-ref + one update-ref, off the main loop
+function M.delete_refs_bg(root, prefixes, cb)
+  cb = cb or function() end
+  bg(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" }, prefixes), nil, function(r)
+    local refs = vim.trim(r.code == 0 and r.stdout or "")
+    if refs == "" then return cb() end
+    bg(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }, function() cb() end) -- all of them in one go
+  end)
+end
+
+-- dir's porcelain status ("" on failure) to cb, off the main loop
+function M.status_bg(dir, cb)
+  bg(dir, { "status", "--porcelain=v1", "-z", "--untracked-files=normal" }, { binary = true }, function(r)
+    cb(r.code == 0 and r.stdout or "")
+  end)
 end
 
 local function readb(path)
@@ -225,7 +241,6 @@ local function readb(path)
   return s
 end
 local function writeb(path, s)
-  vim.fn.mkdir(vim.fs.dirname(path), "p")
   local f = assert(io.open(path, "wb"))
   f:write(s)
   f:close()
@@ -267,28 +282,20 @@ function M.files(root, specs)
   return M.files_wait(M.files_start(root, specs))
 end
 
--- the contents of many blobs with one git process: { [oid] = content }; an object that isn't a blob
--- (a submodule's commit) or isn't there is left out
-local function blobs(root, oids)
-  local list, got = M.files(root, oids), {}
-  for i, oid in ipairs(oids) do if list[i] then got[oid] = list[i] end end
-  return got
-end
-local function merge3(root, cur, base, theirs)
-  local t = { vim.fn.tempname(), vim.fn.tempname(), vim.fn.tempname() }
-  writeb(t[1], cur); writeb(t[2], base); writeb(t[3], theirs)
-  -- no wait: every file's merge runs at once (see plan); its temp files go after it's waited
-  local ok, p = pcall(vim.system, vim.list_extend({ "git", "-C", root },
-    { "merge-file", "-p", "-L", "yours", "-L", "base", "-L", "sepal", t[1], t[2], t[3] }), { text = false })
-  return { p = ok and p or nil, t = t, cur = cur }
+-- what a file is right now, as plan and its freshness check see it: a git-ish mode
+-- ("000000"/"120000"/"100755"/"100644"/"other") and its content (readlink or readb)
+local function observe(path)
+  local st = vim.uv.fs_lstat(path)
+  local mode = not st and "000000" or st.type == "link" and "120000"
+    or st.type == "file" and (bit.band(st.mode, 64) ~= 0 and "100755" or "100644") or "other"
+  local cur = st and (st.type == "link" and vim.uv.fs_readlink(path) or st.type == "file" and readb(path)) or nil
+  return mode, cur
 end
 
--- what applying a -> b to the work tree would do: { { rel, path, content (nil: delete), conflict } }
-function M.plan(root, a, b)
-  local changes, files, oids = {}, {}, {}
-  -- ":<mode> <mode> <old oid> <new oid> <status>\0<path>\0" per file; the blobs come in one batch below
-  local r = M.run(root, { "diff", "--raw", "-z", "--no-renames", "--no-abbrev", a, b })
-  local raw = vim.split(r.code == 0 and r.stdout or "", "\0", { plain = true })
+-- ":<mode> <mode> <old oid> <new oid> <status>\0<path>\0" per file -> the files, and the oids to read
+local function parse_diff(s)
+  local files, oids = {}, {}
+  local raw = vim.split(s, "\0", { plain = true })
   for i = 1, #raw - 1, 2 do
     local oldmode, newmode, old, new, status = raw[i]:match("^:(%d+) (%d+) (%x+) (%x+) (%a)")
     if old then
@@ -297,24 +304,52 @@ function M.plan(root, a, b)
       if status ~= "D" then oids[#oids + 1] = new end
     end
   end
-  local blob = blobs(root, oids)
+  return files, oids
+end
+
+local function merge3(root, c, cur, base, theirs, done)
+  local base_ = vim.fn.tempname()
+  local t = { base_ .. ".1", base_ .. ".2", base_ .. ".3" }
+  writeb(t[1], cur); writeb(t[2], base); writeb(t[3], theirs)
+  local function finish(r)
+    for _, p in ipairs(t) do os.remove(p) end
+    local merged = r.code >= 0 and r.code < 128 and r.stdout or nil
+    c.content, c.conflict = merged or cur, r.code ~= 0 or not merged
+    done()
+  end
+  -- no wait: every file's merge runs at once (see decide); its temp files go when it exits
+  if not pcall(vim.system, vim.list_extend({ "git", "-C", root },
+    { "merge-file", "-p", "-L", "yours", "-L", "base", "-L", "sepal", t[1], t[2], t[3] }), { text = false }, vim.schedule_wrap(finish)) then
+    vim.schedule(function() finish({ code = -1, stdout = "" }) end)
+  end
+end
+
+-- the change each file of files needs to apply a -> b, against blob (oid -> content); skipped ones
+-- are left out, every kept one gets .seen (what it observed, for plan_bg's freshness check). The
+-- merges run off the main loop: on_done(changes) when the last exits (at once when there are none)
+local function decide(root, files, blob, on_done)
+  local changes, pending = {}, 0
+  local linked = {}
+  local function linked_above(path)
+    local dir, seen, res = vim.fs.dirname(path), {}, nil
+    while dir ~= root and dir ~= vim.fs.dirname(dir) do
+      if linked[dir] ~= nil then res = linked[dir]; break end
+      seen[#seen + 1] = dir
+      local p = vim.uv.fs_lstat(dir)
+      if p and p.type == "link" then res = true; break end
+      dir = vim.fs.dirname(dir)
+    end
+    for _, d in ipairs(seen) do linked[d] = res or false end
+    return res == true
+  end
   for _, f in ipairs(files) do
     local status, rel = f.status, f.rel
     local path = vim.fs.joinpath(root, rel)
-    local st = vim.uv.fs_lstat(path)
-    local mode = not st and "000000" or st.type == "link" and "120000"
-      or st.type == "file" and (bit.band(st.mode, 64) ~= 0 and "100755" or "100644") or "other"
-    local cur = st and (st.type == "link" and vim.uv.fs_readlink(path) or st.type == "file" and readb(path)) or nil
+    local mode, cur = observe(path)
     local old, new = status ~= "A" and blob[f.old] or nil, status ~= "D" and blob[f.new] or nil
-    local c = { rel = rel, path = path }
+    local c = { rel = rel, path = path, seen = { mode = mode, cur = cur } }
     c.mode = mode == f.oldmode and f.newmode or mode
-    local parent, linked = vim.fs.dirname(path), false
-    while parent ~= root and parent ~= vim.fs.dirname(parent) do
-      local p = vim.uv.fs_lstat(parent)
-      if p and p.type == "link" then linked = true; break end
-      parent = vim.fs.dirname(parent)
-    end
-    if linked or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
+    if linked_above(path) or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
       c.conflict, c.preserve = true, true
     elseif mode == "120000" or f.oldmode == "120000" or f.newmode == "120000" then
       if cur == new and mode == f.newmode then c.skip = true
@@ -324,24 +359,53 @@ function M.plan(root, a, b)
     elseif cur == old then c.content = new -- you didn't touch it: take theirs (or delete)
     elseif new == nil or cur == nil then c.conflict, c.content = true, cur -- deleted on one side, changed on the other
     elseif (old or ""):find("\0", 1, true) or new:find("\0", 1, true) or cur:find("\0", 1, true) then c.conflict, c.content = true, cur -- binary
-    else c.merge = merge3(root, cur, old or "", new) end
+    else
+      pending = pending + 1
+      merge3(root, c, cur, old or "", new, function()
+        pending = pending - 1
+        if pending == 0 then on_done(changes) end
+      end)
+    end
     if not c.skip then changes[#changes + 1] = c end
   end
-  for _, c in ipairs(changes) do -- the merges all run by now: wait each, then clean its temp files
-    local m = c.merge
-    if m then
-      c.merge = nil
-      local r = m.p and m.p:wait() or { code = -1, stdout = "" }
-      for _, p in ipairs(m.t) do os.remove(p) end
-      local merged = r.code >= 0 and r.code < 128 and r.stdout or nil
-      c.content, c.conflict = merged or m.cur, r.code ~= 0 or not merged
+  if pending == 0 then on_done(changes) end
+end
+
+-- what applying a -> b to the work tree would do, to cb({ { rel, path, content (nil: delete),
+-- conflict } } — nil when a file kept changing under it after 3 tries). The diff, the objects and
+-- every merge run off the main loop; before cb each file is observed once more and cb runs in that
+-- same tick, so what it checked and what the caller applies can't drift apart
+function M.plan_bg(root, a, b, cb, tries)
+  tries = tries or 0
+  bg(root, { "diff", "--raw", "-z", "--no-renames", "--no-abbrev", a, b }, { binary = true }, function(r)
+    local files, oids = parse_diff(r.code == 0 and r.stdout or "")
+    local function check(changes)
+      for _, c in ipairs(changes) do
+        local mode, cur = observe(c.path)
+        if mode ~= c.seen.mode or cur ~= c.seen.cur then
+          if tries >= 2 then return cb(nil) end
+          return M.plan_bg(root, a, b, cb, tries + 1)
+        end
+      end
+      for _, c in ipairs(changes) do c.seen = nil end
+      cb(changes)
     end
-  end
-  return changes
+    local function with_blobs(blob) decide(root, files, blob, check) end
+    if #oids == 0 then return with_blobs({}) end
+    bg(root, { "cat-file", "--batch", "-Z" }, { stdin = table.concat(oids, "\0") .. "\0", binary = true }, function(r)
+      local list, blob = batch_of(r.code == 0 and r.stdout or "", #oids), {}
+      for i, oid in ipairs(oids) do if list[i] then blob[oid] = list[i] end end
+      with_blobs(blob)
+    end)
+  end)
 end
 
 -- carry out a plan: write (or delete) each file
 function M.apply(changes)
+  local made = {}
+  local function mkdirp(dir)
+    if not made[dir] then made[dir] = true; vim.fn.mkdir(dir, "p") end
+  end
   for _, c in ipairs(changes) do
     if not c.preserve then
       if c.content == nil then os.remove(c.path)
@@ -350,9 +414,10 @@ function M.apply(changes)
         if st and st.type == "link" then assert(vim.uv.fs_unlink(c.path)) end
         if c.mode == "120000" then
           if st and st.type ~= "link" then assert(vim.uv.fs_unlink(c.path)) end
-          vim.fn.mkdir(vim.fs.dirname(c.path), "p")
+          mkdirp(vim.fs.dirname(c.path))
           assert(vim.uv.fs_symlink(c.content, c.path))
         else
+          mkdirp(vim.fs.dirname(c.path))
           writeb(c.path, c.content)
           if c.mode and (not st or st.type ~= "file" or (bit.band(st.mode, 64) ~= 0) ~= (c.mode == "100755")) then
             local permissions = st and st.type == "file" and bit.band(st.mode, 511) or 420

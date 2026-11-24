@@ -45,6 +45,7 @@ local function mode(e) return readonly(e.kind) and "plan" or nil end
 -- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update }
 local jobs = {}
 local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
+local landing = {} -- id -> "being landed"/"being taken back": its plan runs off the main loop
 -- every slot taken: a read-only run doesn't take one (no worktree)
 local function full()
   local n = 0
@@ -65,14 +66,38 @@ end
 
 -- the first non-empty line of s, cut to n characters
 local function first(s, n)
-  local l = type(s) == "string" and vim.iter(vim.split(s, "\n")):map(vim.trim):find(function(x) return x ~= "" end) or nil
+  local l
+  if type(s) == "string" then
+    for x in s:gmatch("[^\n]+") do
+      x = vim.trim(x)
+      if x ~= "" then l = x; break end
+    end
+  end
   if l and vim.fn.strchars(l) > n then l = vim.fn.strcharpart(l, 0, n - 1) .. "…" end
   return l
 end
 local function plural(n, word) return ("%d %s%s"):format(n, word, n == 1 and "" or "s") end
 local function tail(s, n)
-  local l = vim.split(vim.trim(s or ""), "\n")
-  return table.concat(vim.list_slice(l, math.max(1, #l - n + 1)), "\n")
+  s = vim.trim(s or "")
+  for i = #s, 1, -1 do
+    if s:byte(i) == 10 then
+      n = n - 1
+      if n == 0 then return s:sub(i + 1) end
+    end
+  end
+  return s
+end
+local function lastline(b)
+  local hi = vim.api.nvim_buf_line_count(b)
+  while hi > 0 do
+    local lo = math.max(hi - 200, 0)
+    local ls = vim.api.nvim_buf_get_lines(b, lo, hi, false)
+    for i = #ls, 1, -1 do
+      local l = ls[i]
+      if vim.trim(l) ~= "" and not l:match("^%[Process exited") then return l end
+    end
+    hi = lo
+  end
 end
 
 local function ref(e, what) return "refs/sepal/" .. e.id .. "/" .. what end
@@ -83,12 +108,13 @@ local function wtdir(e)
 end
 
 -- the task's check ("Done when: make test") and title (Goal, else its first line)
+local FIELDS = { { "Done when", "^%s*Done when:%s*(.-)%s*$" }, { "Goal", "^%s*Goal:%s*(.-)%s*$" } }
 function M.parse(text)
   local f = {}
   for l in (text .. "\n"):gmatch("([^\n]*)\n") do
-    for _, k in ipairs({ "Done when", "Goal" }) do
-      local v = l:match("^%s*" .. k .. ":%s*(.-)%s*$")
-      if v and v ~= "" and not f[k] then f[k] = v end
+    for _, k in ipairs(FIELDS) do
+      local v = l:match(k[2])
+      if v and v ~= "" and not f[k[1]] then f[k[1]] = v end
     end
   end
   return f["Done when"], first(f.Goal or text, 40) or "task"
@@ -208,23 +234,32 @@ function M.subtask(e, i)
 end
 
 -- what a tool call is about, for the spinner: "Edit src/pool.cpp", "Bash make test"
+local TOOL_ARG = { "command", "pattern", "url", "description" }
 local function about(tool, wt)
   local i = type(tool.input) == "table" and tool.input or {}
   local p = type(i.file_path) == "string" and i.file_path or type(i.path) == "string" and i.path or nil
   if p and vim.startswith(p, wt .. "/") then p = p:sub(#wt + 2) end
-  local arg = p or vim.iter({ i.command, i.pattern, i.url, i.description }):find(function(v) return type(v) == "string" end)
+  local arg = p
+  for _, k in ipairs(TOOL_ARG) do
+    if not arg and type(i[k]) == "string" then arg = i[k] end
+  end
   return tostring(tool.name) .. (arg and " " .. first(arg, 50) or "")
 end
 
-local function bufof(path)
+local function bufs_by_name()
+  local by = {}
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(b) and vim.api.nvim_buf_get_name(b) == path then return b end
+    if vim.api.nvim_buf_is_loaded(b) then
+      local name = vim.api.nvim_buf_get_name(b)
+      if name ~= "" then by[name] = by[name] or b end
+    end
   end
+  return by
 end
 -- reload the buffers of files that changed on disk (:checktime alone skips hidden buffers)
-local function reload(changes)
+local function reload(changes, bufs)
   for _, c in ipairs(changes) do
-    local b = bufof(c.path)
+    local b = bufs[c.path]
     if b then vim.api.nvim_buf_call(b, function() pcall(vim.cmd, "silent! checktime") end) end
   end
 end
@@ -414,7 +449,7 @@ agent = function(e, prompt, wt)
     os.remove(events)
     os.remove(conf)
     if not vim.api.nvim_buf_is_valid(b) then return end
-    local lines = vim.tbl_filter(function(l) return vim.trim(l) ~= "" and not l:match("^%[Process exited") end, vim.api.nvim_buf_get_lines(b, 0, -1, false))
+    local last = lastline(b)
     -- watched: you stay in its float. The check gets a spinner; else its last screen stays (claude
     -- stopped) until its chat replaces it, and it's wiped then
     if vim.api.nvim_get_current_buf() == b then
@@ -427,12 +462,12 @@ agent = function(e, prompt, wt)
         vim.bo[b].bufhidden = "wipe"
         pcall(vim.fn.jobstop, vim.bo[b].channel)
         j.watch = { buf = b, win = w, kept = true }
-        return lines[#lines]
+        return last
       end
     end
     for _, w in ipairs(vim.fn.win_findbuf(b)) do pcall(vim.api.nvim_win_close, w, true) end
     pcall(vim.api.nvim_buf_delete, b, { force = true }) -- ends claude too
-    return lines[#lines]
+    return last
   end
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
@@ -657,10 +692,13 @@ function M._prepare(e, prompt, wt)
       return finish(e, wt, "error", { error = "prepare failed: " .. (first((out.stderr or "") .. "\n" .. (out.stdout or ""), 200) or ("exit " .. out.code)) })
     end
     -- whatever prepare made (node_modules links, builds…) isn't the agent's work
-    local st = git.run(wt, { "status", "--porcelain=v1", "-z", "--untracked-files=normal" }).stdout or ""
-    e.exclude = {}
-    for entry in st:gmatch("[^%z]+") do e.exclude[#e.exclude + 1] = entry:sub(4) end
-    agent(e, prompt, wt)
+    git.status_bg(wt, function(st)
+      local j = jobs[e.id]
+      if not j or j.stopped then return finish(e, wt, "stopped") end
+      e.exclude = {}
+      for entry in st:gmatch("[^%z]+") do e.exclude[#e.exclude + 1] = entry:sub(4) end
+      agent(e, prompt, wt)
+    end)
   end))
   if not pok then return finish(e, wt, "error", { error = "could not run prepare: " .. tostring(job):match("[^\n]*") }) end
   jobs[e.id].job = job
@@ -831,50 +869,72 @@ function M.land(e, auto)
   if M.running(e) then return notify("it's still running") end
   if e.status == "landed" then return notify("already landed: u takes it back") end
   if not e.result then return notify("nothing to land") end
-  local changes = git.plan(e.root, e.base, e.result)
-  local unsaved, conflicts = {}, {}
-  for _, c in ipairs(changes) do
-    local b = bufof(c.path)
-    if b and vim.bo[b].modified then unsaved[#unsaved + 1] = c.rel end
-    if c.conflict then conflicts[#conflicts + 1] = c.rel end
-  end
-  if #unsaved > 0 or (auto and #conflicts > 0) then
-    e.status = "needs"
-    e.why = #unsaved > 0 and "unsaved changes in " .. table.concat(unsaved, ", ") .. ": save them, then L in :Sepal inbox"
-      or "it overlaps your edits in " .. table.concat(conflicts, ", ") .. ": L lands it with conflict markers"
+  if landing[e.id] then return notify("a moment: it's " .. landing[e.id]) end
+  local a, z = e.base, e.result
+  landing[e.id] = "being landed"
+  local done_ = sepal().progress(e.title .. ": landing")
+  git.plan_bg(e.root, a, z, function(changes)
+    landing[e.id] = nil
+    done_(true)
+    if not changes then return notify("not landed: " .. e.title .. ": your files kept changing · L tries again", WARN) end
+    if e.base ~= a or e.result ~= z or e.status == "landed" or M.running(e) then
+      return notify("not landed: " .. e.title .. ": it changed meanwhile", WARN)
+    end
+    local bufs = bufs_by_name()
+    local unsaved, conflicts = {}, {}
+    for _, c in ipairs(changes) do
+      local b = bufs[c.path]
+      if b and vim.bo[b].modified then unsaved[#unsaved + 1] = c.rel end
+      if c.conflict then conflicts[#conflicts + 1] = c.rel end
+    end
+    if #unsaved > 0 or (auto and #conflicts > 0) then
+      e.status = "needs"
+      e.why = #unsaved > 0 and "unsaved changes in " .. table.concat(unsaved, ", ") .. ": save them, then L in :Sepal inbox"
+        or "it overlaps your edits in " .. table.concat(conflicts, ", ") .. ": L lands it with conflict markers"
+      inbox.changed(e)
+      return notify(with_assumptions("▲ not landed: " .. e.title .. facts(e) .. "\n" .. e.why, e), WARN)
+    end
+    git.apply(changes)
+    reload(changes, bufs)
+    e.landed, e.base = { from = e.base, to = e.result }, e.result -- a reply lands only what's new
+    e.status, e.why, e.conflicts = "landed", nil, #conflicts > 0 and conflicts or nil
     inbox.changed(e)
-    return notify(with_assumptions("▲ not landed: " .. e.title .. facts(e) .. "\n" .. e.why, e), WARN)
-  end
-  git.apply(changes)
-  reload(changes)
-  e.landed, e.base = { from = e.base, to = e.result }, e.result -- a reply lands only what's new
-  e.status, e.why, e.conflicts = "landed", nil, #conflicts > 0 and conflicts or nil
-  inbox.changed(e)
-  local msg = with_assumptions("landed: " .. e.title .. facts(e), e)
-  if #conflicts > 0 then
-    return notify(msg .. "\nconflict markers in " .. table.concat(conflicts, ", "), WARN)
-  end
-  notify(msg, vim.log.levels.INFO, { icon = { require("sepal").icon("landed", "✔"), "SepalOk" } })
+    local msg = with_assumptions("landed: " .. e.title .. facts(e), e)
+    if #conflicts > 0 then
+      return notify(msg .. "\nconflict markers in " .. table.concat(conflicts, ", "), WARN)
+    end
+    notify(msg, vim.log.levels.INFO, { icon = { require("sepal").icon("landed", "✔"), "SepalOk" } })
+  end)
 end
 
 -- take a landed task back out of your work tree (again a merge: your edits since stay)
 function M.undo(e)
   if not e.landed then return notify("only a landed task can be taken back") end
-  local changes = git.plan(e.root, e.landed.to, e.landed.from)
-  local unsaved, conflicts = {}, {}
-  for _, c in ipairs(changes) do
-    local b = bufof(c.path)
-    if b and vim.bo[b].modified then unsaved[#unsaved + 1] = c.rel end
-    if c.conflict then conflicts[#conflicts + 1] = c.rel end
-  end
-  if #unsaved > 0 then return notify("save these first: " .. table.concat(unsaved, ", "), WARN) end
-  git.apply(changes)
-  reload(changes)
-  e.base, e.landed, e.status = e.landed.from, nil, "undone"
-  e.conflicts = #conflicts > 0 and conflicts or nil
-  inbox.changed(e)
-  notify("took back: " .. e.title .. (#conflicts > 0 and "\nconflict markers in " .. table.concat(conflicts, ", ") or ""),
-    #conflicts > 0 and WARN or vim.log.levels.INFO)
+  if landing[e.id] then return notify("a moment: it's " .. landing[e.id]) end
+  local l = e.landed
+  landing[e.id] = "being taken back"
+  local done_ = sepal().progress(e.title .. ": taking back")
+  git.plan_bg(e.root, l.to, l.from, function(changes)
+    landing[e.id] = nil
+    done_(true)
+    if not changes then return notify("not taken back: " .. e.title .. ": your files kept changing · U tries again", WARN) end
+    if e.landed ~= l or M.running(e) then return notify("not taken back: " .. e.title .. ": it changed meanwhile", WARN) end
+    local bufs = bufs_by_name()
+    local unsaved, conflicts = {}, {}
+    for _, c in ipairs(changes) do
+      local b = bufs[c.path]
+      if b and vim.bo[b].modified then unsaved[#unsaved + 1] = c.rel end
+      if c.conflict then conflicts[#conflicts + 1] = c.rel end
+    end
+    if #unsaved > 0 then return notify("save these first: " .. table.concat(unsaved, ", "), WARN) end
+    git.apply(changes)
+    reload(changes, bufs)
+    e.base, e.landed, e.status = e.landed.from, nil, "undone"
+    e.conflicts = #conflicts > 0 and conflicts or nil
+    inbox.changed(e)
+    notify("took back: " .. e.title .. (#conflicts > 0 and "\nconflict markers in " .. table.concat(conflicts, ", ") or ""),
+      #conflicts > 0 and WARN or vim.log.levels.INFO)
+  end)
 end
 
 function M.stop(e)
@@ -941,14 +1001,17 @@ end
 -- and one inbox save + render at the end
 function M.drop_many(list)
   local dropped = {}
+  local pastes = "@(" .. vim.pesc(M.PASTES) .. "/paste%-%d+%.png)"
   inbox.batch(function()
     for _, e in ipairs(list) do
       if M.running(e) then notify("it's running: x stops it first")
+      elseif landing[e.id] then notify("a moment: it's " .. landing[e.id]) -- dropping deletes the refs its plan reads
       else
         endchat(e)
-        if vim.uv.fs_stat(wtdir(e)) then git.remove_worktree(e.root, wtdir(e)) end
+        local wt = wtdir(e)
+        if vim.uv.fs_stat(wt) then git.remove_worktree(e.root, wt) end
         dropped[#dropped + 1] = e
-        for p in e.task:gmatch("@(" .. vim.pesc(M.PASTES) .. "/paste%-%d+%.png)") do os.remove(p) end
+        if e.task:find(M.PASTES, 1, true) then for p in e.task:gmatch(pastes) do os.remove(p) end end
         inbox.remove(e)
       end
     end
@@ -958,7 +1021,7 @@ function M.drop_many(list)
     by_root[e.root] = by_root[e.root] or {}
     table.insert(by_root[e.root], "refs/sepal/" .. e.id)
   end
-  for root, prefixes in pairs(by_root) do git.delete_refs(root, prefixes) end
+  for root, prefixes in pairs(by_root) do git.delete_refs_bg(root, prefixes) end
   rm_sessions(vim.tbl_map(function(e) return e.session end, dropped))
 end
 
@@ -1021,36 +1084,42 @@ function M.show(e)
   end
   -- the after side of each file, for the quickfix list to point at. Filled now: filling it later
   -- would move the list's line numbers; the before buffers are made lazily, from the same batch
-  local after, busy = {}, false
+  local group = vim.api.nvim_create_augroup("sepal.review." .. tab, { clear = true })
+  local after, idx, busy = {}, {}, false
   for i, path in ipairs(st.paths) do
     local b = scratch(content(z, i), ("sepal://%s/after/%s"):format(e.id, path))
     vim.bo[b].bufhidden, vim.b[b].sepal_path = "hide", path
     keys(b)
-    after[i] = b
-    vim.api.nvim_create_autocmd("BufWinEnter", { buffer = b, callback = function()
-      if busy or not (vim.api.nvim_win_is_valid(old) and vim.api.nvim_win_is_valid(new)) then return end
-      busy = true -- setting the windows' buffers below fires this again
-      if vim.bo[b].filetype == "" then vim.bo[b].filetype = vim.filetype.match({ filename = path }) or "" end -- once shown: it may start a parser
-      local w = vim.api.nvim_get_current_win()
-      local before = scratch(content(a, i), ("sepal://%s/before/%s"):format(e.id, path), vim.bo[b].filetype)
-      vim.b[before].sepal_path = path
-      keys(before)
-      -- after on the right, before on the left, whichever window the quickfix list opened it in
-      for _, s in ipairs({ { old, before, "before" }, { new, b, "after" } }) do
-        vim.api.nvim_win_call(s[1], function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(s[1], s[2]); vim.cmd("diffthis") end)
-        vim.wo[s[1]].winbar = s[3] .. ": " .. path
-      end
-      if w == old then vim.api.nvim_set_current_win(new) end
-      busy = false
-    end })
-    -- a hidden buffer stays in the diff (unless 'diffopt' has hiddenoff): every line would look changed
-    vim.api.nvim_create_autocmd("BufWinLeave", { buffer = b, callback = function()
-      for _, w in ipairs(vim.fn.win_findbuf(b)) do vim.api.nvim_win_call(w, function() vim.cmd("diffoff") end) end
-    end })
+    after[i], idx[b] = b, i
   end
+  vim.api.nvim_create_autocmd("BufWinEnter", { group = group, callback = function(ev)
+    local i = idx[ev.buf]
+    if not i then return end
+    local b, path = ev.buf, st.paths[i]
+    if busy or not (vim.api.nvim_win_is_valid(old) and vim.api.nvim_win_is_valid(new)) then return end
+    busy = true -- setting the windows' buffers below fires this again
+    if vim.bo[b].filetype == "" then vim.bo[b].filetype = vim.filetype.match({ filename = path }) or "" end -- once shown: it may start a parser
+    local w = vim.api.nvim_get_current_win()
+    local before = scratch(content(a, i), ("sepal://%s/before/%s"):format(e.id, path), vim.bo[b].filetype)
+    vim.b[before].sepal_path = path
+    keys(before)
+    -- after on the right, before on the left, whichever window the quickfix list opened it in
+    for _, s in ipairs({ { old, before, "before" }, { new, b, "after" } }) do
+      vim.api.nvim_win_call(s[1], function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(s[1], s[2]); vim.cmd("diffthis") end)
+      vim.wo[s[1]].winbar = s[3] .. ": " .. path
+    end
+    if w == old then vim.api.nvim_set_current_win(new) end
+    busy = false
+  end })
+  -- a hidden buffer stays in the diff (unless 'diffopt' has hiddenoff): every line would look changed
+  vim.api.nvim_create_autocmd("BufWinLeave", { group = group, callback = function(ev)
+    if not idx[ev.buf] then return end
+    for _, w in ipairs(vim.fn.win_findbuf(ev.buf)) do vim.api.nvim_win_call(w, function() vim.cmd("diffoff") end) end
+  end })
   vim.api.nvim_create_autocmd("TabClosed", { callback = function()
     if vim.api.nvim_tabpage_is_valid(tab) then return end
     for _, b in ipairs(after) do pcall(vim.api.nvim_buf_delete, b, { force = true }) end
+    pcall(vim.api.nvim_del_augroup_by_id, group)
     return true
   end })
   local items = {}
@@ -1235,6 +1304,6 @@ vim.api.nvim_create_autocmd("VimLeavePre", { group = vim.api.nvim_create_augroup
   for _, j in pairs(jobs) do if j.job then pcall(j.job.kill, j.job, 15) end end
 end })
 
-M._t = { jobs = jobs, queue = queue, reply_of = reply_of }
+M._t = { jobs = jobs, queue = queue, landing = landing, reply_of = reply_of, about = about }
 
 return M

@@ -6,7 +6,11 @@ local M = {}
 local cache = {} -- root -> list of entries, newest first
 
 local function cfg() return require("sepal").config() end
-function M.key(root) return vim.fn.sha256(root) end
+local keys = {}
+function M.key(root)
+  if not keys[root] then keys[root] = vim.fn.sha256(root) end
+  return keys[root]
+end
 local function file(root) return vim.fs.joinpath(cfg().worktrees, M.key(root) .. ".json") end
 
 function M.list(root)
@@ -36,13 +40,16 @@ local batching, pending = 0, { roots = {}, render = false } -- >0: saves and ren
 
 local function save(root)
   if batching > 0 then pending.roots[root] = true return end
-  vim.fn.mkdir(cfg().worktrees, "p")
   local keep = vim.tbl_map(function(e) -- a shallow copy is enough: it's only encoded
     local c = {}
     for k, v in pairs(e) do if k ~= "activity" and k ~= "subagents" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
     return c
   end, M.list(root))
   local f = io.open(file(root), "w")
+  if not f then
+    vim.fn.mkdir(cfg().worktrees, "p")
+    f = io.open(file(root), "w")
+  end
   if f then f:write(vim.json.encode(keep)); f:close() end
 end
 
@@ -322,16 +329,17 @@ draw = function()
   heads = {}
   for row = 1, #lines do heads[row] = marks[row] ~= nil end
   vim.api.nvim_win_call(w, function()
-    vim.cmd("silent! normal! zE")
+    local cmds = { "silent! normal! zE" }
     for row = 1, #lines do
       local last = row
       while heads[row] and rows[last + 1] == rows[row] do last = last + 1 end
       if last > row then
-        vim.cmd(("%d,%dfold"):format(row, last))
+        cmds[#cmds + 1] = ("%d,%dfold"):format(row, last)
         local o = opened[rows[row]]
-        if o or (o == nil and planned[rows[row]]) then vim.cmd(row .. "foldopen") end
+        if o or (o == nil and planned[rows[row]]) then cmds[#cmds + 1] = row .. "foldopen" end
       end
     end
+    vim.cmd(table.concat(cmds, "\n"))
   end)
 end
 M.render = function() render() end
@@ -352,11 +360,10 @@ end
 -- once the open draft (also one you had before the :w) is sent or discarded. An answered btw
 -- copies into an implement draft, its question and answer as context
 local function drafts(queue)
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.b[b].sepal_task then
-      return vim.api.nvim_create_autocmd("BufWipeout", { buffer = b, once = true,
-        callback = function() vim.schedule(function() drafts(queue) end) end })
-    end
+  local d = require("sepal").draft()
+  if d then
+    return vim.api.nvim_create_autocmd("BufWipeout", { buffer = d, once = true,
+      callback = function() vim.schedule(function() drafts(queue) end) end })
   end
   local e = table.remove(queue, 1)
   if not e then return end
@@ -382,9 +389,11 @@ function M.write(b)
       if cur and i then table.insert(plans[cur], { tonumber(i), m }) end
     end
   end
+  local by = {}
+  for _, e in ipairs(M.list(root)) do by[e.id] = e end
   local agent = require("sepal.agent")
   for id, got in pairs(plans) do
-    local e = M.find(root, id)
+    local e = by[id]
     if e and e.status == "planned" and e.plan then
       local plan, used = {}, {}
       for _, g in ipairs(got) do
@@ -405,7 +414,7 @@ function M.write(b)
   end
   vim.bo[b].modified = false
   local dropping = {}
-  for _, id in ipairs(gone) do local e = M.find(root, id); if e then dropping[#dropping + 1] = e end end
+  for _, id in ipairs(gone) do local e = by[id]; if e then dropping[#dropping + 1] = e end end
   agent.drop_many(dropping) -- a running one stays
   drawn = nil
   render()

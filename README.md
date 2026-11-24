@@ -168,7 +168,7 @@ require("sepal").setup({
   prepare = nil,       -- shell command run in each new worktree first ($SEPAL_ROOT is your repo)
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
-  max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
+  max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
@@ -341,7 +341,7 @@ sepal follows the agent through Claude Code hooks (passed with `--settings`, you
 run): what tool it's on, when it asks for something, and when its turn is over. Then it closes it
 and runs the check.
 
-At most `max_running` implementation tasks (2 by default) run at once, including preparation and
+At most `max_running` implementation tasks (3 by default) run at once, including preparation and
 checking; the rest wait as `queued`. Btw and orchestrate runs bypass this limit.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal warns

@@ -945,8 +945,27 @@ test("<c-c><c-s> turns the idea into the task with task_suggest", function()
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "graceful shutdown" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
   assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "task not written")
-  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: graceful shutdown", "- got: ", "- got: Files:" })
+  local got = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  eq(got[2], "- got: I want a deeper version of this task, not a bigger one. Before rewriting it, work out four things:")
+  eq(got[#got], "- got: graceful shutdown") -- the filled-in fields only: the empty Files: is dropped
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+end)
+
+test("<c-c><c-s> sharpens a short feat's filled-in fields; a large feat's goes as written", function()
+  sepal.task(nil, { "Goal: retry flaky uploads", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.lua" })
+  local b = task_buf()
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
+  assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "not sharpened")
+  local got = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  eq(vim.list_slice(got, #got - 4), { "- got: keeping its Done when: and Files: unless they're wrong; no code fences, no filler. The task:",
+    "- got: Goal: retry flaky uploads", "- got: ", "- got: Files:" , "- got: - @a.lua" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  sepal.task(nil, { "big idea", "", "Files:" }, "orchestrate")
+  b = task_buf()
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
+  assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "not written")
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: big idea", "- got: ", "- got: Files:" })
+  vim.api.nvim_buf_delete(b, { force = true })
 end)
 
 test("an empty idea line shows a hint that goes away when you type", function()
@@ -1083,7 +1102,7 @@ test("a task shows its keys on top, like the inbox", function()
   sepal.config().task_suggest = nil
   vim.api.nvim_buf_delete(task_buf(), { force = true })
   eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 },
-    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> write  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
+    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
 end)
 
 test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", function()

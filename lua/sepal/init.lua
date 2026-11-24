@@ -296,10 +296,25 @@ local function template(check)
   return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
 local IDEA = { "", "", "Files:" } -- with task_suggest (or for btw): the idea goes on top, <c-c><c-s> writes the task
-local HINT = { implement = "what to change, where and why; <c-c><c-s> writes the task",
+local HINT = { implement = "what to change, where and why; <c-c><c-s> sharpens it",
   btw = "ask anything about the project; it answers, nothing changes",
   orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
+-- <c-c><c-s> on a short feat: this goes to task_suggest above the task's filled-in fields (M.tidy's)
+local SHARPEN = [[I want a deeper version of this task, not a bigger one. Before rewriting it, work out four things:
+
+1. What a top professional in this field would do here that I'm not asking for.
+2. The rawest material they would start from instead of what has already been digested for me.
+3. The specific methods and tools they would use.
+4. What, other than you or me, would show the result is right.
+
+Then rewrite my task to ask for exactly that. Have the rewritten task ask the agent to prototype any
+choice an experiment can settle and recommend an option based on what it observed. Leave product or
+preference choices that no experiment can settle for me to make.
+
+Output only the rewritten task, in its fields (Goal:, Constraints:, Done when:, Files: as @path),
+keeping its Done when: and Files: unless they're wrong; no code fences, no filler. The task:
+]]
 
 -- add "- @path" at the end of the Files: list (once)
 local function add_file(buf, path)
@@ -373,7 +388,7 @@ local function keys(buf)
   local kind = vim.b[buf].sepal_kind
   local help = kind == "btw" and "btw  <c-c><c-c> ask  "
     or kind == "orchestrate" and "large feat  <c-c><c-c> plan  <c-c><c-w> plan, its tasks wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
-    or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
+    or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> sharpen  " or "")
   help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
   local line = { { help, "SepalDim" } }
   local w = vim.b[buf].sepal_who
@@ -389,7 +404,8 @@ end
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
 -- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-p> pastes an image,
--- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task.
+-- <c-c><c-s> has task_suggest turn what's there (an idea + files) into the task; on a short feat
+-- (implement) it sharpens it: its filled-in fields go with the SHARPEN prompt.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
 -- kind: "implement" (nil) changes the code; "btw" asks about the project: it answers, nothing lands;
@@ -491,8 +507,13 @@ function M.task(range, lines, kind, agent)
     if job then return M.notify("still writing the task") end
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     if vim.trim((text:gsub("Files:", ""))) == "" then return M.notify("write the idea first", vim.log.levels.WARN) end
+    if kind == "implement" then
+      local filled, err = M.tidy(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+      if not filled then return M.notify(err:gsub(", nothing sent", ", nothing to sharpen"), vim.log.levels.WARN) end
+      text = SHARPEN .. table.concat(filled, "\n")
+    end
     vim.cmd.stopinsert()
-    local tick, done = vim.b[buf].changedtick, progress("writing the task")
+    local tick, done = vim.b[buf].changedtick, progress(kind == "implement" and "sharpening the task" or "writing the task")
     local ok, j = pcall(vim.system, C.task_suggest, { stdin = text, text = true }, vim.schedule_wrap(function(r)
       job = nil
       if not vim.api.nvim_buf_is_valid(buf) then return done() end
@@ -514,7 +535,7 @@ function M.task(range, lines, kind, agent)
       return M.notify("could not run " .. tostring(C.task_suggest[1]) .. "\n" .. tostring(j):match("[^\n]*"), vim.log.levels.ERROR)
     end
     job = j
-  end, vim.tbl_extend("force", o, { desc = "Write the task with task_suggest" }))
+  end, vim.tbl_extend("force", o, { desc = kind == "implement" and "Sharpen the task with task_suggest" or "Write the task with task_suggest" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-f>", function()
     vim.cmd.stopinsert()
     local ok, fff = pcall(require, "fff")

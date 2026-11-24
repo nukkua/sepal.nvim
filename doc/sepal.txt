@@ -112,7 +112,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                }
 <                                                      *sepal-task_suggest*
 `task_suggest` argv that gets the task buffer on stdin (your idea and
-             Files:) and prints the finished task. <c-c><c-s> runs it. For
+             Files:) and prints the finished task. <c-c><c-s> runs it; on a
+             short feat it gets a sharpen prompt above the filled-in fields. For
              Claude Code, pass -p and --no-session-persistence.
                                                              *sepal-sakura*
 `sakura`     true: cherry-blossom pinks for SepalTitle, SepalAccent
@@ -177,7 +178,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                 itself once it passes
                     <c-c><c-w>  send it and close the buffer; it waits in
                                 the inbox for L
-                    <c-c><c-s>  have |sepal-task_suggest| write the task
+                    <c-c><c-s>  short feat: have |sepal-task_suggest| sharpen
+                                it (its filled-in fields, deeper not bigger);
+                                large feat: write it
                     <c-c><c-f>  add a file under Files: as @path
                     <c-c><c-p>  paste the clipboard's image (wl-paste,
                                 xclip or pngpaste); the agent may read it

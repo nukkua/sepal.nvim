@@ -167,8 +167,13 @@ require("sepal").setup({
   land = "auto",       -- "auto": a task that passes lands by itself; "manual": it waits for L in the inbox (Lua API; the task keys choose for themselves)
   prepare = nil,       -- shell command run in each new worktree first ($SEPAL_ROOT is your repo)
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
+<<<<<<< yours
   task_suggest = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
+=======
+  task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
+  max_running = 2,     -- tasks running at once, the rest wait as "queued"; nil: no limit
+>>>>>>> sepal
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
@@ -272,7 +277,7 @@ it does not rerun the check. Dropping a task removes its refs, chat and pasted i
 | ------------ | ---------------------------------------------------------------------- |
 | `<c-c><c-c>` | send the task and close the buffer; it lands by itself once it passes  |
 | `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
-| `<c-c><c-s>` | short feat: have `task_suggest` sharpen it (deeper, not bigger); large feat: write it (`u` undoes) |
+| `<c-c><c-s>` | short feat: have `task_sharpen` sharpen it (deeper, not bigger); large feat: write it (`u` undoes) |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |
 | `<c-c><c-k>` | discard the task                                                       |
@@ -285,12 +290,12 @@ draft, so `:Sepal task` always starts a new one.
 
 ### Writing the task for you
 
-Set `task_suggest` and the task buffer starts as just your idea and `Files:`. `<c-c><c-s>` pipes
+Set `task_sharpen` and the task buffer starts as just your idea and `Files:`. `<c-c><c-s>` pipes
 it to the command, which answers with the task:
 
 ```lua
 require("sepal").setup({
-  task_suggest = { "claude", "-p", "--model", "opus", "--effort", "medium",
+  task_sharpen = { "claude", "-p", "--model", "opus", "--effort", "medium",
     "--no-session-persistence", "--tools=Read,Grep,Glob",
     "Turn the rough idea on stdin into a short task: Goal, Constraints, Done when "
     .. "(one shell command that proves it works, e.g. the test to run), Files (as @path). "

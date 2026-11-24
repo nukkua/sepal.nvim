@@ -957,8 +957,8 @@ test("checkhealth runs", function() require("sepal.health").check() end)
 
 local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n'; sed 's/^/- got: /'; printf '```\n']] }
 
-test("<c-c><c-s> turns the idea into the task with task_suggest", function()
-  sepal.setup({ task_suggest = suggest })
+test("<c-c><c-s> turns the idea into the task with task_sharpen", function()
+  sepal.setup({ task_sharpen = suggest })
   sepal.task()
   local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
@@ -1005,11 +1005,11 @@ test("an empty idea line shows a hint that goes away when you type", function()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false) -- still "write the idea first", nothing runs
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.config().task_suggest = nil -- setup({ task_suggest = nil }) is a no-op: nil keys vanish
+  sepal.config().task_sharpen = nil -- setup({ task_sharpen = nil }) is a no-op: nil keys vanish
   sepal.task()
   eq(marks(task_buf()), 0)
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.setup({ task_suggest = suggest })
+  sepal.setup({ task_sharpen = suggest })
 end)
 
 test("<c-c><c-s> keeps what you typed while it was writing", function()
@@ -1023,8 +1023,8 @@ test("<c-c><c-s> keeps what you typed while it was writing", function()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
-test("<c-c><c-s> with a failing task_suggest leaves the buffer as it was", function()
-  sepal.setup({ task_suggest = { "sh", "-c", "echo boom >&2; exit 3" } })
+test("<c-c><c-s> with a failing task_sharpen leaves the buffer as it was", function()
+  sepal.setup({ task_sharpen = { "sh", "-c", "echo boom >&2; exit 3" } })
   sepal.task()
   local b = task_buf()
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
@@ -1035,10 +1035,10 @@ test("<c-c><c-s> with a failing task_suggest leaves the buffer as it was", funct
   local ok = vim.wait(3000, function() return #got > 0 end, 20)
   vim.notify = notify
   assert(ok, "no error")
-  eq(got, { "task_suggest failed (exit 3)\nboom" })
+  eq(got, { "task_sharpen failed (exit 3)\nboom" })
   eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
-  sepal.config().task_suggest = nil -- setup({ task_suggest = nil }) is a no-op: nil keys vanish
+  sepal.config().task_sharpen = nil -- setup({ task_sharpen = nil }) is a no-op: nil keys vanish
 end)
 
 test("task <c-c><c-k> discards it", function()
@@ -1116,10 +1116,10 @@ test("a task shows its keys on top, like the inbox", function()
   end
   sepal.task()
   local a = help()
-  sepal.config().task_suggest = suggest
+  sepal.config().task_sharpen = suggest
   sepal.task() -- the draft again
   local b = help()
-  sepal.config().task_suggest = nil
+  sepal.config().task_sharpen = nil
   vim.api.nvim_buf_delete(task_buf(), { force = true })
   eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 },
     { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
@@ -1228,7 +1228,7 @@ test("status: what's running, ready and needs you, for the statusline; User Sepa
 end)
 
 test(":'<,'>Sepal task puts the selected lines in the task and lists the file", function()
-  sepal.config().task_suggest = nil
+  sepal.config().task_sharpen = nil
   vim.cmd.edit("tests/pool.lua")
   vim.bo.filetype = "lua"
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })

@@ -51,15 +51,15 @@ function M.check()
   h.info("Claude Code may ask to trust a task's new worktree: sepal warns, answer it in :Sepal open")
   if pcall(require, "fidget") then h.ok("fidget.nvim found: progress spinners") else h.info("fidget.nvim not found: plain notifications") end
   if pcall(require, "fff") then h.ok("fff.nvim found: <c-c><c-f> in a task picks files with it") else h.info("fff.nvim not found: <c-c><c-f> in a task prompts for a path") end
-  local ss = C.task_suggest
+  local ss = C.task_sharpen
   if ss == nil then
-    h.info("task_suggest not set: <c-c><c-s> in a task does nothing")
+    h.info("task_sharpen not set: <c-c><c-s> in a task does nothing")
   elseif not argv(ss) then
-    h.error("task_suggest must be an argv list, e.g. { \"claude\", \"-p\", \"...\" }")
+    h.error("task_sharpen must be an argv list, e.g. { \"claude\", \"-p\", \"...\" }")
   elseif vim.fn.executable(ss[1]) == 0 then
-    h.error("task_suggest: " .. ss[1] .. " is not executable")
+    h.error("task_sharpen: " .. ss[1] .. " is not executable")
   else
-    h.ok("task_suggest: " .. ss[1])
+    h.ok("task_sharpen: " .. ss[1])
   end
 end
 

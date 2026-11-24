@@ -103,14 +103,17 @@ function M.add_worktree(root, dir, commit, on_done)
     vim.schedule_wrap(function(r) on_done(r.code == 0, vim.trim(r.stderr or "")) end))
 end
 
--- the path is free at once (renamed aside: a retry or reply reuses it); deleting the checkout, slow
--- in a big repo, happens in the background, then git drops its record of it
+-- the path is free at once (renamed aside: a retry or reply reuses it) and git's record of it goes;
+-- deleting the checkout, slow in a big repo, happens in the background. Not `git worktree prune`:
+-- it would delete the record of a worktree another `worktree add` is making right then
 function M.remove_worktree(root, dir)
   local trash = ("%s.old-%d"):format(dir, vim.uv.hrtime())
   if vim.uv.fs_rename(dir, trash) then
-    local ok = pcall(vim.system, { "rm", "-rf", trash }, {}, vim.schedule_wrap(function()
-      pcall(vim.system, { "git", "-C", root, "worktree", "prune" })
-    end))
+    local f = io.open(trash .. "/.git")
+    local admin = f and f:read("*l"):match("^gitdir: (.+)$")
+    if f then f:close() end
+    if admin then vim.fn.delete(admin, "rf") end
+    local ok = pcall(vim.system, { "rm", "-rf", trash })
     if ok then return end
     dir = trash
   end

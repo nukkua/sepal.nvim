@@ -397,7 +397,8 @@ agent = function(e, prompt, wt)
     argv = vim.list_extend(cmd(args(e), mode(e), e), model(e))
     for _, r in ipairs(allow) do vim.list_extend(argv, { "--allowedTools", r }) end
   end
-  for i, a in ipairs(argv) do if a == "--model" and argv[i + 1] then e.model = argv[i + 1] end end -- till SessionStart says
+  local asked -- the --model it runs with: Devin's SessionStart names a fusion's lead model only, so it keeps that
+  for i, a in ipairs(argv) do if a == "--model" and argv[i + 1] then e.model, asked = argv[i + 1], dv end end -- till SessionStart says
   if e.session then vim.list_extend(argv, { dv and "-r" or "--resume", e.session }) end
   vim.list_extend(argv, dv and { "--", prompt } or { "--settings", SETTINGS, prompt })
   local b = vim.api.nvim_create_buf(false, true)
@@ -497,7 +498,7 @@ agent = function(e, prompt, wt)
       e.session = ev.session_id
       inbox.save(e.root) -- now, not when it finishes: a quit mid-run keeps the chat for o and r
     end
-    if type(ev.model) == "string" and ev.model ~= e.model then e.model = ev.model; dirty = true end -- SessionStart says it
+    if not asked and type(ev.model) == "string" and ev.model ~= e.model then e.model = ev.model; dirty = true end -- SessionStart says it
     local name = ev.hook_event_name
     if name == "PreToolUse" then
       e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)

@@ -1594,7 +1594,7 @@ if [ -n "$resumed" ]; then
   while :; do sleep 1; done
 fi
 ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
-ev '{"hook_event_name":"SessionStart","source":"startup","session_id":"dv1"}'
+ev '{"hook_event_name":"SessionStart","source":"startup","session_id":"dv1","model":"claude-opus-5-5"}'
 printf '\033]7501;state=working:app=devin\007'
 if [ -n "$SEPAL_INTERRUPT" ]; then sleep 0.2; printf '\033]7501;state=idle:app=devin\007'; while :; do sleep 1; done; fi
 ev "{\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"exec\",\"tool_input\":{\"command\":\"rm -rf x\"},\"session_id\":\"dv1\"}"

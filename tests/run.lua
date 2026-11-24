@@ -708,7 +708,10 @@ test("the inbox is edited like oil: dd drops on :w, u takes it back, yyp opens a
   eq(#inbox.list(work), 1) -- the copy is a draft, not a task yet
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), vim.split(newest().task, "\n"))
   eq(vim.api.nvim_get_current_buf(), task_buf()) -- focused, to change it
-  vim.api.nvim_buf_delete(task_buf(), { force = true })
+  vim.o.splitbelow = true -- closing the draft would focus the window above, not the inbox
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "x", false) -- discard it
+  vim.o.splitbelow = false
+  assert(vim.wait(1000, function() return vim.api.nvim_get_current_buf() == b end, 10), "the inbox lost focus")
   vim.cmd("close")
 end)
 

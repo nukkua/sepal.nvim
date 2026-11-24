@@ -423,7 +423,12 @@ function M.task(range, lines, kind, agent)
   local template = (btw or C.task_suggest) and IDEA or template(check)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
+  local from = vim.api.nvim_get_current_win()
   vim.api.nvim_open_win(buf, true, { split = "above", win = 0, height = 12 })
+  -- back to where the draft came from (the inbox for yyp): with splitbelow, closing it would focus the window above
+  vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = function()
+    vim.schedule(function() if vim.api.nvim_win_is_valid(from) then vim.api.nvim_set_current_win(from) end end)
+  end })
   keys(buf)
   check_hint(buf)
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf); check_hint(buf) end })

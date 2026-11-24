@@ -149,12 +149,12 @@ end
 
 M.progress = progress
 
--- in the agent (or a chat), or with the panel open, fidget's window is noise: the panel already shows it.
+-- in the agent (or a chat), the inbox, or with the panel open, fidget's window is noise: the panel already shows it.
 -- It shows again (with what's current) once you leave
 local hid_fidget = false
 function M.fidget()
   local panel = package.loaded["sepal.panel"]
-  local hide = vim.b.sepal_agent == true or (panel ~= nil and panel.shown())
+  local hide = vim.b.sepal_agent == true or vim.bo.filetype == "sepal-inbox" or (panel ~= nil and panel.shown())
   if hide == hid_fidget then return end -- only flip on a change, so your own suppress() isn't undone
   local ok, n = pcall(require, "fidget.notification")
   if ok then n.suppress(hide); hid_fidget = hide end

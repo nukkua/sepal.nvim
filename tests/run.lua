@@ -1013,6 +1013,17 @@ test("fidget's window hides while the panel is open: the panel shows the same", 
   eq(got, { true, false })
 end)
 
+test("fidget's window hides inside the inbox", function()
+  local got = {}
+  package.loaded["fidget.notification"] = { suppress = function(v) got[#got + 1] = v end }
+  vim.cmd("Sepal inbox")
+  require("sepal").fidget()
+  vim.cmd("enew")
+  require("sepal").fidget()
+  package.loaded["fidget.notification"] = nil
+  eq(got, { true, false })
+end)
+
 test("notify: info goes to fidget, warnings to vim.notify", function()
   local got = {}
   package.loaded.fidget = { notify = function(msg, lvl, o) got[#got + 1] = { "fidget", msg, lvl, o.annote } end }

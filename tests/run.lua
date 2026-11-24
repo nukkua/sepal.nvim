@@ -1379,12 +1379,13 @@ test("a plan is read from the end of an orchestrate's reply: each task, its mode
 end)
 
 test("the orchestrate demo's self-check passes (tests/demo.lua, when it is there)", function()
-  local demo = vim.fs.joinpath(vim.opt.rtp:get()[1], "tests/demo.lua") -- the repo root; cwd is a temp dir by now
+  local root = vim.opt.rtp:get()[1] -- the repo root; cwd is a temp dir by now
+  local demo = vim.fs.joinpath(root, "tests/demo.lua")
   if not vim.uv.fs_stat(demo) then
     print("skip: tests/demo.lua not found")
     return
   end
-  local r = vim.system({ vim.v.progpath, "--headless", "-u", demo }, { env = { SEPAL_DEMO_CHECK = "1" }, text = true }):wait(60000)
+  local r = vim.system({ vim.v.progpath, "--headless", "-u", demo }, { cwd = root, env = { SEPAL_DEMO_CHECK = "1" }, text = true }):wait(60000)
   assert(r.code == 0, ("demo self-check exited %d\nstdout:\n%s\nstderr:\n%s"):format(r.code, r.stdout or "", r.stderr or ""))
 end)
 

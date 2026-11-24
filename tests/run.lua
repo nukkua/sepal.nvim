@@ -1193,7 +1193,7 @@ test(":'<,'>Sepal task puts the selected lines in the task and lists the file", 
   vim.cmd.edit("tests/pool.lua")
   vim.bo.filetype = "lua"
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })
-  key("i")
+  key("s")
   vim.cmd("2,3Sepal task")
   local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Constraints:", "- ", "",
@@ -1373,7 +1373,7 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(sepal.config().models.btw, "sonnet") -- setting one keeps the other's default
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
   notified(function()
-    key("i")
+    key("s")
     sepal.pick()
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: implemented" })
     vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
@@ -1413,7 +1413,7 @@ test("the orchestrate demo's self-check passes (tests/demo.lua, when it is there
   assert(r.code == 0, ("demo self-check exited %d\nstdout:\n%s\nstderr:\n%s"):format(r.code, r.stdout or "", r.stderr or ""))
 end)
 
-test("o orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
+test("l (large feat) orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
   clean(); reset()
   local cmd = sepal.config().cmd
   sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "opus" }, { cmd = cmd, model = "sonnet" }, { cmd = cmd, model = "haiku" } }
@@ -1423,7 +1423,7 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
     "   Files:", "   - @a.txt", "2. [haiku] Add b", "   Goal: add b.txt", "", "Assumptions:", "- two tasks are enough" }, "\n") } } } }) }, reply)
   vim.env.SEPAL_REPLY = reply
   local got = msgs(notified(function()
-    key("o", "1")
+    key("l", "1")
     sepal.pick()
     eq(vim.b[task_buf()].sepal_kind, "orchestrate")
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: shout and add", "", "Done when: true" })
@@ -1518,13 +1518,13 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   sepal.setup({ agents = { { cmd = "claude", name = "claude" }, { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
     { cmd = "codex", model = "gpt-5", key = "t" }, { cmd = "devin" } } })
   local g = vim.fn.getcharstr
-  vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("t"); return "i" end
+  vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("t"); return "s" end
   sepal.pick()
   local codex = draft()
   vim.api.nvim_echo = echo
   sepal.setup({ models = {}, agents = nil })
-  eq(shown, { "sepal o orchestrate ◇ sh   i implement ✻ opus 5.5   b btw ✻ sonnet   ",
-    "sepal o orchestrate   i implement   b btw   ",
+  eq(shown, { "sepal l large feat ◇ sh   s short feat ✻ opus 5.5   b btw ✻ sonnet   ",
+    "sepal l large feat   s short feat   b btw   ",
     "sepal 1 ✻ claude                                  2 ❖ devin  · opus 5.5 medium + swe 2 high   t ֎ codex  · gpt 5\n"
       .. "4 ❖ devin" })
   eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet  " }, { "֎", "SepalDim", " gpt 5  " } })
@@ -1569,9 +1569,9 @@ while :; do sleep 1; done
   sepal.setup({ agents = { { cmd = { "sh", "-c", fake, "sh" }, name = "claude" }, { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } } } })
   vim.env.SEPAL_EDIT = [[echo dv > a.txt]]
   local got = msgs(notified(function()
-    key("i")
+    key("s")
     local g = vim.fn.getcharstr
-    vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("2"); return "i" end
+    vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("2"); return "s" end
     sepal.pick()
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: by devin", "", "Done when: true" })
     vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)

@@ -372,7 +372,7 @@ local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
   local kind = vim.b[buf].sepal_kind
   local help = kind == "btw" and "btw  <c-c><c-c> ask  "
-    or kind == "orchestrate" and "orchestrate  <c-c><c-c> plan  <c-c><c-w> plan, its tasks wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
+    or kind == "orchestrate" and "large feat  <c-c><c-c> plan  <c-c><c-w> plan, its tasks wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
     or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_suggest and "<c-c><c-s> write  " or "")
   help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
   local line = { { help, "SepalDim" } }
@@ -558,9 +558,10 @@ function M.implement(e)
   if vim.b.sepal_task then vim.api.nvim_win_set_cursor(0, { 1, #"Goal: " }) end
 end
 
--- :Sepal task: pick its kind first, o orchestrate, i implement or b btw (any other key cancels); an
--- open draft just gets the focus (and the range), whatever its kind
-local KINDS = { i = "implement", b = "btw", o = "orchestrate" }
+-- :Sepal task: pick its kind first, l large feat (an orchestrate), s short feat (an implement) or b btw
+-- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
+local KINDS = { s = "implement", b = "btw", l = "orchestrate" }
+local LABEL = { implement = "short feat", btw = "btw", orchestrate = "large feat" } -- shown names; the kinds stay (saved inboxes, models keys)
 -- a one-line pick (here and the inbox's m): chunks echoed after "sepal ", the key you press (nil: <Esc>, <c-c>)
 function M.choose(chunks)
   chunks = vim.list_extend({ { "sepal ", "SepalTitle" } }, chunks)
@@ -582,8 +583,8 @@ function M.pick(range)
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local chunks = {}
-  for _, k in ipairs({ "o", "i", "b" }) do
-    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. KINDS[k] } })
+  for _, k in ipairs({ "l", "s", "b" }) do
+    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. LABEL[KINDS[k]] } })
     if #agents < 2 then
       local l, m, name = who(KINDS[k])
       vim.list_extend(chunks, { { " " }, l, { " " .. (m or name), "SepalDim" } })

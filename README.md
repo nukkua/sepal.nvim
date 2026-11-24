@@ -37,8 +37,8 @@ vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox
 ```
 
 **2. Write a task.** Select the code you mean (or don't) and press `<leader>as`, then pick what
-kind of task it is: `o` orchestrate (a bigger job, planned as several tasks, see Orchestrate), `i`
-implement (a change, below) or `b` btw (a question, see Btw). A buffer opens
+kind of task it is: `l` large feat (a bigger job, planned as several tasks, see Orchestrate), `s`
+short feat (a change, below) or `b` btw (a question, see Btw). A buffer opens
 above your code:
 
 ```

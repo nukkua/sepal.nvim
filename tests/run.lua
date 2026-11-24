@@ -957,17 +957,19 @@ test("checkhealth runs", function() require("sepal.health").check() end)
 
 local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n'; sed 's/^/- got: /'; printf '```\n']] }
 
-test("<c-c><c-s> turns the idea into the task with task_sharpen", function()
+test("with task_sharpen a short feat keeps its fields; a large feat starts as the idea", function()
   sepal.setup({ task_sharpen = suggest })
   sepal.task()
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 3, false), { "Goal: ", "", "Constraints:" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  sepal.task(nil, nil, "orchestrate")
   local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "", "", "Files:" })
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "graceful shutdown" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
   assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "task not written")
-  local got = vim.api.nvim_buf_get_lines(b, 0, -1, false)
-  eq(got[2], "- got: I want a deeper version of this task, not a bigger one. Before rewriting it, work out four things:")
-  eq(got[#got], "- got: graceful shutdown") -- the filled-in fields only: the empty Files: is dropped
+  -- the idea went as written: no sharpen prompt for a large feat
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: graceful shutdown", "- got: ", "- got: Files:" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
@@ -991,7 +993,11 @@ end)
 test("an empty idea line shows a hint that goes away when you type", function()
   local ns = vim.api.nvim_create_namespace("sepal.hint")
   local function marks(b) return #vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {}) end
-  sepal.task()
+  sepal.task() -- a short feat keeps its fields: no hint, and "Goal: " is not the idea line
+  eq(marks(task_buf()), 0)
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 1, false), { "Goal: " })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
+  sepal.task(nil, nil, "orchestrate")
   local b = task_buf()
   eq(marks(b), 1)
   local tick = vim.b[b].changedtick
@@ -1015,11 +1021,11 @@ end)
 test("<c-c><c-s> keeps what you typed while it was writing", function()
   sepal.task()
   local b = task_buf()
-  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "Goal: idea" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
-  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea, edited" })
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "Goal: idea, edited" })
   vim.wait(1500)
-  eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea, edited" })
+  eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "Goal: idea, edited" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
@@ -1027,7 +1033,7 @@ test("<c-c><c-s> with a failing task_sharpen leaves the buffer as it was", funct
   sepal.setup({ task_sharpen = { "sh", "-c", "echo boom >&2; exit 3" } })
   sepal.task()
   local b = task_buf()
-  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "idea" })
+  vim.api.nvim_buf_set_lines(b, 0, 1, false, { "Goal: idea" })
   local got = {}
   local notify = vim.notify
   vim.notify = function(msg) got[#got + 1] = msg end
@@ -1036,7 +1042,7 @@ test("<c-c><c-s> with a failing task_sharpen leaves the buffer as it was", funct
   vim.notify = notify
   assert(ok, "no error")
   eq(got, { "task_sharpen failed (exit 3)\nboom" })
-  eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "idea" })
+  eq(vim.api.nvim_buf_get_lines(b, 0, 1, false), { "Goal: idea" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   sepal.config().task_sharpen = nil -- setup({ task_sharpen = nil }) is a no-op: nil keys vanish
 end)
@@ -1109,10 +1115,12 @@ test("notify: the builtin vim.notify gets a colored echo", function()
 end)
 
 test("a task shows its keys on top, like the inbox", function()
-  local function help()
+  local function help() -- the wrapped lines joined back, from the first key (past who works on it)
     local m = vim.api.nvim_buf_get_extmarks(0, -1, 0, 0, { details = true, type = "virt_lines" })[1]
-    local l = m[4].virt_lines[1]
-    return { m[2], l[#l][1], vim.fn.winsaveview().topfill } -- after who works on it
+    local text = table.concat(vim.tbl_map(function(l)
+      return table.concat(vim.tbl_map(function(c) return c[1] end, l))
+    end, vim.tbl_filter(function(l) return l[1][1] ~= "" end, m[4].virt_lines)), "  ")
+    return { m[2], text:match("<c%-c>.*"), vim.fn.winsaveview().topfill == #m[4].virt_lines }
   end
   sepal.task()
   local a = help()
@@ -1121,8 +1129,36 @@ test("a task shows its keys on top, like the inbox", function()
   local b = help()
   sepal.config().task_sharpen = nil
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 },
-    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", 2 } })
+  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true },
+    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true } })
+end)
+
+test("a draft in a narrow window wraps its keys into lines that fit", function()
+  sepal.config().task_sharpen = suggest
+  sepal.task()
+  local b = task_buf()
+  vim.cmd("vsplit")
+  vim.api.nvim_win_set_width(0, 40)
+  vim.api.nvim_exec_autocmds("WinResized", {})
+  local m = vim.api.nvim_buf_get_extmarks(b, -1, 0, 0, { details = true, type = "virt_lines" })[1]
+  local lines = vim.tbl_map(function(l)
+    return table.concat(vim.tbl_map(function(c) return c[1] end, l))
+  end, vim.tbl_filter(function(l) return l[1][1] ~= "" end, m[4].virt_lines))
+  local width = math.huge -- the narrowest window's text width, as keys() measures it
+  for _, w in ipairs(vim.fn.win_findbuf(b)) do
+    width = math.min(width, vim.api.nvim_win_get_width(w) - vim.fn.getwininfo(w)[1].textoff)
+  end
+  assert(#lines > 1, "the keys did not wrap")
+  for _, s in ipairs(lines) do assert(vim.fn.strdisplaywidth(s) <= width, s) end
+  local joined = table.concat(lines, "  ")
+  for _, k in ipairs({ "<c-c><c-c> send", "<c-c><c-w> wait", "<c-c><c-s> sharpen",
+    "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" }) do
+    assert(joined:find(k, 1, true), k .. " was cut off")
+  end
+  eq(vim.fn.winsaveview().topfill, #m[4].virt_lines)
+  vim.api.nvim_buf_delete(b, { force = true })
+  vim.cmd("silent! only")
+  sepal.config().task_sharpen = nil
 end)
 
 test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", function()
@@ -1566,7 +1602,7 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
     "sepal l large feat   s short feat   b btw   ",
     "sepal 1 ✻ claude                                  2 ❖ devin  · opus 5.5 medium + swe 2 high   t ֎ codex  · gpt 5\n"
       .. "4 ❖ devin" })
-  eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet  " }, { "֎", "SepalDim", " gpt 5  " } })
+  eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet" }, { "֎", "SepalDim", " gpt 5" } })
 end)
 
 test(":Sepal task asks which agent with agents set: devin runs with sepal's hooks in its config; ctrl-c is caught", function()

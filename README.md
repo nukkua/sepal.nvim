@@ -285,8 +285,8 @@ draft, so `:Sepal task` always starts a new one.
 
 ### Writing the task for you
 
-Set `task_sharpen` and the task buffer starts as just your idea and `Files:`. `<c-c><c-s>` pipes
-it to the command, which answers with the task:
+Set `task_sharpen` and a large feat starts as just your idea and `Files:`, and `<c-c><c-s>` has
+the command write the task. A short feat keeps its fields, and `<c-c><c-s>` sharpens them:
 
 ```lua
 require("sepal").setup({

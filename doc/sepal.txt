@@ -112,10 +112,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                  { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", name = "devin", key = "d" },
                }
 <                                                      *sepal-task_sharpen*
-`task_sharpen` argv that gets the task buffer on stdin (your idea and
-             Files:) and prints the finished task. <c-c><c-s> runs it; on a
-             short feat it gets a sharpen prompt above the filled-in fields. For
-             Claude Code, pass -p and --no-session-persistence.
+`task_sharpen` argv that gets the task buffer on stdin and prints the
+             finished task. <c-c><c-s> runs it; a large feat's buffer is your
+             idea and Files:, a short feat's is a sharpen prompt above its
+             filled-in fields. For Claude Code, pass -p and
+             --no-session-persistence.
                                                              *sepal-skills*
 `skills`     name -> a SKILL.md path or the skill's text. Write /name in a
              task (`Goal: /how does the inbox save?`) and the skill is sent

@@ -310,9 +310,8 @@ end
 local function template(check)
   return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
-local IDEA = { "", "", "Files:" } -- with task_sharpen (or for btw): the idea goes on top, <c-c><c-s> writes the task
-local HINT = { implement = "what to change, where and why; <c-c><c-s> sharpens it",
-  btw = "ask anything about the project; it answers, nothing changes",
+local IDEA = { "", "", "Files:" } -- a large feat with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
+local HINT = { btw = "ask anything about the project; it answers, nothing changes",
   orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 -- <c-c><c-s> on a short feat: this goes to task_sharpen above the task's filled-in fields (M.tidy's)
@@ -401,18 +400,34 @@ local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
 local function keys(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
   local kind = vim.b[buf].sepal_kind
-  local help = kind == "btw" and "btw  <c-c><c-c> ask  "
-    or kind == "orchestrate" and "large feat  <c-c><c-c> plan  <c-c><c-w> plan, its tasks wait  " .. (C.task_sharpen and "<c-c><c-s> write  " or "")
-    or "<c-c><c-c> send  <c-c><c-w> wait  " .. (C.task_sharpen and "<c-c><c-s> sharpen  " or "")
-  help = help .. "<c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard"
-  local line = { { help, "SepalDim" } }
+  local help = kind == "btw" and { "btw", "<c-c><c-c> ask" }
+    or kind == "orchestrate" and { "large feat", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
+    or { "<c-c><c-c> send", "<c-c><c-w> wait", C.task_sharpen and "<c-c><c-s> sharpen" or nil }
+  vim.list_extend(help, { "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
+  local items = vim.tbl_map(function(s) return { { s, "SepalDim" } } end, help)
   local w = vim.b[buf].sepal_who
-  if w then line = { { w[1], w[2] }, { " " .. w[3] .. "  ", "SepalDim" }, line[1] } end
+  if w then table.insert(items, 1, { { w[1], w[2] }, { " " .. w[3], "SepalDim" } }) end
+  -- virt_lines don't wrap: the items go on as many lines as the narrowest window needs
+  local width = math.huge
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    width = math.min(width, vim.api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff)
+  end
+  local lines, used = { {} }, 0
+  for _, item in ipairs(items) do
+    local iw = 0
+    for _, c in ipairs(item) do iw = iw + vim.fn.strdisplaywidth(c[1]) end
+    local line = lines[#lines]
+    if #line > 0 and used + 2 + iw > width then line, used = {}, 0; lines[#lines + 1] = line end
+    if #line > 0 then line[#line + 1], used = { "  ", "SepalDim" }, used + 2 end
+    vim.list_extend(line, item)
+    used = used + iw
+  end
+  lines[#lines + 1] = { { "" } }
   vim.api.nvim_buf_clear_namespace(buf, KEYS_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
-  vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = { line, { { "" } } }, virt_lines_above = true })
-  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
+  vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = lines, virt_lines_above = true })
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     -- lines above line 1 only show with topfill
-    vim.api.nvim_win_call(w, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = 2 }) end end)
+    vim.api.nvim_win_call(win, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = #lines }) end end)
   end
 end
 
@@ -453,7 +468,8 @@ function M.task(range, lines, kind, agent)
     local c, from = M.find_check(vim.fn.getcwd())
     if c then check, vim.b[buf].sepal_found = c, { c, from } end
   end
-  local template = (btw or C.task_sharpen) and IDEA or template(check)
+  local idea = btw or (kind == "orchestrate" and C.task_sharpen) -- a short feat keeps its fields: <c-c><c-s> sharpens them
+  local template = idea and IDEA or template(check)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
   local from = vim.api.nvim_get_current_win()
@@ -462,16 +478,21 @@ function M.task(range, lines, kind, agent)
   vim.wo[w].wrap, vim.wo[w].cursorline = true, false
   -- back to where the draft came from (the inbox for yyp): with splitbelow, closing it would focus the window above
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = function()
-    vim.schedule(function() if vim.api.nvim_win_is_valid(from) then vim.api.nvim_set_current_win(from) end end)
+    -- not when a new draft opened meanwhile: it keeps the focus
+    vim.schedule(function() if vim.api.nvim_win_is_valid(from) and not vim.b.sepal_task then vim.api.nvim_set_current_win(from) end end)
   end })
   keys(buf)
   check_hint(buf)
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf); check_hint(buf) end })
+  vim.api.nvim_create_autocmd("WinResized", { callback = function()
+    if not vim.api.nvim_buf_is_valid(buf) then return true end
+    keys(buf)
+  end })
   if not lines then
     vim.api.nvim_win_set_cursor(0, { 1, #template[1] })
     vim.schedule(function() vim.cmd.startinsert({ bang = true }) end) -- after keys already typed (see sepal.resume)
   end
-  if btw or C.task_sharpen then
+  if idea then
     -- placeholder on an empty idea line: an extmark, so it's never sent or piped (and changedtick stays)
     local function hint()
       if not vim.api.nvim_buf_is_valid(buf) then return end

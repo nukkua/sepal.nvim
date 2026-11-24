@@ -1326,6 +1326,13 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   agent.show(e)
   eq({ vim.bo.filetype, vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] }, { "markdown", "Did it." })
   vim.cmd("tabclose")
+  -- T: the answer becomes the context of an implement draft
+  sepal.implement(e)
+  local d = task_buf()
+  eq(vim.b[d].sepal_kind, "implement")
+  local l = vim.api.nvim_buf_get_lines(d, 0, -1, false)
+  eq({ l[1], l[8], l[9], l[11], l[12], l[#l] }, { "Goal: ", "Asked:", "how does landing work?", "Answer:", "Did it.", "Files:" })
+  vim.api.nvim_buf_delete(d, { force = true })
   clean(); reset()
   sepal.setup({ models = { implement = "opus" } })
   eq(sepal.config().models.btw, "sonnet") -- setting one keeps the other's default

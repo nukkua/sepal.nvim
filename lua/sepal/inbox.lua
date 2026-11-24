@@ -131,7 +131,7 @@ local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  T task  m model  C clean  za fold  q close"
 -- an orchestrate's plan item under it: "    2. [sonnet] title"; edit the model in it (or dd it) and :w
 local PLAN = "^%s+(%d+)%.%s*%[([^%]]*)%]"
 local function plan_line(i, p) return ("%d. [%s] %s"):format(i, p.model or "default", p.title) end
@@ -457,6 +457,7 @@ function M.open(root)
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "s", on(agent.split), o("Split a planned orchestrate into its tasks"))
+    vim.keymap.set("n", "T", on(require("sepal").implement), o("Turn an answered btw into a task to implement"))
     vim.keymap.set("n", "m", M.pick_model, o("Set the model of a planned task (all of them on the plan's line)"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))

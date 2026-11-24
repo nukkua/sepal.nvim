@@ -209,6 +209,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     s     split a planned orchestrate: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
+                    T     an answered btw as an implement draft: its
+                          question and answer as context (Asked:,
+                          Answer:), you write the Goal: and send it
                     m     the model of the plan item under the cursor (on
                           the orchestrate's own line: of every item), from
                           your |sepal-agents|' models, "default" or one you

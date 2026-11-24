@@ -91,7 +91,7 @@ buffers for affected files before landing or undoing.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close
+<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  T task  m model  C clean  za fold  q close
 
 ✓ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✓
     · shutdown() blocks until the queue is empty
@@ -123,7 +123,9 @@ That's all of it: write, send, keep working, read the `·` lines.
 Write the question and send it with `<c-c><c-c>`. It runs on a cheaper model (sonnet by default, see
 `models`) in your repo itself, read-only (Claude Code's plan mode), so it starts at once: no worktree,
 and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
-`<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat.
+`<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat. `T` turns the answer into
+an implement task: a draft with the question and the answer under `Asked:`/`Answer:` as context,
+you write the `Goal:` and send it.
 
 ### Orchestrate
 

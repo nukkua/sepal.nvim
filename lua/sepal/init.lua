@@ -533,6 +533,23 @@ function M.task(range, lines, kind, agent)
   end, vim.tbl_extend("force", o, { desc = "Paste the clipboard's image into the task" }))
 end
 
+-- T in the inbox on an answered btw: an implement draft with the question and its answer as
+-- context (the question's files listed again), the check found as for a new task; you write the Goal
+function M.implement(e)
+  if e.kind ~= "btw" or not e.answer then return M.notify("T turns an answered btw into a task") end
+  local q, files = {}, nil
+  for _, l in ipairs(vim.split(e.task, "\n")) do
+    if l:match("^Files:") then files = {} end
+    table.insert(files or q, l)
+  end
+  local lines = template(C.check or M.find_check(vim.fn.getcwd()))
+  table.remove(lines) -- its Files:, the question's come last
+  vim.list_extend(lines, { "Asked:", vim.trim(table.concat(q, "\n")), "", "Answer:", e.answer, "" })
+  vim.list_extend(lines, files or { "Files:" })
+  M.task(nil, vim.split(table.concat(lines, "\n"), "\n"))
+  if vim.b.sepal_task then vim.api.nvim_win_set_cursor(0, { 1, #"Goal: " }) end
+end
+
 -- :Sepal task: pick its kind first, i implement, b btw or o orchestrate (any other key cancels); an
 -- open draft just gets the focus (and the range), whatever its kind
 local KINDS = { i = "implement", b = "btw", o = "orchestrate" }

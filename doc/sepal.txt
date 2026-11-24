@@ -131,7 +131,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 `icons`      inbox status -> icon: `{ landed = "✔", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
              failed, error, needs, stopped, interrupted, undone, answered,
-             planned, split.
+             planned, swarmed.
              Also the model logos (panel, :Sepal task's picker and draft):
              `devin`, `claude`, `openai`, `gemini`, `opencode`.
 
@@ -207,7 +207,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           starts over
                     o     watch it (running) or open its chat (done)
                     x     stop it
-                    s     split a planned orchestrate: one task per item of
+                    s     swarm a planned orchestrate: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
                     m     the model of the plan item under the cursor (on
@@ -258,7 +258,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   (normal mode) it's a toggle: it leaves, like `q`.
 :Sepal stop       Stop every running or queued task, and close their chats.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
-                  stopped, interrupted, answered, split.
+                  stopped, interrupted, answered, swarmed.
 
 Lua: `require("sepal").task(range, lines, kind)` (kind "implement", "btw" or "orchestrate", no
 picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
@@ -298,7 +298,7 @@ Lifecycle: queued -> running -> checking -> ready (manual) or landed.
 No diff: nochange ("no changes"); exhausted checks: failed ("check failed");
 agent/setup errors: error ("failed"); unsafe auto-landing: needs ("needs you").
 Stopping gives stopped; undo gives undone. Btw finishes as answered;
-orchestrate as planned, then split when its tasks are made.
+orchestrate as planned, then swarmed when its tasks are made.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal
 warns ("▲ …: Claude Code asks to trust the worktree · :Sepal open"); answer

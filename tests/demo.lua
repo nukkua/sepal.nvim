@@ -76,7 +76,7 @@ vim.schedule(function()
   vim.api.nvim_echo({
     { "sepal demo", "SepalTitle" }, { " — a throwaway repo at " .. T },
     { "\n:Sepal task", "SepalAccent" }, { "  then o, write a Goal, <c-c><c-c> sends it" },
-    { "\n:Sepal inbox", "SepalAccent" }, { "  m picks a plan task's model, s splits it into tasks" },
+    { "\n:Sepal inbox", "SepalAccent" }, { "  m picks a plan task's model, s swarms it into tasks" },
     { "\n:Sepal panel", "SepalAccent" }, { "  the tasks and their agents at the right" },
   }, true, {})
 end)
@@ -103,7 +103,7 @@ vim.schedule(function()
     local e = newest()
     assert(e.status == "planned" and #(e.plan or {}) == 2,
       ("expected a 2-task plan, got %s%s"):format(tostring(e and e.status), e and e.error and ": " .. e.error or ""))
-    agent.split(e)
+    agent.swarm(e)
     local function done(x) return not vim.tbl_contains({ "running", "queued", "checking" }, x.status) end
     assert(vim.wait(60000, function()
       local l = inbox.list(root)

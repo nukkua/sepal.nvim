@@ -26,6 +26,7 @@ function M.list(root)
     -- nvim quit while it ran: the agent was stopped with it
     if e.status == "running" or e.status == "checking" or e.status == "queued" then e.status = "interrupted" end
     e.task, e.spec = e.task or e.spec or "", nil -- older inboxes saved the task as spec
+    if e.status == "split" then e.status, e.swarm, e.split = "swarmed", e.split, nil end -- older inboxes: split was renamed swarmed
   end
   cache[root] = list
   return list
@@ -123,7 +124,7 @@ local STATUS = {
   undone = { "↺", "undone", "SepalDim" },
   answered = { "◆", "answered", "SepalOk" }, -- a btw
   planned = { "◇", "planned", "SepalOk" }, -- an orchestrate: its plan waits for s
-  split = { "⇉", "split", "SepalDim" }, -- an orchestrate whose tasks were made
+  swarmed = { "⇉", "swarmed", "SepalDim" }, -- an orchestrate whose tasks were made
 }
 M.STATUS = STATUS
 M.LIVE = { running = true, checking = true } -- these spin in the inbox and the panel
@@ -131,7 +132,7 @@ local SPIN, frame, timer = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 function M.spin() return SPIN[frame] end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  m model  C clean  za fold  q close"
 -- an orchestrate's plan item under it: "    2. [sonnet] title"; edit the model in it (or dd it) and :w
 local PLAN = "^%s+(%d+)%.%s*%[([^%]]*)%]"
 local function plan_line(i, p) return ("%d. [%s] %s"):format(i, p.model or "default", p.title) end
@@ -182,8 +183,8 @@ local function details(e)
   if e.status == "failed" and e.check_out then
     for _, l in ipairs(vim.list_slice(vim.split(vim.trim(e.check_out), "\n"), 1, 3)) do d[#d + 1] = "│ " .. l end
   end
-  if e.status == "split" then d[#d + 1] = ("→ split into %d task%s, above in the inbox"):format(#(e.split or {}), #(e.split or {}) == 1 and "" or "s") end
-  if e.status == "planned" or e.status == "split" then
+  if e.status == "swarmed" then d[#d + 1] = ("→ swarmed into %d task%s, above in the inbox"):format(#(e.swarm or {}), #(e.swarm or {}) == 1 and "" or "s") end
+  if e.status == "planned" or e.status == "swarmed" then
     for i, p in ipairs(e.plan or {}) do d[#d + 1] = plan_line(i, p) end
   end
   for _, a in ipairs(e.assumptions or {}) do d[#d + 1] = "· " .. a end
@@ -475,7 +476,7 @@ function M.open(root)
     vim.keymap.set("n", "c", on(agent.resume), o("Continue a task that was cut short (quit, stopped, crashed)"))
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
-    vim.keymap.set("n", "s", on(agent.split), o("Split a planned orchestrate into its tasks"))
+    vim.keymap.set("n", "s", on(agent.swarm), o("Swarm a planned orchestrate into its tasks"))
     vim.keymap.set("n", "m", M.pick_model, o("Set the model of a planned task (all of them on the plan's line)"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))

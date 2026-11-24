@@ -91,7 +91,7 @@ buffers for affected files before landing or undoing.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s split  m model  C clean  za fold  q close
+<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  m model  C clean  za fold  q close
 
 ✔ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✔
     · shutdown() blocks until the queue is empty
@@ -144,7 +144,7 @@ The plan waits in the inbox, unfolded:
   `default` (the plan's agent's own) or one you type. `m`
   on the plan's own line changes all of them. You can also edit the `[model]` in the line and `:w`.
   `dd` an item (or move it) and `:w` drops (or reorders) it.
-- `s` splits it: each item becomes a task of its own, run with its model and checked with its
+- `s` swarms it: each item becomes a task of its own, run with its model and checked with its
   `Done when:` (the plan's own if it has none). All of them start from one snapshot of your work
   tree, run in parallel up to `max_running`, and land the way you sent the plan (`<c-c><c-c>` by
   themselves, `<c-c><c-w>` on `L`).
@@ -236,7 +236,7 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 | `:Sepal undo`        | take the newest landed task back out                                     |
 | `:Sepal open`        | watch the newest running task or task with a chat, in its agent         |
 | `:Sepal stop`        | stop running and queued tasks, and close their chats                    |
-| `:Sepal clean`       | drop landed, no changes, undone, stopped, interrupted, answered and split tasks |
+| `:Sepal clean`       | drop landed, no changes, undone, stopped, interrupted, answered and swarmed tasks |
 
 ## How it works
 
@@ -260,7 +260,7 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 Tasks move through `queued`, `running`, `checking`, then `ready` (manual landing) or `landed`.
 No diff gives `no changes`; exhausted checks give `check failed`; agent/setup errors give `failed`;
 unsafe automatic landing gives `needs you`. Stopping gives `stopped`, undo gives `undone`.
-Questions finish as `answered`; orchestrates as `planned`, then `split` when their tasks start.
+Questions finish as `answered`; orchestrates as `planned`, then `swarmed` when their tasks start.
 `L` / `:Sepal land` can also apply saved results from failed, stopped, interrupted or undone tasks:
 it does not rerun the check. Dropping a task removes its refs, chat and pasted images, not landed edits.
 

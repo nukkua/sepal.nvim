@@ -234,11 +234,11 @@ function M.stop()
   for _, e in ipairs(entries() or {}) do if agent.running(e) or agent.chatting(e) then agent.stop(e); n = n + 1 end end
   if n == 0 then M.notify("no task is running") end
 end
--- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted, answered, split)
+-- :Sepal clean: drop the tasks that are over (landed, no changes, undone, stopped, interrupted, answered, swarmed)
 function M.clean()
   local agent, list = require("sepal.agent"), {}
   for _, e in ipairs(vim.list_slice(entries() or {}, 1)) do
-    if vim.tbl_contains({ "landed", "nochange", "undone", "stopped", "interrupted", "answered", "split" }, e.status) then list[#list + 1] = e end
+    if vim.tbl_contains({ "landed", "nochange", "undone", "stopped", "interrupted", "answered", "swarmed" }, e.status) then list[#list + 1] = e end
   end
   agent.drop_many(list)
   M.notify("dropped " .. #list .. " task" .. (#list == 1 and "" or "s"))

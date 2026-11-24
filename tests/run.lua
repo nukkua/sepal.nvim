@@ -1474,8 +1474,8 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
     idle()
   end))
   vim.cmd("close")
-  eq(got[1], "split: shout and add · 2 tasks: 1 default, 1 sonnet started")
-  eq({ e.status, #e.split }, { "split", 2 })
+  eq(got[1], "swarm: shout and add · 2 tasks: 1 default, 1 sonnet started")
+  eq({ e.status, #e.swarm }, { "swarmed", 2 })
   local l = inbox.list(work)
   eq(vim.tbl_map(function(x) return { x.title, x.status, x.check } end, vim.list_slice(l, 1, 2)),
     { { "upper case line two", "landed", "test -n ok" }, { "add b.txt", "landed", "true" } })
@@ -1484,9 +1484,9 @@ test("o orchestrates: the agent plans the tasks and their models; edit them in t
   table.sort(a)
   eq(a, { "--permission-mode acceptEdits --allowedTools Bash(test -n ok)", "--permission-mode acceptEdits --model sonnet --allowedTools Bash(true)" })
   assert(prompts():find("Part of a plan, task 2 of 2", 1, true), prompts())
-  eq(msgs(notified(function() agent.split(e) end)), { "already split: its tasks are in the inbox" })
+  eq(msgs(notified(function() agent.swarm(e) end)), { "already swarmed: its tasks are in the inbox" })
   sepal.clean()
-  eq(#inbox.list(work), 0) -- a split orchestrate is over
+  eq(#inbox.list(work), 0) -- a swarmed orchestrate is over
   sepal.config().agents = nil
   clean()
 end)

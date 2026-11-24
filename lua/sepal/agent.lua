@@ -435,7 +435,7 @@ agent = function(e, prompt, wt)
       e.answer, e.summary = reply or e.answer, first(reply, 100) or e.summary
       local status = j.stopped and "stopped" or reply and "answered" or "error"
       local extra = not reply and not j.stopped and { error = "the agent ended its turn without an answer" } or nil
-      if e.kind == "orchestrate" and status == "answered" then -- a plan: its tasks, to split it into
+      if e.kind == "orchestrate" and status == "answered" then -- a plan: its tasks, to swarm it into
         e.assumptions = M.assumptions(reply)
         local plan = M.plan(reply)
         if #plan > 0 then e.plan, status = plan, "planned"
@@ -756,11 +756,11 @@ end
 
 -- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by the agent with
 -- the item's model (agents option), else by the orchestrate's agent with that model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
-function M.split(e)
-  if e.kind ~= "orchestrate" then return notify("only an orchestrate task splits into tasks") end
+function M.swarm(e)
+  if e.kind ~= "orchestrate" then return notify("only an orchestrate task swarms into tasks") end
   if M.running(e) then return notify("it's still planning") end
-  if e.status == "split" then return notify("already split: its tasks are in the inbox") end
-  if e.status ~= "planned" or #(e.plan or {}) == 0 then return notify("it has no plan to split: r asks for one") end
+  if e.status == "swarmed" then return notify("already swarmed: its tasks are in the inbox") end
+  if e.status ~= "planned" or #(e.plan or {}) == 0 then return notify("it has no plan to swarm: r asks for one") end
   local specs = {}
   for i, p in ipairs(e.plan) do
     local a
@@ -769,14 +769,14 @@ function M.split(e)
     specs[i] = { text = M.subtask(e, i), agent = next(a) and a or nil }
   end
   local es, why = M.start_many(specs, e.root, e.land, function(why)
-    e.status, e.split = "planned", nil
+    e.status, e.swarm = "planned", nil
     inbox.changed(e)
     notify(why, ERROR)
   end)
   if not es then return notify(why, ERROR) end
-  e.status, e.split = "split", vim.tbl_map(function(x) return x.id end, es)
+  e.status, e.swarm = "swarmed", vim.tbl_map(function(x) return x.id end, es)
   inbox.changed(e)
-  notify(("split: %s · %s started"):format(e.title, plan_summary(e.plan)))
+  notify(("swarm: %s · %s started"):format(e.title, plan_summary(e.plan)))
 end
 
 -- reply to e: the agent continues its chat, from what it did last, then check and land again

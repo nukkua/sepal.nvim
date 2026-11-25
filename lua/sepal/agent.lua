@@ -783,10 +783,9 @@ end
 
 -- run several new tasks from cwd at once: specs = { { text, agent } }, the first one starts first;
 -- your work tree is saved once for all of them. The list of entries, or nil, why
-function M.start_many(specs, cwd, land, on_fail)
+local function start_many(specs, cwd, land, on_fail)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
-  if #specs == 0 then return nil, "no tasks to start" end
   local es = {}
   inbox.batch(function()
     for i = #specs, 1, -1 do -- the inbox is newest first: the first task on top
@@ -812,7 +811,7 @@ function M.swarm(e)
     a = a or vim.tbl_extend("force", e.agent or {}, { model = p.model }) -- no model: the agent's, else models.implement
     specs[i] = { text = M.subtask(e, i), agent = next(a) and a or nil }
   end
-  local es, why = M.start_many(specs, e.root, e.land, function(why)
+  local es, why = start_many(specs, e.root, e.land, function(why)
     e.status, e.swarm = "planned", nil
     inbox.changed(e)
     notify(why, ERROR)

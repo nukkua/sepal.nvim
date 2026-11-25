@@ -108,7 +108,7 @@ end
 -- every message is "what happened", shown under "sepal".
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
--- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
+-- o.icon: { text, hl } instead of the level's
 local ICON = { [vim.log.levels.ERROR] = { "✘", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
 local missing = {} -- module -> 'runtimepath' when require failed
 local function optional(name)
@@ -139,7 +139,7 @@ function M.notify(msg, lvl, o)
   lvl, o = lvl or vim.log.levels.INFO, o or {}
   local fidget = optional("fidget")
   if fidget and lvl <= vim.log.levels.INFO then
-    return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal", key = o.key, ttl = o.ttl })
+    return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal" })
   end
   if not (debug.getinfo(vim.notify, "S").source or ""):match("^@?vim/") then return vim.notify(msg, lvl, { title = "sepal" }) end
   local icon = o.icon or ICON[lvl] or { "●", "SepalInfo" }

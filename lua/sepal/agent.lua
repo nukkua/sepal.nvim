@@ -1105,7 +1105,7 @@ function M.show(e)
     -- after on the right, before on the left, whichever window the quickfix list opened it in
     for _, s in ipairs({ { old, before, "before" }, { new, b, "after" } }) do
       vim.api.nvim_win_call(s[1], function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(s[1], s[2]); vim.cmd("diffthis") end)
-      vim.wo[s[1]].winbar = s[3] .. ": " .. path
+      vim.wo[s[1]].winbar = s[3] .. ": " .. path:gsub("%%", "%%%%")
     end
     if w == old then vim.api.nvim_set_current_win(new) end
     busy = false

@@ -250,6 +250,38 @@ test("review preserves non-ASCII and escaped filenames and their first changed l
   vim.cmd.tabclose()
 end)
 
+test("review escapes % in winbar so statusline expressions aren't evaluated or rejected", function()
+  clean(); reset()
+  local git = require("sepal.git")
+  local ran = false
+  _G._sepal_winbar_probe = function() ran = true; return "eval" end
+  local paths = { "100%done.txt", "%{v:lua._sepal_winbar_probe()}.txt", "plain.txt" }
+  for i, path in ipairs(paths) do put(path, "before " .. i .. "\n") end
+  local base
+  git.snapshot(work, nil, function(c) base = c end)
+  assert(vim.wait(10000, function() return base ~= nil end, 10))
+  for i, path in ipairs(paths) do put(path, "after " .. i .. "\n") end
+  local result
+  git.snapshot(work, nil, function(c) result = c end)
+  assert(vim.wait(10000, function() return result ~= nil end, 10))
+  local e = { id = "pct", root = work, title = "pct", task = "Goal: pct", status = "ready", base = base, result = result }
+  inbox.add(e)
+  agent.show(e)
+  local seen = {}
+  for i = 1, #paths do
+    local path = vim.b.sepal_path
+    seen[path] = true
+    local wins = vim.api.nvim_tabpage_list_wins(0)
+    eq(vim.api.nvim_eval_statusline(vim.wo[wins[1]].winbar, { winid = wins[1], use_winbar = true, maxwidth = 200 }).str, "before: " .. path)
+    eq(vim.api.nvim_eval_statusline(vim.wo[wins[2]].winbar, { winid = wins[2], use_winbar = true, maxwidth = 200 }).str, "after: " .. path)
+    if i < #paths then vim.cmd.lnext() end
+  end
+  eq(ran, false)
+  for _, path in ipairs(paths) do assert(seen[path], "visited " .. path) end
+  _G._sepal_winbar_probe = nil
+  vim.cmd.tabclose()
+end)
+
 test("manual landing and undo preserve executable modes", function()
   clean(); reset()
   put("script.sh", "#!/bin/sh\necho old\n")

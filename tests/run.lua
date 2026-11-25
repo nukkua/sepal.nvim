@@ -1733,6 +1733,38 @@ test("a plan's models are your agents': m offers them, a task with one runs on i
   C.agents = nil
 end)
 
+test("swarm clears the orchestrate agent's model for [default] plan items", function()
+  clean(); reset()
+  local cmd = sepal.config().cmd
+  sepal.config().agents = { { cmd = cmd, model = "opus" }, { cmd = cmd, model = "sonnet" } }
+  local e = {
+    id = "orch-default",
+    root = work,
+    title = "plan with opus",
+    task = "Goal: plan with opus",
+    kind = "orchestrate",
+    status = "planned",
+    agent = { cmd = cmd, model = "opus" },
+    plan = {
+      { title = "Default task", model = nil, task = "Goal: default task" },
+      { title = "Sonnet task", model = "sonnet", task = "Goal: sonnet task" },
+    },
+  }
+  inbox.add(e)
+  vim.env.SEPAL_EDIT = [[echo x > "$(basename "$PWD").txt"]]
+  notified(function() agent.swarm(e); idle() end)
+  local l = inbox.list(work)
+  local by_title = {}
+  for _, x in ipairs(l) do by_title[x.title] = x end
+  eq(by_title["default task"].agent.model, nil)
+  eq(by_title["sonnet task"].agent.model, "sonnet")
+  local a = args()
+  table.sort(a)
+  eq(a, { "--permission-mode acceptEdits", "--permission-mode acceptEdits --model sonnet" })
+  sepal.config().agents = nil
+  clean()
+end)
+
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()
   clean(); reset()
   local echo, shown = vim.api.nvim_echo, {}

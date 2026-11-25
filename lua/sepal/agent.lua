@@ -808,7 +808,10 @@ function M.swarm(e)
   for i, p in ipairs(e.plan) do
     local a
     for _, x in ipairs(p.model and C().agents or {}) do if x.model == p.model then a = vim.deepcopy(x); break end end
-    a = a or vim.tbl_extend("force", e.agent or {}, { model = p.model }) -- no model: the agent's, else models.implement
+    if not a then
+      a = vim.deepcopy(e.agent or {})
+      a.model = p.model -- nil clears e.agent's model so [default] runs without it
+    end
     specs[i] = { text = M.subtask(e, i), agent = next(a) and a or nil }
   end
   local es, why = start_many(specs, e.root, e.land, function(why)

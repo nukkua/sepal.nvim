@@ -36,7 +36,6 @@ local HINT = {
   undone = "taken back out",
   answered = "<CR> in :Sepal inbox reads it",
   planned = "s in :Sepal inbox starts its tasks",
-  split = "its tasks are in the inbox",
 }
 -- the provider's logo, by what its model is called; icons = { claude = "…", … } in setup changes them
 local PROVIDERS = {

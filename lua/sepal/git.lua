@@ -58,7 +58,7 @@ function M.commit_bg(root, tree, parent, ref, cb)
   if parent and parent ~= "" then vim.list_extend(args, { "-p", parent }) end
   bg(root, args, { env = ENV }, function(r)
     local c = r.code == 0 and vim.trim(r.stdout) or nil
-    if not (c and ref) then return cb(c) end
+    if not c then return cb(nil) end
     bg(root, { "update-ref", ref, c }, nil, function() cb(c) end)
   end)
 end

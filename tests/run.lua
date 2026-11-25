@@ -694,6 +694,16 @@ test(":Sepal panel with no tasks shows an empty state that says how to start", f
   vim.cmd("Sepal panel")
 end)
 
+test(":Sepal panel shows the status hint for swarmed tasks", function()
+  clean(); reset()
+  inbox.add({ id = "swarmed-1", root = work, title = "big feat", task = "Goal: big feat", status = "swarmed", time = os.time(), swarm = { "a", "b" } })
+  vim.cmd("Sepal panel")
+  local lines = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
+  assert(vim.tbl_contains(lines, " ▎ swarmed  its tasks are in the inbox"), vim.inspect(lines))
+  vim.cmd("Sepal panel")
+  clean()
+end)
+
 test(":Sepal panel shows each task as a card at the right, and redraws with the inbox", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]

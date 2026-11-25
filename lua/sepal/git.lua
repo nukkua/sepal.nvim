@@ -322,17 +322,17 @@ end
 -- merges run off the main loop: on_done(changes) when the last exits (at once when there are none)
 local function decide(root, files, blob, on_done)
   local changes, pending = {}, 0
-  local linked = {}
-  local function linked_above(path)
+  local blocked, deleting = {}, {}
+  local function blocked_above(path)
     local dir, seen, res = vim.fs.dirname(path), {}, nil
     while dir ~= root and dir ~= vim.fs.dirname(dir) do
-      if linked[dir] ~= nil then res = linked[dir]; break end
+      if blocked[dir] ~= nil then res = blocked[dir]; break end
       seen[#seen + 1] = dir
       local p = vim.uv.fs_lstat(dir)
-      if p and p.type == "link" then res = true; break end
+      if p and p.type ~= "directory" and not deleting[dir] then res = true; break end
       dir = vim.fs.dirname(dir)
     end
-    for _, d in ipairs(seen) do linked[d] = res or false end
+    for _, d in ipairs(seen) do blocked[d] = res or false end
     return res == true
   end
   for _, f in ipairs(files) do
@@ -342,7 +342,7 @@ local function decide(root, files, blob, on_done)
     local old, new = status ~= "A" and blob[f.old] or nil, status ~= "D" and blob[f.new] or nil
     local c = { rel = rel, path = path, seen = { mode = mode, cur = cur } }
     c.mode = mode == f.oldmode and f.newmode or mode
-    if linked_above(path) or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
+    if blocked_above(path) or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
       c.conflict, c.preserve = true, true
     elseif mode == "120000" or f.oldmode == "120000" or f.newmode == "120000" then
       if cur == new and mode == f.newmode then c.skip = true
@@ -359,7 +359,10 @@ local function decide(root, files, blob, on_done)
         if pending == 0 then on_done(changes) end
       end)
     end
-    if not c.skip then changes[#changes + 1] = c end
+    if not c.skip then
+      changes[#changes + 1] = c
+      if not c.preserve and c.content == nil then deleting[path] = true end
+    end
   end
   if pending == 0 then on_done(changes) end
 end

@@ -327,6 +327,30 @@ test("manual landing never writes through a symlinked parent directory", functio
   eq(e.conflicts, { "dir/file" })
 end)
 
+test("landing reports a file blocking a parent directory as a conflict instead of crashing", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[mkdir -p sub && printf 'agent\n' > sub/file.txt && printf 'other\n' > z.txt]]
+  run({ "Goal: add nested file" }, "<c-c><c-w>")
+  put("sub", "mine\n")
+  local e = newest()
+  notified(function() agent.land(e, true); settled() end)
+  eq(e.status, "needs")
+  eq(file("sub"), "mine\n")
+  eq(vim.uv.fs_stat(work .. "/z.txt"), nil)
+  notified(function() agent.land(e); settled() end)
+  eq(e.status, "landed")
+  eq(file("sub"), "mine\n")
+  eq(file("z.txt"), "other\n")
+  eq(e.conflicts, { "sub/file.txt" })
+  -- replacing an untouched file with a directory of the same name still lands cleanly
+  clean(); reset()
+  put("sub", "old\n")
+  vim.env.SEPAL_EDIT = [[rm sub && mkdir -p sub && printf 'new\n' > sub/file.txt]]
+  run({ "Goal: replace file with dir" })
+  eq(newest().status, "landed")
+  eq(file("sub/file.txt"), "new\n")
+end)
+
 test("landing runs off the main loop: the file is yours until the plan is checked fresh", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo landed-async > a.txt]]

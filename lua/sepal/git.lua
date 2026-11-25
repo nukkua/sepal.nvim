@@ -215,14 +215,12 @@ function M.review(root, a, b, on_stat)
   return st, firsts_of(text(uni)), extra
 end
 
--- delete every ref under a list of prefixes, then cb() (at once when there is nothing): one
--- for-each-ref + one update-ref, off the main loop
-function M.delete_refs_bg(root, prefixes, cb)
-  cb = cb or function() end
+-- delete every ref under a list of prefixes: one for-each-ref + one update-ref, off the main loop
+function M.delete_refs_bg(root, prefixes)
   bg(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" }, prefixes), nil, function(r)
     local refs = vim.trim(r.code == 0 and r.stdout or "")
-    if refs == "" then return cb() end
-    bg(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }, function() cb() end) -- all of them in one go
+    if refs == "" then return end
+    bg(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }, function() end) -- all of them in one go
   end)
 end
 

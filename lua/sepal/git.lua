@@ -18,19 +18,14 @@ function M.run(dir, args, o)
   end)
   return ok and r or { code = -1, stdout = "", stderr = tostring(r) }
 end
-local function out(dir, args, o)
-  local r = M.run(dir, args, o)
-  if r.code ~= 0 then return nil, vim.trim(r.stderr or "") end
-  return vim.trim(r.stdout)
-end
-
 -- the repo's top directory, as buffer names spell it (git resolves symlinks, a cwd reached
 -- through one doesn't), or nil outside a repo
 local roots = {} -- cwd -> its root: every :Sepal command asks; only found ones are kept (a `git init` later counts)
 function M.root(cwd)
   local known = roots[cwd]
   if known and vim.uv.fs_stat(vim.fs.joinpath(known, ".git")) then return known end
-  local root = out(cwd, { "rev-parse", "--show-toplevel" })
+  local r = M.run(cwd, { "rev-parse", "--show-toplevel" })
+  local root = r.code == 0 and vim.trim(r.stdout)
   if not root or root == "" then roots[cwd] = nil; return nil end
   local real = vim.uv.fs_realpath(cwd)
   if real and vim.startswith(real, root) and vim.endswith(cwd, real:sub(#root + 1)) then root = cwd:sub(1, #cwd - (#real - #root)) end

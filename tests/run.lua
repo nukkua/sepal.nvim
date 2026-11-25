@@ -250,6 +250,38 @@ test("review preserves non-ASCII and escaped filenames and their first changed l
   vim.cmd.tabclose()
 end)
 
+test("review escapes % in winbar so statusline expressions aren't evaluated or rejected", function()
+  clean(); reset()
+  local git = require("sepal.git")
+  local ran = false
+  _G._sepal_winbar_probe = function() ran = true; return "eval" end
+  local paths = { "100%done.txt", "%{v:lua._sepal_winbar_probe()}.txt", "plain.txt" }
+  for i, path in ipairs(paths) do put(path, "before " .. i .. "\n") end
+  local base
+  git.snapshot(work, nil, function(c) base = c end)
+  assert(vim.wait(10000, function() return base ~= nil end, 10))
+  for i, path in ipairs(paths) do put(path, "after " .. i .. "\n") end
+  local result
+  git.snapshot(work, nil, function(c) result = c end)
+  assert(vim.wait(10000, function() return result ~= nil end, 10))
+  local e = { id = "pct", root = work, title = "pct", task = "Goal: pct", status = "ready", base = base, result = result }
+  inbox.add(e)
+  agent.show(e)
+  local seen = {}
+  for i = 1, #paths do
+    local path = vim.b.sepal_path
+    seen[path] = true
+    local wins = vim.api.nvim_tabpage_list_wins(0)
+    eq(vim.api.nvim_eval_statusline(vim.wo[wins[1]].winbar, { winid = wins[1], use_winbar = true, maxwidth = 200 }).str, "before: " .. path)
+    eq(vim.api.nvim_eval_statusline(vim.wo[wins[2]].winbar, { winid = wins[2], use_winbar = true, maxwidth = 200 }).str, "after: " .. path)
+    if i < #paths then vim.cmd.lnext() end
+  end
+  eq(ran, false)
+  for _, path in ipairs(paths) do assert(seen[path], "visited " .. path) end
+  _G._sepal_winbar_probe = nil
+  vim.cmd.tabclose()
+end)
+
 test("manual landing and undo preserve executable modes", function()
   clean(); reset()
   put("script.sh", "#!/bin/sh\necho old\n")
@@ -325,6 +357,30 @@ test("manual landing never writes through a symlinked parent directory", functio
   eq(file("mine/file"), "original\n", "land wrote through a parent symlink")
   eq(vim.uv.fs_readlink(work .. "/dir"), "mine")
   eq(e.conflicts, { "dir/file" })
+end)
+
+test("landing reports a file blocking a parent directory as a conflict instead of crashing", function()
+  clean(); reset()
+  vim.env.SEPAL_EDIT = [[mkdir -p sub && printf 'agent\n' > sub/file.txt && printf 'other\n' > z.txt]]
+  run({ "Goal: add nested file" }, "<c-c><c-w>")
+  put("sub", "mine\n")
+  local e = newest()
+  notified(function() agent.land(e, true); settled() end)
+  eq(e.status, "needs")
+  eq(file("sub"), "mine\n")
+  eq(vim.uv.fs_stat(work .. "/z.txt"), nil)
+  notified(function() agent.land(e); settled() end)
+  eq(e.status, "landed")
+  eq(file("sub"), "mine\n")
+  eq(file("z.txt"), "other\n")
+  eq(e.conflicts, { "sub/file.txt" })
+  -- replacing an untouched file with a directory of the same name still lands cleanly
+  clean(); reset()
+  put("sub", "old\n")
+  vim.env.SEPAL_EDIT = [[rm sub && mkdir -p sub && printf 'new\n' > sub/file.txt]]
+  run({ "Goal: replace file with dir" })
+  eq(newest().status, "landed")
+  eq(file("sub/file.txt"), "new\n")
 end)
 
 test("landing runs off the main loop: the file is yours until the plan is checked fresh", function()
@@ -1685,6 +1741,38 @@ test("a plan's models are your agents': m offers them, a task with one runs on i
   C.agents = { { cmd = "claude" }, { cmd = "claude", model = "opus" }, { cmd = "devin", model = "fusion-x" }, { cmd = "claude", model = "opus" } }
   eq(sepal.plan_models(), { "opus", "fusion-x" })
   C.agents = nil
+end)
+
+test("swarm clears the orchestrate agent's model for [default] plan items", function()
+  clean(); reset()
+  local cmd = sepal.config().cmd
+  sepal.config().agents = { { cmd = cmd, model = "opus" }, { cmd = cmd, model = "sonnet" } }
+  local e = {
+    id = "orch-default",
+    root = work,
+    title = "plan with opus",
+    task = "Goal: plan with opus",
+    kind = "orchestrate",
+    status = "planned",
+    agent = { cmd = cmd, model = "opus" },
+    plan = {
+      { title = "Default task", model = nil, task = "Goal: default task" },
+      { title = "Sonnet task", model = "sonnet", task = "Goal: sonnet task" },
+    },
+  }
+  inbox.add(e)
+  vim.env.SEPAL_EDIT = [[echo x > "$(basename "$PWD").txt"]]
+  notified(function() agent.swarm(e); idle() end)
+  local l = inbox.list(work)
+  local by_title = {}
+  for _, x in ipairs(l) do by_title[x.title] = x end
+  eq(by_title["default task"].agent.model, nil)
+  eq(by_title["sonnet task"].agent.model, "sonnet")
+  local a = args()
+  table.sort(a)
+  eq(a, { "--permission-mode acceptEdits", "--permission-mode acceptEdits --model sonnet" })
+  sepal.config().agents = nil
+  clean()
 end)
 
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()

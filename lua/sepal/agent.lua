@@ -783,10 +783,9 @@ end
 
 -- run several new tasks from cwd at once: specs = { { text, agent } }, the first one starts first;
 -- your work tree is saved once for all of them. The list of entries, or nil, why
-function M.start_many(specs, cwd, land, on_fail)
+local function start_many(specs, cwd, land, on_fail)
   local root = git.root(cwd)
   if not root then return nil, "not in a git repository: a task runs in a git worktree" end
-  if #specs == 0 then return nil, "no tasks to start" end
   local es = {}
   inbox.batch(function()
     for i = #specs, 1, -1 do -- the inbox is newest first: the first task on top
@@ -809,10 +808,13 @@ function M.swarm(e)
   for i, p in ipairs(e.plan) do
     local a
     for _, x in ipairs(p.model and C().agents or {}) do if x.model == p.model then a = vim.deepcopy(x); break end end
-    a = a or vim.tbl_extend("force", e.agent or {}, { model = p.model }) -- no model: the agent's, else models.implement
+    if not a then
+      a = vim.deepcopy(e.agent or {})
+      a.model = p.model -- nil clears e.agent's model so [default] runs without it
+    end
     specs[i] = { text = M.subtask(e, i), agent = next(a) and a or nil }
   end
-  local es, why = M.start_many(specs, e.root, e.land, function(why)
+  local es, why = start_many(specs, e.root, e.land, function(why)
     e.status, e.swarm = "planned", nil
     inbox.changed(e)
     notify(why, ERROR)
@@ -1106,7 +1108,7 @@ function M.show(e)
     -- after on the right, before on the left, whichever window the quickfix list opened it in
     for _, s in ipairs({ { old, before, "before" }, { new, b, "after" } }) do
       vim.api.nvim_win_call(s[1], function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(s[1], s[2]); vim.cmd("diffthis") end)
-      vim.wo[s[1]].winbar = s[3] .. ": " .. path
+      vim.wo[s[1]].winbar = s[3] .. ": " .. path:gsub("%%", "%%%%")
     end
     if w == old then vim.api.nvim_set_current_win(new) end
     busy = false
@@ -1274,7 +1276,6 @@ function M.reply(e)
   if not e.session then return notify("this task has no chat to continue") end
   local b = vim.api.nvim_create_buf(false, true)
   vim.bo[b].filetype, vim.bo[b].bufhidden = "markdown", "wipe"
-  vim.b[b].sepal_reply = e.id
   local w = vim.api.nvim_open_win(b, true, { split = "above", win = -1, height = 6 })
   vim.wo[w].wrap, vim.wo[w].cursorline = true, false -- not the inbox's nowrap (a split copies them)
   local ns = vim.api.nvim_create_namespace("sepal.reply")

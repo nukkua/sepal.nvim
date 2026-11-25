@@ -18,19 +18,14 @@ function M.run(dir, args, o)
   end)
   return ok and r or { code = -1, stdout = "", stderr = tostring(r) }
 end
-local function out(dir, args, o)
-  local r = M.run(dir, args, o)
-  if r.code ~= 0 then return nil, vim.trim(r.stderr or "") end
-  return vim.trim(r.stdout)
-end
-
 -- the repo's top directory, as buffer names spell it (git resolves symlinks, a cwd reached
 -- through one doesn't), or nil outside a repo
 local roots = {} -- cwd -> its root: every :Sepal command asks; only found ones are kept (a `git init` later counts)
 function M.root(cwd)
   local known = roots[cwd]
   if known and vim.uv.fs_stat(vim.fs.joinpath(known, ".git")) then return known end
-  local root = out(cwd, { "rev-parse", "--show-toplevel" })
+  local r = M.run(cwd, { "rev-parse", "--show-toplevel" })
+  local root = r.code == 0 and vim.trim(r.stdout)
   if not root or root == "" then roots[cwd] = nil; return nil end
   local real = vim.uv.fs_realpath(cwd)
   if real and vim.startswith(real, root) and vim.endswith(cwd, real:sub(#root + 1)) then root = cwd:sub(1, #cwd - (#real - #root)) end
@@ -58,7 +53,7 @@ function M.commit_bg(root, tree, parent, ref, cb)
   if parent and parent ~= "" then vim.list_extend(args, { "-p", parent }) end
   bg(root, args, { env = ENV }, function(r)
     local c = r.code == 0 and vim.trim(r.stdout) or nil
-    if not (c and ref) then return cb(c) end
+    if not c then return cb(nil) end
     bg(root, { "update-ref", ref, c }, nil, function() cb(c) end)
   end)
 end
@@ -215,14 +210,12 @@ function M.review(root, a, b, on_stat)
   return st, firsts_of(text(uni)), extra
 end
 
--- delete every ref under a list of prefixes, then cb() (at once when there is nothing): one
--- for-each-ref + one update-ref, off the main loop
-function M.delete_refs_bg(root, prefixes, cb)
-  cb = cb or function() end
+-- delete every ref under a list of prefixes: one for-each-ref + one update-ref, off the main loop
+function M.delete_refs_bg(root, prefixes)
   bg(root, vim.list_extend({ "for-each-ref", "--format=delete %(refname)" }, prefixes), nil, function(r)
     local refs = vim.trim(r.code == 0 and r.stdout or "")
-    if refs == "" then return cb() end
-    bg(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }, function() cb() end) -- all of them in one go
+    if refs == "" then return end
+    bg(root, { "update-ref", "--stdin" }, { stdin = refs .. "\n" }, function() end) -- all of them in one go
   end)
 end
 
@@ -329,17 +322,17 @@ end
 -- merges run off the main loop: on_done(changes) when the last exits (at once when there are none)
 local function decide(root, files, blob, on_done)
   local changes, pending = {}, 0
-  local linked = {}
-  local function linked_above(path)
+  local blocked, deleting = {}, {}
+  local function blocked_above(path)
     local dir, seen, res = vim.fs.dirname(path), {}, nil
     while dir ~= root and dir ~= vim.fs.dirname(dir) do
-      if linked[dir] ~= nil then res = linked[dir]; break end
+      if blocked[dir] ~= nil then res = blocked[dir]; break end
       seen[#seen + 1] = dir
       local p = vim.uv.fs_lstat(dir)
-      if p and p.type == "link" then res = true; break end
+      if p and p.type ~= "directory" and not deleting[dir] then res = true; break end
       dir = vim.fs.dirname(dir)
     end
-    for _, d in ipairs(seen) do linked[d] = res or false end
+    for _, d in ipairs(seen) do blocked[d] = res or false end
     return res == true
   end
   for _, f in ipairs(files) do
@@ -349,7 +342,7 @@ local function decide(root, files, blob, on_done)
     local old, new = status ~= "A" and blob[f.old] or nil, status ~= "D" and blob[f.new] or nil
     local c = { rel = rel, path = path, seen = { mode = mode, cur = cur } }
     c.mode = mode == f.oldmode and f.newmode or mode
-    if linked_above(path) or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
+    if blocked_above(path) or mode == "other" or f.oldmode == "160000" or f.newmode == "160000" then
       c.conflict, c.preserve = true, true
     elseif mode == "120000" or f.oldmode == "120000" or f.newmode == "120000" then
       if cur == new and mode == f.newmode then c.skip = true
@@ -366,7 +359,10 @@ local function decide(root, files, blob, on_done)
         if pending == 0 then on_done(changes) end
       end)
     end
-    if not c.skip then changes[#changes + 1] = c end
+    if not c.skip then
+      changes[#changes + 1] = c
+      if not c.preserve and c.content == nil then deleting[path] = true end
+    end
   end
   if pending == 0 then on_done(changes) end
 end

@@ -6,6 +6,7 @@
 
 local M = {}
 
+local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
 local C = {
   cmd = { "claude" },  -- the agent. A task runs Claude Code (cmd <args> <task>) in a hidden terminal in its worktree
   args = { "--permission-mode", "acceptEdits" }, -- added to each run: --model, --allowedTools…
@@ -17,15 +18,13 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
+  models = vim.tbl_extend("force", {}, MODELS), -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
   skills = {},         -- name -> a SKILL.md path or its text; /name in a task sends the skill along: { how = "~/.claude/skills/how/SKILL.md" }
 }
-local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
-C.models = vim.tbl_extend("force", {}, MODELS)
 local highlight -- below
 function M.setup(opts)
   C = vim.tbl_extend("force", C, opts or {})
@@ -108,7 +107,7 @@ end
 -- every message is "what happened", shown under "sepal".
 -- info goes to fidget if installed (corner, fades out); warnings/errors stay in vim.notify so they're not missed.
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
--- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
+-- o.icon: { text, hl } instead of the level's
 local ICON = { [vim.log.levels.ERROR] = { "✘", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
 local missing = {} -- module -> 'runtimepath' when require failed
 local function optional(name)
@@ -139,7 +138,7 @@ function M.notify(msg, lvl, o)
   lvl, o = lvl or vim.log.levels.INFO, o or {}
   local fidget = optional("fidget")
   if fidget and lvl <= vim.log.levels.INFO then
-    return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal", key = o.key, ttl = o.ttl })
+    return fidget.notify((o.icon and o.icon[1] .. " " or "") .. msg, lvl, { annote = "sepal" })
   end
   if not (debug.getinfo(vim.notify, "S").source or ""):match("^@?vim/") then return vim.notify(msg, lvl, { title = "sepal" }) end
   local icon = o.icon or ICON[lvl] or { "●", "SepalInfo" }

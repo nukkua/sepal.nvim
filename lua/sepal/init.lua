@@ -6,6 +6,7 @@
 
 local M = {}
 
+local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
 local C = {
   cmd = { "claude" },  -- the agent. A task runs Claude Code (cmd <args> <task>) in a hidden terminal in its worktree
   args = { "--permission-mode", "acceptEdits" }, -- added to each run: --model, --allowedTools…
@@ -17,15 +18,13 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
+  models = vim.tbl_extend("force", {}, MODELS), -- task kind -> its --model
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
   skills = {},         -- name -> a SKILL.md path or its text; /name in a task sends the skill along: { how = "~/.claude/skills/how/SKILL.md" }
 }
-local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
-C.models = vim.tbl_extend("force", {}, MODELS)
 local highlight -- below
 function M.setup(opts)
   C = vim.tbl_extend("force", C, opts or {})

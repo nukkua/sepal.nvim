@@ -1274,7 +1274,6 @@ function M.reply(e)
   if not e.session then return notify("this task has no chat to continue") end
   local b = vim.api.nvim_create_buf(false, true)
   vim.bo[b].filetype, vim.bo[b].bufhidden = "markdown", "wipe"
-  vim.b[b].sepal_reply = e.id
   local w = vim.api.nvim_open_win(b, true, { split = "above", win = -1, height = 6 })
   vim.wo[w].wrap, vim.wo[w].cursorline = true, false -- not the inbox's nowrap (a split copies them)
   local ns = vim.api.nvim_create_namespace("sepal.reply")

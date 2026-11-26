@@ -674,7 +674,7 @@ end
 -- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
 local KINDS = { s = "implement", b = "btw", l = "orchestrate" }
 local LABEL = { implement = "short feat", btw = "btw", orchestrate = "large feat" } -- shown names; the kinds stay (saved inboxes, models keys)
--- a centered floating pick (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
+-- a pick in a bottom split like the inbox (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
 local CHOOSE_NS = vim.api.nvim_create_namespace("sepal.choose")
 local function pad(s, w) return s .. (" "):rep(math.max(0, w - vim.fn.strdisplaywidth(s))) end
 function M.choose(items, opts)
@@ -732,35 +732,23 @@ function M.choose(items, opts)
     end
     lines[row] = line
   end
-  local title = opts and opts.title and { { " sepal ", "SepalTitle" }, { "· " .. opts.title .. " ", "SepalDim" } }
-    or { { " sepal ", "SepalTitle" } }
-  local max_line_w, title_w = 0, 2
-  for _, line in ipairs(lines) do max_line_w = math.max(max_line_w, vim.fn.strdisplaywidth(line)) end
-  for _, c in ipairs(title) do title_w = title_w + vim.fn.strdisplaywidth(c[1]) end
-  local width = math.max(1, math.min(math.max(max_line_w + 2, title_w), math.max(1, vim.o.columns - 4)))
-  local height = math.max(1, math.min(#lines, math.max(1, vim.o.lines - 4)))
-  local row = math.max(0, math.floor((vim.o.lines - height - 2) / 2))
-  local col = math.max(0, math.floor((vim.o.columns - width - 2) / 2))
+  -- like the inbox: a full-width split at the bottom, its header line first
+  local title = "sepal" .. (opts and opts.title and " · " .. opts.title or "")
+  table.insert(lines, 1, "")
+  table.insert(lines, 1, title)
   local buf = vim.api.nvim_create_buf(false, true)
+  vim.b[buf].sepal_choose = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_extmark(buf, CHOOSE_NS, 0, 0, { end_col = 5, hl_group = "SepalTitle" })
+  if #title > 5 then vim.api.nvim_buf_set_extmark(buf, CHOOSE_NS, 0, 5, { end_col = #title, hl_group = "SepalDim" }) end
   for _, m in ipairs(marks) do
-    vim.api.nvim_buf_set_extmark(buf, CHOOSE_NS, m[1], m[2], { end_col = m[3], hl_group = m[4] })
+    vim.api.nvim_buf_set_extmark(buf, CHOOSE_NS, m[1] + 2, m[2], { end_col = m[3], hl_group = m[4] })
   end
-  local win = vim.api.nvim_open_win(buf, false, {
-    relative = "editor",
-    row = row,
-    col = col,
-    width = width,
-    height = height,
-    style = "minimal",
-    border = "rounded",
-    title = title,
-    title_pos = "left",
-    focusable = false,
-    noautocmd = true,
-    zindex = 200,
-  })
-  vim.wo[win].wrap = false
+  local win = vim.api.nvim_open_win(buf, false, { split = "below", win = -1, noautocmd = true,
+    height = math.max(1, math.min(#lines, vim.o.lines - 4)) })
+  vim.wo[win].wrap, vim.wo[win].cursorline = false, false
+  vim.wo[win].number, vim.wo[win].relativenumber, vim.wo[win].signcolumn, vim.wo[win].foldcolumn = false, false, "no", "0"
+  vim.wo[win].fillchars = "eob: "
   vim.cmd.redraw()
   local ok, c = pcall(vim.fn.getcharstr)
   if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end

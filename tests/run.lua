@@ -199,15 +199,16 @@ local function picker_shots(keys)
   local shots, ks, g = {}, vim.list_extend({}, keys), vim.fn.getcharstr
   vim.fn.getcharstr = function()
     for _, w in ipairs(vim.api.nvim_list_wins()) do
-      local cfg = vim.api.nvim_win_get_config(w)
-      if cfg.relative == "editor" and cfg.zindex == 200 then
-        local b = vim.api.nvim_win_get_buf(w)
-        local marks = {}
+      local b = vim.api.nvim_win_get_buf(w)
+      if vim.b[b].sepal_choose then
+        local cfg, all, marks = vim.api.nvim_win_get_config(w), vim.api.nvim_buf_get_lines(b, 0, -1, false), {}
+        -- rows past the header line and its blank one, as the items
         for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, -1, 0, -1, { details = true })) do
-          marks[#marks + 1] = { m[2], m[3], m[4].end_col, m[4].hl_group }
+          marks[#marks + 1] = { m[2] - 2, m[3], m[4].end_col, m[4].hl_group }
         end
-        shots[#shots + 1] = { win = w, buf = b, config = cfg, wrap = vim.wo[w].wrap,
-          lines = vim.api.nvim_buf_get_lines(b, 0, -1, false), marks = marks }
+        shots[#shots + 1] = { win = w, buf = b, config = cfg, wrap = vim.wo[w].wrap, title = all[1],
+          width = vim.api.nvim_win_get_width(w), height = vim.api.nvim_win_get_height(w),
+          lines = vim.list_slice(all, 3), marks = marks }
       end
     end
     local k = table.remove(ks, 1)
@@ -1782,7 +1783,7 @@ test("l (large feat) orchestrates: the agent plans the tasks and their models; e
   vim.cmd("normal m")
   eq(#shots, 1)
   eq(shots[1].lines, { "  1  ✻ lead     opus  ●", "  2  ✻ review   sonnet", "  3  ✻ haiku", "", "  d    default", "  o    other…" })
-  eq(shots[1].config.title, { { " sepal ", "SepalTitle" }, { "· task 1 model ", "SepalDim" } })
+  eq({ shots[1].title, shots[1].config.relative }, { "sepal · task 1 model", "" })
   eq(shots[1].wrap, false)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "1"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalDim"), "opus"), true)
@@ -1848,7 +1849,7 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   eq(#shots, 1)
   eq(shots[1].lines, { "  l  large feat  ✻ claude", "  s  short feat  ✻ opus 5.5",
     "  b  btw" .. (" "):rep(9) .. "✻ sonnet" })
-  eq(shots[1].config.title, { { " sepal ", "SepalTitle" } })
+  eq({ shots[1].title, shots[1].config.relative }, { "sepal", "" })
   eq(shots[1].wrap, false)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "l"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalClaude"), "✻"), true)
@@ -1858,7 +1859,7 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
     { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", name = "fusion review" },
     { cmd = "devin", model = "gpt-5", key = "t" }, { cmd = "devin" }, { cmd = "devin", model = "opus", name = "opus" } } })
   local columns = vim.o.columns
-  vim.o.columns = 40 -- long rows are clamped, never wrapped
+  vim.o.columns = 40 -- long rows are cut, never wrapped
   shots = picker_shots({ "s", "t" })
   local ok, err = pcall(sepal.pick)
   vim.o.columns = columns
@@ -1869,8 +1870,8 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   eq(shots[1].lines, { "  l  large feat", "  s  short feat", "  b  btw" })
   eq(shots[2].lines, { "  1  ✻ claude", "  2  ❖ fusion review  opus 5.5 medium + swe 2 high",
     "  t  ֎ devin" .. (" "):rep(10) .. "gpt 5", "  4  ❖ devin", "  5  ✻ opus" })
-  eq(shots[2].config.title, { { " sepal ", "SepalTitle" }, { "· short feat ", "SepalDim" } })
-  eq({ shots[2].config.width, shots[2].config.height, shots[2].wrap }, { 36, 5, false })
+  eq(shots[2].title, "sepal · short feat")
+  eq({ shots[2].width, shots[2].height, shots[2].wrap }, { 40, 7, false })
   local function detail_col(line, detail)
     return vim.fn.strdisplaywidth(line:sub(1, assert(line:find(detail, 1, true)) - 1))
   end
@@ -1881,7 +1882,7 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   eq({ btw, gpt }, { { "✻", "SepalClaude", " sonnet" }, { "֎", "SepalDim", " gpt 5" } })
 end)
 
-test("the picker closes its float and buffer when getcharstr is interrupted", function()
+test("the picker closes its split and buffer when getcharstr is interrupted", function()
   local shots = picker_shots({ function() error("interrupt", 0) end })
   eq(sepal.choose({ { key = "x", label = "thing" } }, { title = "interrupted" }), nil)
   eq(#shots, 1)

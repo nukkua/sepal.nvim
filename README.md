@@ -12,7 +12,7 @@ You don't watch the agent work.
 - [Claude Code](https://claude.com/claude-code), or [Devin CLI](https://cli.devin.ai) (see Devin)
 - git (tasks run in git worktrees, so your project has to be a git repo)
 - optional: [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) to pick files for a task
-- optional: [fidget.nvim](https://github.com/j-hui/fidget.nvim) for a spinner showing what the agent is doing
+- optional: [fidget.nvim](https://github.com/j-hui/fidget.nvim) for notifications (shown when a task finishes)
 - optional: `wl-paste` (Wayland), `pngpaste` (macOS), or `xclip` (X11) to paste clipboard images
 
 ## Install

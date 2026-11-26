@@ -10,7 +10,7 @@ with the git tools you already use. You hear about it when it's landed or
 when something needs you. |:Sepal-inbox| lists every task.
 
 Requirements: Neovim 0.12+, Claude Code or Devin CLI (|sepal-agents|), git.
-Optional: fff.nvim to pick files, fidget.nvim for a spinner; wl-paste on
+Optional: fff.nvim to pick files, fidget.nvim for notifications; wl-paste on
 Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 
 ==============================================================================

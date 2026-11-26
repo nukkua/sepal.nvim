@@ -707,12 +707,14 @@ agent = function(e, prompt, wt)
   end))
 end
 
+-- no spinner while a task runs: finish notifies when it's over
+local function quiet() end
+
 -- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
 -- with max_running tasks already running it waits in the queue
 local function launch(e, prompt, from)
   if readonly(e.kind) then -- a question or a plan: in your repo, read-only, at once; no worktree, prepare or slot
-    local done_, update = sepal().progress(e.title .. (e.kind == "btw" and ": answering" or ": planning"))
-    jobs[e.id] = { done = done_, update = update, btw = true }
+    jobs[e.id] = { update = quiet, btw = true }
     e.status = "running"
     inbox.changed(e)
     vim.fn.mkdir(vim.fs.dirname(wtdir(e)), "p") -- for its events file
@@ -725,8 +727,7 @@ local function launch(e, prompt, from)
   end
   local wt = wtdir(e)
   if vim.uv.fs_stat(wt) then git.remove_worktree(e.root, wt) end
-  local done_, update = sepal().progress(e.title .. ": working")
-  jobs[e.id] = { done = done_, update = update } -- from here it counts as running: x stops it, max_running counts it
+  jobs[e.id] = { update = quiet } -- from here it counts as running: x stops it, max_running counts it
   e.status = "running"
   inbox.changed(e)
   local ok, job = pcall(git.add_worktree, e.root, wt, from, function(made, err)

@@ -368,7 +368,7 @@ local function drafts(queue)
   local e = table.remove(queue, 1)
   if not e then return end
   local sepal = require("sepal")
-  if e.kind == "btw" and e.answer then sepal.implement(e) else sepal.task(nil, vim.split(e.task, "\n"), e.kind) end
+  if e.kind == "btw" and e.answer then sepal.implement(e) else sepal.task(nil, vim.split(e.task, "\n"), e.kind, e.agent) end
   if queue[1] then drafts(queue) end
 end
 
@@ -425,50 +425,35 @@ function M.write(b)
   if #queue > 1 then require("sepal").notify(#queue .. " copies: each opens its draft once the one before is sent or discarded") end
 end
 
--- m: the model of the plan item under the cursor (on the orchestrate's own line: of all of them),
--- picked from your agents' models (agents option), "default" (the agent's own) or one you type
+-- m: on a planned orchestrate, the model of the plan item under the cursor (on its own line: of all
+-- of them); on any other task, the model its next run uses (a queued one starts on it)
 function M.pick_model()
   local b, e = vim.api.nvim_get_current_buf(), M.current()
   local notify = require("sepal").notify
   if not e then return end
-  if e.status ~= "planned" then return notify("m sets the models of a planned orchestrate's tasks") end
   if vim.bo[b].modified then return notify("your edits come first: :w (or u)") end
-  local i = tonumber(vim.api.nvim_get_current_line():match(PLAN) or nil)
-  local which = {}
-  for k in ipairs(e.plan) do if not i or k == i then which[#which + 1] = k end end
-  if #which == 0 then return end
   local sepal = require("sepal")
-  local choices, cur = {}, i and e.plan[i].model
-  for _, m in ipairs(sepal.plan_models()) do
-    if m ~= "default" and m ~= "other…" and not vim.tbl_contains(choices, m) then choices[#choices + 1] = m end
+  if e.status == "planned" then
+    local i = tonumber(vim.api.nvim_get_current_line():match(PLAN) or nil)
+    local which = {}
+    for k in ipairs(e.plan) do if not i or k == i then which[#which + 1] = k end end
+    if #which == 0 then return end
+    local cur = false
+    if i then cur = e.plan[i].model end
+    return sepal.pick_model((i and ("task %d"):format(i) or "every task") .. " model", cur, function(m)
+      m = require("sepal.agent").model_of(m)
+      for _, k in ipairs(which) do e.plan[k].model = m end
+      M.changed(e)
+    end)
   end
-  if cur and cur ~= "default" and cur ~= "other…" and not vim.tbl_contains(choices, cur) then choices[#choices + 1] = cur end
-  local function set(m)
-    if not m then return end
-    for _, k in ipairs(which) do e.plan[k].model = require("sepal.agent").model_of(m) end
+  sepal.pick_model(e.title .. " model", e.agent and e.agent.model, function(m)
+    local a = vim.deepcopy(e.agent or {})
+    a.model = m
+    e.agent = a
     M.changed(e)
-  end
-  -- like :Sepal task's picks: one item a row, each model with its number, logo and short name, the current
-  -- one marked; d default, o other… (shortcut: numbers 1-9 only, past 9 models type it with o)
-  local panel, by, items = require("sepal.panel"), {}, {}
-  for n, m in ipairs(choices) do
-    local k = tostring(n)
-    by[k] = m
-    local l, hl = panel.logo(m)
-    local short, name = panel.model(m), nil
-    for _, a in ipairs(sepal.config().agents or {}) do
-      if a.model == m and a.name then name = a.name break end
-    end
-    items[#items + 1] = { key = k, icon = { l, hl }, label = name or short,
-      detail = name and short ~= name and short or nil, current = m == cur }
-  end
-  if #items > 0 then items[#items + 1] = { sep = true } end
-  by.d, by.o = "default", "other…"
-  items[#items + 1] = { key = "d", label = "default", label_hl = "SepalDim", current = i ~= nil and cur == nil }
-  items[#items + 1] = { key = "o", label = "other…", label_hl = "SepalDim" }
-  local c = by[sepal.choose(items, { title = (i and ("task %d"):format(i) or "every task") .. " model" })]
-  if c ~= "other…" then return set(c) end
-  vim.ui.input({ prompt = "model: " }, set)
+    notify(("%s: %s · %s"):format(e.title, m or "default",
+      e.status == "queued" and "it starts on it" or "its next run (r, c) uses it"))
+  end)
 end
 
 function M.open(root)
@@ -491,7 +476,7 @@ function M.open(root)
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "s", on(agent.swarm), o("Swarm a planned orchestrate into its tasks"))
-    vim.keymap.set("n", "m", M.pick_model, o("Set the model of a planned task (all of them on the plan's line)"))
+    vim.keymap.set("n", "m", M.pick_model, o("Pick the model of the task's next run"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
     -- j/k go task to task, past the detail lines under each

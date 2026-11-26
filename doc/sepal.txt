@@ -197,6 +197,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     <c-c><c-s>  short feat: have |sepal-task_sharpen| sharpen
                                 it (its filled-in fields, deeper not bigger);
                                 large feat: write it
+                    <c-c><c-m>  pick the model it runs on (your agents'
+                                models, the models option's, default or one
+                                you type; an agents' model runs on that agent)
                     <c-c><c-f>  add a file under Files: as @path
                     <c-c><c-p>  paste the clipboard's image (wl-paste,
                                 xclip or pngpaste); the agent may read it
@@ -229,13 +232,15 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     s     swarm a planned orchestrate: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
-                    m     the model of the plan item under the cursor (on
-                          the orchestrate's own line: of every item), from
-                          your |sepal-agents|' models, "default" or one you
+                    m     on a planned orchestrate, the model of the plan
+                          item under the cursor (on the orchestrate's own
+                          line: of every item), from your |sepal-agents|'
+                          models, the models option's, "default" or one you
                           type; an item with an agent's model runs on that
-                          agent.
-                          Or edit the `[model]` in the line and :w; dd an
-                          item (or move it) and :w drops (or reorders) it
+                          agent. Or edit the `[model]` in the line and :w;
+                          dd an item (or move it) and :w drops (or reorders)
+                          it. On any other task, the model of its next run:
+                          a queued one starts on it, r and c use it
                     dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim
                     yyp   a copied line opens, on :w, a new task with

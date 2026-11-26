@@ -427,7 +427,7 @@ local function keys(buf)
   local help = kind == "btw" and { "btw", "<c-c><c-c> ask" }
     or kind == "orchestrate" and { "large feat", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
     or { "<c-c><c-c> send", "<c-c><c-w> wait", C.task_sharpen and "<c-c><c-s> sharpen" or nil }
-  vim.list_extend(help, { "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
+  vim.list_extend(help, { "<c-c><c-m> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
   local items = vim.tbl_map(function(s) return { { s, "SepalDim" } } end, help)
   local w = vim.b[buf].sepal_who
   local b = BUSY[buf]
@@ -484,6 +484,10 @@ local function busy(buf, label)
   return stop
 end
 
+-- the kinds :Sepal task picks from; the shown names (the kinds stay: saved inboxes, models keys)
+local KINDS = { s = "implement", b = "btw", l = "orchestrate" }
+local LABEL = { implement = "short feat", btw = "btw", orchestrate = "large feat" }
+
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
 -- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-p> pastes an image,
@@ -498,6 +502,11 @@ end
 -- agent: one of the agents option's (nil: its first)
 function M.task(range, lines, kind, agent)
   kind = kind or "implement"
+  if agent then -- a stored agent: back to its agents-option entry when that's still it (its name shows)
+    for _, x in ipairs(C.agents or {}) do
+      if vim.deep_equal(x.cmd, agent.cmd) and x.model == agent.model then agent = vim.deepcopy(x) break end
+    end
+  end
   local btw = kind == "btw"
   local block, path
   if range then block, path = selection(range[1], range[2]) end
@@ -576,6 +585,35 @@ function M.task(range, lines, kind, agent)
     if kind == "orchestrate" then return M.notify("planning: " .. e.title .. " · its tasks wait in :Sepal inbox, s starts them") end
     M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
   end
+  vim.keymap.set({ "n", "i" }, "<c-c><c-m>", function()
+    local insert = vim.api.nvim_get_mode().mode:sub(1, 1) == "i"
+    local pos = vim.api.nvim_win_get_cursor(0)
+    vim.cmd.stopinsert()
+    local cur = agent or (C.agents or {})[1]
+    M.pick_model(LABEL[kind] .. " model", cur and cur.model, function(m)
+      local picked
+      if m then
+        for _, x in ipairs(C.agents or {}) do
+          if x.model == m then picked = vim.deepcopy(x) break end
+        end
+      end
+      if picked then
+        agent = picked
+      else
+        agent = vim.deepcopy(agent or (C.agents or {})[1] or {})
+        agent.model = m
+      end
+      if vim.api.nvim_buf_is_valid(buf) then
+        local l, shown, name = who(kind, agent)
+        vim.b[buf].sepal_who = { l[1], l[2], shown or name }
+        keys(buf)
+      end
+    end)
+    if insert and vim.api.nvim_buf_is_valid(buf) then
+      pcall(vim.api.nvim_win_set_cursor, 0, pos)
+      vim.cmd.startinsert()
+    end
+  end, vim.tbl_extend("force", o, { desc = "Pick the task's model" }))
   vim.keymap.set({ "n", "i" }, "<c-c><c-c>", function() send("auto") end,
     vim.tbl_extend("force", o, { desc = "Run the task, it lands by itself" }))
   if not btw then -- a question doesn't land, nor is it a task to write
@@ -666,14 +704,12 @@ function M.implement(e)
   table.remove(lines) -- its Files:, the question's come last
   vim.list_extend(lines, { "Asked:", vim.trim(table.concat(q, "\n")), "", "Answer:", e.answer, "" })
   vim.list_extend(lines, files or { "Files:" })
-  M.task(nil, vim.split(table.concat(lines, "\n"), "\n"))
+  M.task(nil, vim.split(table.concat(lines, "\n"), "\n"), nil, e.agent)
   if vim.b.sepal_task then vim.api.nvim_win_set_cursor(0, { 1, #"Goal: " }) end
 end
 
 -- :Sepal task: pick its kind first, l large feat (an orchestrate), s short feat (an implement) or b btw
 -- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
-local KINDS = { s = "implement", b = "btw", l = "orchestrate" }
-local LABEL = { implement = "short feat", btw = "btw", orchestrate = "large feat" } -- shown names; the kinds stay (saved inboxes, models keys)
 -- a pick in a bottom split like the inbox (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
 local CHOOSE_NS = vim.api.nvim_create_namespace("sepal.choose")
 local function pad(s, w) return s .. (" "):rep(math.max(0, w - vim.fn.strdisplaywidth(s))) end
@@ -755,6 +791,45 @@ function M.choose(items, opts)
   if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
   vim.cmd.redraw()
   return ok and c or nil
+end
+
+-- a model picker, in the inbox and in a task draft: your agents' models, the models option's, the
+-- current one if it's another, then d default and o one you type. cur == false: no current (several)
+function M.pick_model(title, cur, set)
+  local choices = {}
+  local function add(m)
+    if type(m) == "string" and m ~= "" and m ~= "default" and m ~= "other…" and not vim.tbl_contains(choices, m) then
+      choices[#choices + 1] = m
+    end
+  end
+  for _, m in ipairs(M.plan_models()) do add(m) end
+  add(C.models.implement)
+  add(C.models.btw)
+  add(C.models.orchestrate)
+  add(cur)
+  local panel, by, items = require("sepal.panel"), {}, {}
+  for n, m in ipairs(choices) do
+    local k = tostring(n)
+    by[k] = m
+    local l, hl = panel.logo(m)
+    local short, name = panel.model(m), nil
+    for _, a in ipairs(C.agents or {}) do
+      if a.model == m and a.name then name = a.name break end
+    end
+    items[#items + 1] = { key = k, icon = { l, hl }, label = name or short,
+      detail = name and short ~= name and short or nil, current = m == cur }
+  end
+  if #items > 0 then items[#items + 1] = { sep = true } end
+  items[#items + 1] = { key = "d", label = "default", label_hl = "SepalDim", current = cur == nil }
+  items[#items + 1] = { key = "o", label = "other…", label_hl = "SepalDim" }
+  local c = M.choose(items, { title = title })
+  if c == "d" then return set(nil) end
+  if c == "o" then
+    return vim.ui.input({ prompt = "model: " }, function(s)
+      if s then set(require("sepal.agent").model_of(s)) end
+    end)
+  end
+  if by[c] then set(by[c]) end
 end
 function M.pick(range)
   if M.draft() then return M.task(range) end

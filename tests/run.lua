@@ -1376,8 +1376,8 @@ test("a task shows its keys on top, like the inbox", function()
   local b = help()
   sepal.config().task_sharpen = nil
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true },
-    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true } })
+  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-m> model  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true },
+    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-m> model  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true } })
 end)
 
 test("a draft in a narrow window wraps its keys into lines that fit", function()
@@ -1399,13 +1399,50 @@ test("a draft in a narrow window wraps its keys into lines that fit", function()
   for _, s in ipairs(lines) do assert(vim.fn.strdisplaywidth(s) <= width, s) end
   local joined = table.concat(lines, "  ")
   for _, k in ipairs({ "<c-c><c-c> send", "<c-c><c-w> wait", "<c-c><c-s> sharpen",
-    "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" }) do
+    "<c-c><c-m> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" }) do
     assert(joined:find(k, 1, true), k .. " was cut off")
   end
   eq(vim.fn.winsaveview().topfill, #m[4].virt_lines)
   vim.api.nvim_buf_delete(b, { force = true })
   vim.cmd("silent! only")
   sepal.config().task_sharpen = nil
+end)
+
+test("<c-c><c-m> picks the model a draft runs on, from the list or typed", function()
+  clean(); reset()
+  sepal.setup({ models = {} })
+  sepal.task()
+  local function who()
+    local m = vim.api.nvim_buf_get_extmarks(task_buf(), -1, 0, 0, { details = true, type = "virt_lines" })[1]
+    local l = m[4].virt_lines[1]
+    return { l[1][1], l[1][2], l[2][1] }
+  end
+  local shots = picker_shots({ "1" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-m>"), "tx", false)
+  eq(#shots, 1)
+  eq(shots[1].lines, { "  1  ✻ sonnet", "", "  d    default  ●", "  o    other…" })
+  eq(shots[1].title, "sepal · short feat model")
+  picker_closed(shots[1])
+  eq(who(), { "✻", "SepalClaude", " sonnet" })
+  vim.env.SEPAL_EDIT = [[echo x > a.txt]]
+  vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: modelled" })
+  notified(function()
+    vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+    idle()
+  end)
+  assert(args()[1]:find("--model sonnet", 1, true), args()[1])
+  eq(newest().agent.model, "sonnet")
+  sepal.task()
+  shots = picker_shots({ "o" })
+  local input = vim.ui.input
+  vim.ui.input = function(opts, cb)
+    eq(opts.prompt, "model: ")
+    cb("haiku")
+  end
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-m>"), "tx", false)
+  vim.ui.input = input
+  eq(who()[3], " haiku")
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
 end)
 
 test("<c-c><c-p> pastes the clipboard's image, the agent may read just that", function()
@@ -1687,6 +1724,10 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(vim.b[d].sepal_kind, "implement")
   local l = vim.api.nvim_buf_get_lines(d, 0, -1, false)
   eq({ l[1], l[5], l[6], l[8], l[9], l[#l] }, { "Goal: ", "Asked:", "how does landing work?", "Answer:", "Did it.", "Files:" })
+  picker_shots({ "1" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-m>"), "tx", false)
+  local wm = vim.api.nvim_buf_get_extmarks(d, -1, 0, 0, { details = true, type = "virt_lines" })[1]
+  eq(wm[4].virt_lines[1][2][1], " sonnet")
   vim.api.nvim_buf_delete(d, { force = true })
   assert(vim.wait(1000, function() return task_buf() ~= nil end, 10), "the second copy's draft never opened")
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), { "Goal: hogs the slot" })
@@ -1832,6 +1873,33 @@ test("a plan's models are your agents': m offers them, a task with one runs on i
   C.agents = { { cmd = "claude" }, { cmd = "claude", model = "opus" }, { cmd = "devin", model = "fusion-x" }, { cmd = "claude", model = "opus" } }
   eq(sepal.plan_models(), { "opus", "fusion-x" })
   C.agents = nil
+end)
+
+test("m on a queued task sets the model it starts on", function()
+  clean(); reset()
+  local slots = sepal.config().max_running
+  sepal.setup({ max_running = 1 })
+  vim.env.SEPAL_SLEEP = "1"
+  send({ "Goal: first" })
+  assert(vim.wait(4000, function() return (read(T .. "/args") or "") ~= "" end, 10), "the first task never started")
+  vim.env.SEPAL_SLEEP = nil -- only the first one sleeps; it was already started
+  send({ "Goal: queued" })
+  vim.cmd("Sepal inbox")
+  local row
+  for r = 1, vim.api.nvim_buf_line_count(0) do
+    vim.api.nvim_win_set_cursor(0, { r, 0 })
+    if (inbox.current() or {}).title == "queued" then row = r break end
+  end
+  assert(row, "the queued task is not in the inbox")
+  local q = inbox.current()
+  picker_shots({ "1" })
+  local got = msgs(notified(function() vim.cmd("normal m") end))
+  assert(vim.tbl_contains(got, "queued: sonnet · it starts on it"), vim.inspect(got))
+  eq(q.agent.model, "sonnet")
+  vim.cmd("close")
+  idle()
+  eq(args()[2], "--permission-mode acceptEdits --model sonnet")
+  sepal.setup({ max_running = slots })
 end)
 
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()

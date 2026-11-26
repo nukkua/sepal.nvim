@@ -1980,8 +1980,6 @@ test(":Sepal task asks which agent with agents set: devin runs with sepal's hook
   assert(vim.tbl_contains(got, "landed: by devin · 1 file +1 −3 · true ✔\n· used devin"), vim.inspect(got))
   -- its chat: devin's "resume where?" prompt (the worktree's gone) is answered: here, this once
   vim.cmd("Sepal open")
-  vim.wait(4000, function() return vim.uv.fs_stat(T .. "/resume_answer") ~= nil end)
-  eq(vim.trim(read(T .. "/resume_answer") or ""), "2")
   vim.wait(4000, function() return vim.bo.buftype == "terminal" end)
   eq(vim.bo.buftype, "terminal", "the chat didn't show")
   local chat = vim.api.nvim_get_current_buf()
@@ -1989,6 +1987,7 @@ test(":Sepal task asks which agent with agents set: devin runs with sepal's hook
     return table.concat(vim.api.nvim_buf_get_lines(chat, 0, -1, false)):find("the chat so far", 1, true) ~= nil
   end)
   assert(table.concat(vim.api.nvim_buf_get_lines(chat, 0, -1, false)):find("the chat so far", 1, true), "no chat text")
+  eq(vim.trim(read(T .. "/resume_answer") or ""), "2")
   vim.cmd.stopinsert()
   vim.cmd("bwipeout!")
   clean(); reset()

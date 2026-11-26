@@ -282,14 +282,19 @@ function M.render()
     end
   end
   out[#out + 1] = counts
-  local fullest -- the fullest context window among the running tasks: it can't hide in a card
+  local fullest, n = nil, 0 -- the fullest context window among the running tasks: it can't hide in a card
   for _, e in ipairs(list) do
-    if e.status == "running" and e.usage and e.usage.limit and (not fullest or pct(e.usage) > pct(fullest.usage)) then fullest = e end
+    if e.status == "running" and e.usage and e.usage.limit then
+      n = n + 1
+      if not fullest or pct(e.usage) > pct(fullest.usage) then fullest = e end
+    end
   end
   if fullest then
     local p = pct(fullest.usage)
     local full, empty, hl = cells(p)
-    local text = " " .. p .. "% of context · "
+    -- say which task and why that one: with several, it's the closest to its limit (short: 46 columns
+    -- must leave room for the title)
+    local text = " " .. p .. (n > 1 and "% · fullest of " .. n .. ": " or "% context · ")
     out[#out + 1] = { { " ", "Normal" }, full, empty,
       { (text .. inbox.fit(fullest.title or "", width - dw(" ") - 10 - dw(text))):gsub("%s+$", ""), hl } }
   end

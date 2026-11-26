@@ -1906,12 +1906,12 @@ test("the card's context bar is Claude Code's statusLine: none yet, its numbers,
     eq(e.usage, { used = 39149, limit = four.context_window.context_window_size })
     eq(require("sepal.panel").pct(e.usage), four.context_window.used_percentage) -- Claude Code's own percent
     eq(has_bar(), " ▎ ░░░░░░░░░░ 39.1k/1M · 4%")
-    eq(panel_lines()[3], " ░░░░░░░░░░ 4% of context · fed")
+    eq(panel_lines()[3], " ░░░░░░░░░░ 4% context · fed")
     go()
     assert(vim.wait(5000, function() return e.usage.used == 1100000 end, 10), vim.inspect(e.usage))
     eq(has_bar(), " ▎ ██████████ 1.1M/1M · 110% · over the limit") -- the card's cache refreshed
     assert(vim.tbl_contains(hl_on(has_bar()), "SepalError"), vim.inspect(hl_on(has_bar())))
-    eq(panel_lines()[3], " ██████████ 110% of context · fed")
+    eq(panel_lines()[3], " ██████████ 110% context · fed")
     go()
     assert(vim.wait(5000, function() return e.usage.limit == 200000 end, 10), vim.inspect(e.usage))
     eq(has_bar(), " ▎ ████████░░ 150k/200k · 75%")
@@ -1921,10 +1921,23 @@ test("the card's context bar is Claude Code's statusLine: none yet, its numbers,
   end)
   local e = newest()
   eq({ e.status, e.usage, has_bar() }, { "landed", { used = 150000, limit = 200000 }, " ▎ ████████░░ 150k/200k · 75%" }) -- kept after the run
-  assert(not panel_lines()[3]:find("of context", 1, true), panel_lines()[3])
+  assert(not panel_lines()[3]:find("% context", 1, true), panel_lines()[3])
   vim.cmd("Sepal panel")
   local s = vim.json.decode(read(T .. "/settings") or "{}")
   eq(s.statusLine and s.statusLine.type, "command")
+end)
+
+test("with several running tasks the header names the fullest and says it's the fullest", function()
+  clean(); reset()
+  vim.cmd("Sepal panel")
+  local l = inbox.list(work)
+  table.insert(l, 1, { id = "h1", root = work, title = "small", status = "running", time = os.time(), usage = { used = 20000, limit = 200000 } })
+  table.insert(l, 1, { id = "h2", root = work, title = "big", status = "running", time = os.time(), usage = { used = 160000, limit = 200000 } })
+  require("sepal.panel").render()
+  local line = panel_lines()[3]
+  table.remove(l, 1); table.remove(l, 1)
+  vim.cmd("Sepal panel")
+  eq(line, " ████████░░ 80% · fullest of 2: big")
 end)
 
 test("a Devin card's bar is its transcript's totals, like its /usage; it exposes no limit, so none is shown", function()
@@ -1947,7 +1960,7 @@ test("a Devin card's bar is its transcript's totals, like its /usage; it exposes
     local k, out = read(FIXTURES .. "/devin/usage.txt"):match("Tokens%s+(%d+)k in · (%d+) out") -- what its /usage printed
     eq({ math.floor(e.usage.used / 1000 + 0.5), e.usage.out }, { tonumber(k), tonumber(out) })
     eq(has_bar(), " ▎ 37.8k in · 252 out · no limit: Devin exposes none")
-    assert(not panel_lines()[3]:find("of context", 1, true), "no limit: not in the header")
+    assert(not panel_lines()[3]:find("% context", 1, true), "no limit: not in the header")
     go()
     idle()
   end)

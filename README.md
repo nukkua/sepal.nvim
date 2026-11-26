@@ -417,9 +417,10 @@ chat), `q` closes the panel. To act on a task, use the inbox.
 
 A task's card in the panel shows its context window: a 10-cell bar, the tokens used
 against the window, and the percent, e.g. `██████░░░░ 120k/200k · 60%`. It turns amber at 70% and
-red at 90%; past the window it says `over the limit`. The panel header shows the fullest running
-task's bar. Queued tasks aren't paused at a limit: the bar only shows it. The numbers are the
-agent's own, never estimates:
+red at 90%; past the window it says `over the limit`. The panel header shows the bar of the running
+task closest to its limit, e.g. `████████░░ 80% · fullest of 3: <title>` (with one task,
+just `80% context · <title>`). Queued tasks aren't paused at a limit: the bar only shows it.
+The numbers are the agent's own, never estimates:
 
 - Claude Code: the statusLine JSON (sepal sets its own statusLine in its hidden terminals, so your
   statusline doesn't show there): `current_usage` (input + cache creation + cache read) against

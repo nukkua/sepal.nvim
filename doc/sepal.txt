@@ -322,8 +322,10 @@ orchestrate as planned, then swarmed when its tasks are made.
                                                         *sepal-context*
 A task's card in the panel shows its context window: 10 cells, used
 / window and the percent ("████░░░░░░ 80k/200k · 40%"), amber at 70%, red at
-90%, "over the limit" past it. The panel header shows the fullest running
-task's. Queued tasks aren't paused at a limit. Only the agent's own numbers:
+90%, "over the limit" past it. The panel header shows the running task
+closest to its limit: "████████░░ 80% · fullest of 3: <title>"
+(one task: "80% context · <title>"). Queued tasks aren't paused at a
+limit. Only the agent's own numbers:
 Claude Code    its statusLine JSON (sepal sets its own statusLine in its
                hidden terminals): current_usage (input + cache creation +
                cache read) against context_window_size.

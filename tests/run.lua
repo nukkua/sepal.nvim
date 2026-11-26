@@ -194,6 +194,39 @@ local function key(...)
   local ks, g = { ... }, vim.fn.getcharstr
   vim.fn.getcharstr = function() local k = table.remove(ks, 1); if #ks == 0 then vim.fn.getcharstr = g end; return k end
 end
+-- the floating picker while it waits for each key in keys (a function key errors, like <c-c>)
+local function picker_shots(keys)
+  local shots, ks, g = {}, vim.list_extend({}, keys), vim.fn.getcharstr
+  vim.fn.getcharstr = function()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      local cfg = vim.api.nvim_win_get_config(w)
+      if cfg.relative == "editor" and cfg.zindex == 200 then
+        local b = vim.api.nvim_win_get_buf(w)
+        local marks = {}
+        for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, -1, 0, -1, { details = true })) do
+          marks[#marks + 1] = { m[2], m[3], m[4].end_col, m[4].hl_group }
+        end
+        shots[#shots + 1] = { win = w, buf = b, config = cfg, wrap = vim.wo[w].wrap,
+          lines = vim.api.nvim_buf_get_lines(b, 0, -1, false), marks = marks }
+      end
+    end
+    local k = table.remove(ks, 1)
+    if #ks == 0 then vim.fn.getcharstr = g end
+    if type(k) == "function" then return k() end
+    return k
+  end
+  return shots
+end
+local function marked_texts(shot, row, hl)
+  local out = {}
+  for _, m in ipairs(shot.marks) do
+    if m[1] == row and (not hl or m[4] == hl) then out[#out + 1] = shot.lines[row + 1]:sub(m[2] + 1, m[3]) end
+  end
+  return out
+end
+local function picker_closed(shot)
+  eq({ vim.api.nvim_win_is_valid(shot.win), vim.api.nvim_buf_is_valid(shot.buf) }, { false, false })
+end
 local function task_buf()
   for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.b[b].sepal_task then return b end end
 end
@@ -1705,7 +1738,8 @@ end)
 test("l (large feat) orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
   clean(); reset()
   local cmd = sepal.config().cmd
-  sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "opus" }, { cmd = cmd, model = "sonnet" }, { cmd = cmd, model = "haiku" } }
+  sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "opus", name = "lead" },
+    { cmd = cmd, model = "sonnet", name = "review" }, { cmd = cmd, model = "haiku" } }
   local reply = vim.fs.joinpath(T, "plan.jsonl")
   vim.fn.writefile({ vim.json.encode({ type = "assistant", message = { content = { { type = "text", text = table.concat({
     "Two parts.", "", "Plan:", "1. [opus] Shout two", "   Goal: upper case line two", "   Done when: `test -n ok`",
@@ -1744,16 +1778,27 @@ test("l (large feat) orchestrates: the agent plans the tasks and their models; e
   eq(e.plan[2].model, "sonnet")
   eq(vim.api.nvim_buf_get_lines(b, 4, 5, false), { "    2. [sonnet] Add b" })
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
-  local echo, shown = vim.api.nvim_echo, nil
-  vim.api.nvim_echo = function(c, ...) shown = shown or table.concat(vim.tbl_map(function(x) return x[1] end, c)); return echo(c, ...) end
-  key("q"); vim.cmd("normal m")
-  vim.api.nvim_echo = echo
-  eq(vim.trim(shown), "sepal task 1 model  1 ✻ opus ●   2 ✻ sonnet   3 ✻ haiku   d default   o other…")
+  local shots = picker_shots({ "q" })
+  vim.cmd("normal m")
+  eq(#shots, 1)
+  eq(shots[1].lines, { "  1  ✻ lead     opus  ●", "  2  ✻ review   sonnet", "  3  ✻ haiku", "", "  d    default", "  o    other…" })
+  eq(shots[1].config.title, { { " sepal ", "SepalTitle" }, { "· task 1 model ", "SepalDim" } })
+  eq(shots[1].wrap, false)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "1"), true)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalDim"), "opus"), true)
+  eq(#marked_texts(shots[1], 3), 0) -- the separator has no highlights
+  picker_closed(shots[1])
   eq({ vim.api.nvim_get_current_buf(), e.plan[1].model }, { b, "opus" }) -- cancelled
-  key("d"); vim.cmd("normal m")
+  picker_shots({ "d" })
+  vim.cmd("normal m")
   eq(vim.api.nvim_get_current_buf(), b)
   eq(e.plan[1].model, nil)
   eq(vim.api.nvim_buf_get_lines(b, 3, 4, false), { "    1. [default] Shout two" })
+  shots = picker_shots({ "q" })
+  vim.cmd("normal m")
+  eq(shots[1].lines[1], "  1  ✻ lead     opus")
+  eq(shots[1].lines[5], "  d    default  ●")
+  picker_closed(shots[1])
   -- s: one task per item, each with its model, one snapshot of your work tree for all of them
   reset()
   vim.env.SEPAL_EDIT = [[echo x > "$(basename "$PWD").txt"]]
@@ -1790,11 +1835,6 @@ end)
 
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()
   clean(); reset()
-  local echo, shown = vim.api.nvim_echo, {}
-  vim.api.nvim_echo = function(chunks, ...)
-    if #chunks > 1 then shown[#shown + 1] = table.concat(vim.tbl_map(function(c) return c[1] end, chunks)) end
-    return echo(chunks, ...)
-  end
   local function draft()
     local m = vim.api.nvim_buf_get_extmarks(task_buf(), -1, 0, 0, { details = true, type = "virt_lines" })[1]
     local l = m[4].virt_lines[1]
@@ -1802,21 +1842,50 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
     return { l[1][1], l[1][2], l[2][1] }
   end
   sepal.setup({ models = { implement = "claude-opus-5-5" } })
-  key("b"); sepal.pick()
-  local btw = draft()
-  sepal.setup({ agents = { { cmd = "claude", name = "claude" }, { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
-    { cmd = "devin", model = "gpt-5", key = "t" }, { cmd = "devin" } } })
-  local g = vim.fn.getcharstr
-  vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("t"); return "s" end
+  local shots = picker_shots({ "b" })
   sepal.pick()
+  local btw = draft()
+  eq(#shots, 1)
+  eq(shots[1].lines, { "  l  large feat  ✻ claude", "  s  short feat  ✻ opus 5.5",
+    "  b  btw" .. (" "):rep(9) .. "✻ sonnet" })
+  eq(shots[1].config.title, { { " sepal ", "SepalTitle" } })
+  eq(shots[1].wrap, false)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "l"), true)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalClaude"), "✻"), true)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalDim"), "claude"), true)
+  picker_closed(shots[1])
+  sepal.setup({ agents = { { cmd = "claude", name = "claude" },
+    { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high", name = "fusion review" },
+    { cmd = "devin", model = "gpt-5", key = "t" }, { cmd = "devin" }, { cmd = "devin", model = "opus", name = "opus" } } })
+  local columns = vim.o.columns
+  vim.o.columns = 40 -- long rows are clamped, never wrapped
+  shots = picker_shots({ "s", "t" })
+  local ok, err = pcall(sepal.pick)
+  vim.o.columns = columns
+  if not ok then error(err, 0) end
   local gpt = draft()
-  vim.api.nvim_echo = echo
   sepal.setup({ models = {}, agents = nil })
-  eq(shown, { "sepal l large feat ✻ claude   s short feat ✻ opus 5.5   b btw ✻ sonnet   ",
-    "sepal l large feat   s short feat   b btw   ",
-    "sepal 1 ✻ claude                                  2 ❖ devin  · opus 5.5 medium + swe 2 high   t ֎ devin  · gpt 5\n"
-      .. "4 ❖ devin" })
+  eq(#shots, 2)
+  eq(shots[1].lines, { "  l  large feat", "  s  short feat", "  b  btw" })
+  eq(shots[2].lines, { "  1  ✻ claude", "  2  ❖ fusion review  opus 5.5 medium + swe 2 high",
+    "  t  ֎ devin" .. (" "):rep(10) .. "gpt 5", "  4  ❖ devin", "  5  ✻ opus" })
+  eq(shots[2].config.title, { { " sepal ", "SepalTitle" }, { "· short feat ", "SepalDim" } })
+  eq({ shots[2].config.width, shots[2].config.height, shots[2].wrap }, { 36, 5, false })
+  local function detail_col(line, detail)
+    return vim.fn.strdisplaywidth(line:sub(1, assert(line:find(detail, 1, true)) - 1))
+  end
+  eq(detail_col(shots[2].lines[2], "opus 5.5 medium"), detail_col(shots[2].lines[3], "gpt 5"))
+  eq(shots[2].lines[5]:find("opus  opus", 1, true), nil) -- a custom name equal to the model isn't repeated
+  eq(vim.tbl_contains(marked_texts(shots[2], 1, "SepalDim"), "opus 5.5 medium + swe 2 high"), true)
+  picker_closed(shots[2])
   eq({ btw, gpt }, { { "✻", "SepalClaude", " sonnet" }, { "֎", "SepalDim", " gpt 5" } })
+end)
+
+test("the picker closes its float and buffer when getcharstr is interrupted", function()
+  local shots = picker_shots({ function() error("interrupt", 0) end })
+  eq(sepal.choose({ { key = "x", label = "thing" } }, { title = "interrupted" }), nil)
+  eq(#shots, 1)
+  picker_closed(shots[1])
 end)
 
 test(":Sepal task asks which agent with agents set: devin runs with sepal's hooks in its config; ctrl-c is caught", function()

@@ -674,57 +674,126 @@ end
 -- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
 local KINDS = { s = "implement", b = "btw", l = "orchestrate" }
 local LABEL = { implement = "short feat", btw = "btw", orchestrate = "large feat" } -- shown names; the kinds stay (saved inboxes, models keys)
--- a one-line pick (here and the inbox's m): chunks echoed after "sepal ", the key you press (nil: <Esc>, <c-c>)
-function M.choose(chunks)
-  chunks = vim.list_extend({ { "sepal ", "SepalTitle" } }, chunks)
-  -- a cmdline as tall as the wrapped line, so it shows whole without a hit-enter prompt
-  local h, ch = 0, vim.o.cmdheight
-  for _, l in ipairs(vim.split(table.concat(vim.tbl_map(function(c) return c[1] end, chunks)), "\n")) do
-    h = h + math.max(1, math.ceil(vim.fn.strdisplaywidth(l) / vim.o.columns))
+-- a centered floating pick (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
+local CHOOSE_NS = vim.api.nvim_create_namespace("sepal.choose")
+local function pad(s, w) return s .. (" "):rep(math.max(0, w - vim.fn.strdisplaywidth(s))) end
+function M.choose(items, opts)
+  local kw, iw, lw, diw, has_detail = 0, 0, 0, 0, false
+  for _, item in ipairs(items) do
+    if not item.sep then
+      kw = math.max(kw, vim.fn.strdisplaywidth(item.key))
+      if item.icon then iw = math.max(iw, vim.fn.strdisplaywidth(item.icon[1])) end
+      lw = math.max(lw, vim.fn.strdisplaywidth(item.label))
+      if item.detail_icon then diw = math.max(diw, vim.fn.strdisplaywidth(item.detail_icon[1])) end
+      has_detail = has_detail or (item.detail ~= nil and item.detail ~= "")
+    end
   end
-  vim.o.cmdheight = math.max(ch, math.min(h, vim.o.lines - 2))
+  local lines, marks = {}, {}
+  for row, item in ipairs(items) do
+    local chunks = {}
+    local function add(text, hl) chunks[#chunks + 1] = { text, hl } end
+    if not item.sep then
+      add("  ")
+      add(pad(item.key, kw), "SepalAccent")
+      add("  ")
+      if iw > 0 then
+        if item.icon then
+          add(pad(item.icon[1], iw), item.icon[2])
+          add(" ")
+        else
+          add((" "):rep(iw + 1))
+        end
+      end
+      if has_detail and item.detail and item.detail ~= "" then
+        add(pad(item.label, lw), item.label_hl)
+        add("  ")
+        if diw > 0 then
+          if item.detail_icon then
+            add(pad(item.detail_icon[1], diw), item.detail_icon[2])
+            add(" ")
+          else
+            add((" "):rep(diw + 1))
+          end
+        end
+        add(item.detail, item.detail_hl or "SepalDim")
+      else
+        add(item.label, item.label_hl)
+      end
+      if item.current then
+        add("  ")
+        add("●", "SepalAccent")
+      end
+    end
+    local line, col = "", 0
+    for _, c in ipairs(chunks) do
+      line = line .. c[1]
+      if c[2] and c[1] ~= "" then marks[#marks + 1] = { row - 1, col, col + #c[1], c[2] } end
+      col = col + #c[1]
+    end
+    lines[row] = line
+  end
+  local title = opts and opts.title and { { " sepal ", "SepalTitle" }, { "· " .. opts.title .. " ", "SepalDim" } }
+    or { { " sepal ", "SepalTitle" } }
+  local max_line_w, title_w = 0, 2
+  for _, line in ipairs(lines) do max_line_w = math.max(max_line_w, vim.fn.strdisplaywidth(line)) end
+  for _, c in ipairs(title) do title_w = title_w + vim.fn.strdisplaywidth(c[1]) end
+  local width = math.max(1, math.min(math.max(max_line_w + 2, title_w), math.max(1, vim.o.columns - 4)))
+  local height = math.max(1, math.min(#lines, math.max(1, vim.o.lines - 4)))
+  local row = math.max(0, math.floor((vim.o.lines - height - 2) / 2))
+  local col = math.max(0, math.floor((vim.o.columns - width - 2) / 2))
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  for _, m in ipairs(marks) do
+    vim.api.nvim_buf_set_extmark(buf, CHOOSE_NS, m[1], m[2], { end_col = m[3], hl_group = m[4] })
+  end
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative = "editor",
+    row = row,
+    col = col,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    title = title,
+    title_pos = "left",
+    focusable = false,
+    noautocmd = true,
+    zindex = 200,
+  })
+  vim.wo[win].wrap = false
   vim.cmd.redraw()
-  vim.api.nvim_echo(chunks, false, {})
   local ok, c = pcall(vim.fn.getcharstr)
-  vim.o.cmdheight = ch
-  vim.api.nvim_echo({ { "" } }, false, {})
+  if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+  if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
+  vim.cmd.redraw()
   return ok and c or nil
 end
 function M.pick(range)
   if M.draft() then return M.task(range) end
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
-  local chunks = {}
+  local items = {}
   for _, k in ipairs({ "l", "s", "b" }) do
-    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " .. LABEL[KINDS[k]] } })
+    local item = { key = k, label = LABEL[KINDS[k]] }
     if #agents < 2 then
       local l, m, name = who(KINDS[k])
-      vim.list_extend(chunks, { { " " }, l, { " " .. (m or name), "SepalDim" } })
+      item.detail_icon, item.detail = l, m or name
     end
-    vim.list_extend(chunks, { { "   " } })
+    items[#items + 1] = item
   end
-  local c = M.choose(chunks)
+  local c = M.choose(items)
   if not KINDS[c] then return end
   if #agents < 2 then return M.task(range, nil, KINDS[c]) end
-  -- then which agent: its key, else 1, 2… as listed in the agents option (any other key cancels), each with its
-  -- logo, three to a row, names padded so the models line up in columns
-  chunks = {}
-  local by, cells, nw, cw = {}, {}, 0, 0
-  local function pad(s, w) return s .. (" "):rep(w - vim.fn.strdisplaywidth(s)) end
+  -- then which agent: its key, else 1, 2… as listed in the agents option (any other key cancels)
+  items = {}
+  local by = {}
   for i, a in ipairs(agents) do
     local k = a.key or tostring(i)
     by[k] = by[k] or a
     local l, m, name = who(KINDS[c], a)
-    cells[i] = { k, l, name, m and " · " .. m or "" }
-    nw = math.max(nw, vim.fn.strdisplaywidth(k .. name))
+    items[#items + 1] = { key = k, icon = l, label = name, detail = m ~= name and m or nil }
   end
-  for _, x in ipairs(cells) do cw = math.max(cw, nw + vim.fn.strdisplaywidth(x[4])) end
-  for i, x in ipairs(cells) do
-    local last = i == #cells or i % 3 == 0
-    vim.list_extend(chunks, { { x[1], "SepalAccent" }, { " " }, x[2], { " " .. (last and x[4] == "" and x[3] or pad(x[3], nw - #x[1])) },
-      { last and x[4] or pad(x[4], cw - nw) .. "   " }, last and i < #cells and { "\n" } or nil })
-  end
-  local a = by[M.choose(chunks)]
+  local a = by[M.choose(items, { title = LABEL[KINDS[c]] })]
   if a then M.task(range, nil, KINDS[c], a) end
 end
 

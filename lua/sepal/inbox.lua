@@ -437,32 +437,36 @@ function M.pick_model()
   local which = {}
   for k in ipairs(e.plan) do if not i or k == i then which[#which + 1] = k end end
   if #which == 0 then return end
+  local sepal = require("sepal")
   local choices, cur = {}, i and e.plan[i].model
-  local all = vim.list_extend({}, require("sepal").plan_models())
-  if cur then all[#all + 1] = cur end
-  vim.list_extend(all, { "default", "other…" })
-  for _, m in ipairs(all) do
-    if not vim.tbl_contains(choices, m) then choices[#choices + 1] = m end
+  for _, m in ipairs(sepal.plan_models()) do
+    if m ~= "default" and m ~= "other…" and not vim.tbl_contains(choices, m) then choices[#choices + 1] = m end
   end
+  if cur and cur ~= "default" and cur ~= "other…" and not vim.tbl_contains(choices, cur) then choices[#choices + 1] = cur end
   local function set(m)
     if not m then return end
     for _, k in ipairs(which) do e.plan[k].model = require("sepal.agent").model_of(m) end
     M.changed(e)
   end
-  -- like :Sepal task's picks: one line, each model with its number, logo and short name, the current one
-  -- marked; d default, o other… (shortcut: numbers 1-9 only, past 9 models type it with o)
-  local panel, by, n = require("sepal.panel"), {}, 0
-  local chunks = { { (i and ("task %d"):format(i) or "every task") .. " model  " } }
-  for _, m in ipairs(choices) do
-    local special = m == "default" or m == "other…"
-    if not special then n = n + 1 end
-    local k = m == "default" and "d" or m == "other…" and "o" or tostring(n)
+  -- like :Sepal task's picks: one item a row, each model with its number, logo and short name, the current
+  -- one marked; d default, o other… (shortcut: numbers 1-9 only, past 9 models type it with o)
+  local panel, by, items = require("sepal.panel"), {}, {}
+  for n, m in ipairs(choices) do
+    local k = tostring(n)
     by[k] = m
-    vim.list_extend(chunks, { { k, "SepalAccent" }, { " " } })
-    if not special then local l, hl = panel.logo(m); vim.list_extend(chunks, { { l, hl }, { " " } }) end
-    vim.list_extend(chunks, { { special and m or panel.model(m), "SepalDim" }, { m == cur and " ●   " or "   " } })
+    local l, hl = panel.logo(m)
+    local short, name = panel.model(m), nil
+    for _, a in ipairs(sepal.config().agents or {}) do
+      if a.model == m and a.name then name = a.name break end
+    end
+    items[#items + 1] = { key = k, icon = { l, hl }, label = name or short,
+      detail = name and short ~= name and short or nil, current = m == cur }
   end
-  local c = by[require("sepal").choose(chunks)]
+  if #items > 0 then items[#items + 1] = { sep = true } end
+  by.d, by.o = "default", "other…"
+  items[#items + 1] = { key = "d", label = "default", label_hl = "SepalDim", current = i ~= nil and cur == nil }
+  items[#items + 1] = { key = "o", label = "other…", label_hl = "SepalDim" }
+  local c = by[sepal.choose(items, { title = (i and ("task %d"):format(i) or "every task") .. " model" })]
   if c ~= "other…" then return set(c) end
   vim.ui.input({ prompt = "model: " }, set)
 end

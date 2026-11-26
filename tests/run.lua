@@ -775,6 +775,34 @@ test(":Sepal panel with no tasks shows an empty state that says how to start", f
   vim.cmd("Sepal panel")
 end)
 
+test("panel_width: the panel's width in columns, or a percent of the editor's that follows it", function()
+  clean(); reset()
+  local cols = vim.o.columns
+  vim.o.columns = 200
+  local function width()
+    vim.cmd("Sepal panel")
+    return vim.api.nvim_win_get_width(vim.fn.bufwinid("sepal://panel"))
+  end
+  eq(width(), 46) -- the default
+  vim.cmd("Sepal panel")
+  sepal.setup({ panel_width = 60 })
+  eq(width(), 60)
+  vim.cmd("Sepal panel")
+  sepal.setup({ panel_width = "40%" })
+  eq(width(), 80)
+  vim.o.columns = 150
+  vim.api.nvim_exec_autocmds("VimResized", {})
+  eq(vim.api.nvim_win_get_width(vim.fn.bufwinid("sepal://panel")), 60) -- follows the editor
+  vim.cmd("Sepal panel")
+  sepal.setup({ panel_width = 0.5 })
+  eq(width(), 75)
+  vim.cmd("Sepal panel")
+  local panel = require("sepal.panel")
+  eq({ panel.width(5), panel.width("nope"), panel.width(1000) }, { 20, 46, 130 }) -- at least 20, room beside it
+  sepal.setup({ panel_width = 46 })
+  vim.o.columns = cols
+end)
+
 test(":Sepal panel shows each task as a card at the right, and redraws with the inbox", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]

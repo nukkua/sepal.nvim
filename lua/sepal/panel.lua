@@ -9,7 +9,15 @@ local agent = require("sepal.agent")
 local inbox = require("sepal.inbox")
 local NS = vim.api.nvim_create_namespace("sepal.panel")
 local ANIM = vim.api.nvim_create_namespace("sepal.panel.anim") -- the light on a working card, redrawn each tick
-local WIDTH = 46
+local WIDTH = 46 -- panel_width's default
+-- the panel_width option in columns: a number of 1 or more is columns, a fraction (0.3) or "30%" a
+-- share of the editor's width; anything else is the default. At least 20, and room for a window beside it
+function M.width(o)
+  o = o == nil and require("sepal").config().panel_width or o
+  local pct = type(o) == "string" and tonumber(o:match("^%s*([%d.]+)%s*%%%s*$"))
+  local n = pct and vim.o.columns * pct / 100 or type(o) == "number" and o > 0 and (o < 1 and vim.o.columns * o or o) or WIDTH
+  return math.max(1, math.min(math.max(20, math.floor(n)), vim.o.columns - 20))
+end
 -- the header's counts, in this order: { label, statuses, hl }
 local COUNTS = {
   { "running", { running = true, checking = true }, "SepalAccent" },
@@ -366,11 +374,16 @@ function M.toggle(root)
       local e = id and inbox.find(vim.b[b].sepal_panel, id)
       if e then require("sepal.agent").open(e) end
     end, o("Watch the agent, or open the task's chat"))
-    vim.api.nvim_create_autocmd("WinResized", { group = vim.api.nvim_create_augroup("sepal.panel", {}), callback = function() M.render() end })
+    local g = vim.api.nvim_create_augroup("sepal.panel", {})
+    vim.api.nvim_create_autocmd("WinResized", { group = g, callback = function() M.render() end })
+    vim.api.nvim_create_autocmd("VimResized", { group = g, callback = function() -- "30%" follows the editor's width
+      local pw = win()
+      if pw then vim.api.nvim_win_set_width(pw, M.width()) end
+    end })
   end
   vim.b[b].sepal_panel = root
   -- focus stays where you are: it's for looking at
-  w = vim.api.nvim_open_win(b, false, { split = "right", win = -1, width = WIDTH })
+  w = vim.api.nvim_open_win(b, false, { split = "right", win = -1, width = M.width() })
   vim.wo[w].wrap, vim.wo[w].cursorline, vim.wo[w].winfixwidth = false, false, true
   vim.wo[w].number, vim.wo[w].relativenumber, vim.wo[w].signcolumn, vim.wo[w].foldcolumn = false, false, "no", "0"
   vim.wo[w].list, vim.wo[w].spell, vim.wo[w].fillchars = false, false, "eob: "

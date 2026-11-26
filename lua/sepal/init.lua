@@ -19,6 +19,7 @@ local C = {
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
   models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, orchestrate (the planner)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
+  panel_width = 46,    -- :Sepal panel's width: columns (46), a share of the editor's ("30%" or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }

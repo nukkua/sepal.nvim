@@ -52,6 +52,10 @@ function M.check()
       else h.ok("agent: " .. c .. (a.model and " · " .. a.model or "")) end
     end
   end
+  local pw = C.panel_width
+  if (type(pw) == "number" and pw > 0) or (type(pw) == "string" and pw:match("^%s*[%d.]+%s*%%%s*$")) then
+    h.ok(("panel_width: %s (%d columns now)"):format(pw, require("sepal.panel").width(pw)))
+  else h.error("panel_width must be columns (46), a fraction (0.3) or a percent (\"30%\")") end
   h.ok(C.sakura and "sakura: blossom pinks for sepal's accents" or "sakura off: your colorscheme's colors")
   if type(C.highlights) ~= "table" then h.error("highlights must be a table: { SepalOk = { fg = \"#a3be8c\" } }") end
   if type(C.icons) ~= "table" then h.error("icons must be a table: { landed = \"✔\" }") end

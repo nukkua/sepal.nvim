@@ -50,6 +50,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
     max_running = 3,
     models = { btw = "sonnet" },
     agents = nil,
+    panel_width = 46,
     sakura = true,
     highlights = {},
     icons = {},
@@ -125,7 +126,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              task (`Goal: /how does the inbox save?`) and the skill is sent
              with it, below the task, its frontmatter dropped. >lua
                skills = { how = "~/.claude/skills/how/SKILL.md" }
-<                                                            *sepal-sakura*
+<                                                       *sepal-panel_width*
+`panel_width` the width of |:Sepal-panel|: columns (46, the default), or a
+             share of the editor's width, `"30%"` or `0.3`, that follows it
+             when Neovim is resized. At least 20 columns.
+                                                            *sepal-sakura*
 `sakura`     true: cherry-blossom pinks for SepalTitle, SepalAccent
              and SepalInfo (lighter on a dark 'background', deeper
              on a light one). false: those groups link to your colorscheme's.
@@ -337,7 +342,7 @@ it there.
 
 `:checkhealth sepal` checks Neovim, git, `cmd`, `args`, `check`, `retries`,
 `land`, `prepare`, `max_running`, `models`, `agents` and their executables,
-plan models, `task_sharpen`, `sakura`, `highlights`, `icons`, fidget and fff.
+plan models, `task_sharpen`, `panel_width`, `sakura`, `highlights`, `icons`, fidget and fff.
 It also reports `auto_mode`, the worktree/inbox path and worktree trust prompts.
 
  vim:tw=78:ts=8:ft=help:norl:

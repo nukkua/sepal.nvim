@@ -190,6 +190,7 @@ require("sepal").setup({
   max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
   models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
+  panel_width = 46,    -- :Sepal panel's width: columns, or a share of the editor's: "30%" (or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
@@ -432,7 +433,7 @@ Nothing shows until the agent reports its first usage.
 ## Health
 
 `:checkhealth sepal` checks Neovim, git, `cmd`, `args`, `check`, `retries`, `land`, `prepare`,
-`max_running`, `models`, `agents` and their executables, plan models, `task_sharpen`, `sakura`,
+`max_running`, `models`, `agents` and their executables, plan models, `task_sharpen`, `panel_width`, `sakura`,
 `highlights`, `icons`, fidget.nvim and fff.nvim. It also reports `auto_mode`, where worktrees and the
 inbox live, where the context bar reads from, and the worktree trust prompt.
 

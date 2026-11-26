@@ -337,19 +337,18 @@ local HINT = { btw = "ask anything about the project; it answers, nothing change
   orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 -- <c-c><c-s> on a short feat: this goes to task_sharpen above the task's filled-in fields (M.tidy's)
-local SHARPEN = [[I want a deeper version of this task, not a bigger one. Before rewriting it, work out four things:
-
+local SHARPEN = [[Make this task deeper, not bigger. First work out:
 1. What a top professional in this field would do here that I'm not asking for.
-2. The rawest material they would start from instead of what has already been digested for me.
-3. The specific methods and tools they would use.
+2. The rawest material they'd start from, instead of what's been digested for me.
+3. The specific methods and tools they'd use.
 4. What, other than you or me, would show the result is right.
 
-Then rewrite my task to ask for exactly that. Have the rewritten task ask the agent to prototype any
-choice an experiment can settle and recommend an option based on what it observed. Leave product or
-preference choices that no experiment can settle for me to make.
+Then rewrite my task to ask for exactly that. Have it ask the agent to prototype any choice an
+experiment can settle and recommend an option from what it observed; leave product or preference
+choices no experiment can settle to me.
 
-Output only the rewritten task, in its fields (Goal:, Constraints:, Done when:, Files: as @path),
-keeping its Done when: and Files: unless they're wrong; no code fences, no filler. The task:
+Output only the rewritten task in its fields (Goal:, Constraints:, Done when:, Files: as @path),
+keeping Done when: and Files: unless wrong; no code fences, no filler. The task:
 ]]
 
 -- add "- @path" at the end of the Files: list (once)

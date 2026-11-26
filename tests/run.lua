@@ -576,6 +576,7 @@ test("a reply continues the task's chat from what it did, and lands only what's 
   local got = notified(function() agent.continue(e, "add a line"); idle() end)
   eq(vim.endswith(args()[1], "--resume s1"), true)
   assert(vim.startswith(prompts(), "add a line\n"), prompts())
+  assert(prompts():find("same rules as before", 1, true) and not prompts():find("How to work on this", 1, true), prompts()) -- its chat has them
   eq(file("a.txt"), "manual\nmore\n")
   eq(msgs(got)[1]:match("^landed"), "landed")
 end)
@@ -1191,7 +1192,7 @@ test("<c-c><c-s> sharpens a short feat's filled-in fields; a large feat's goes a
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
   assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "not sharpened")
   local got = vim.api.nvim_buf_get_lines(b, 0, -1, false)
-  eq(vim.list_slice(got, #got - 4), { "- got: keeping its Done when: and Files: unless they're wrong; no code fences, no filler. The task:",
+  eq(vim.list_slice(got, #got - 4), { "- got: keeping Done when: and Files: unless wrong; no code fences, no filler. The task:",
     "- got: Goal: retry flaky uploads", "- got: ", "- got: Files:" , "- got: - @a.lua" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   sepal.task(nil, { "big idea", "", "Files:" }, "orchestrate")
@@ -1599,6 +1600,7 @@ test("c starts over a task that never got its agent going; x keeps what the agen
   end)
   eq(vim.endswith(args()[1], "--resume s1"), false)
   assert(vim.startswith(prompts(), "Goal: never went\n"), prompts())
+  assert(prompts():find("How to work on this", 1, true), prompts()) -- a new chat: the rules in full
   eq({ e.status, e.stat and e.stat.list }, { "stopped", { "d.txt +1 −0" } })
 end)
 
@@ -1684,7 +1686,7 @@ test("a plan is read from the end of an orchestrate's reply: each task, its mode
   eq(agent.plan("no plan here"), {})
   eq(agent.plan_summary(plan), "3 tasks: 1 opus, 1 default, 1 Haiku")
   local e = { check = "make test", plan = plan }
-  eq(agent.subtask(e, 1), plan[1].task .. "\n\nPart of a plan, task 1 of 3 (the others run on their own, in parallel: do only this one):"
+  eq(agent.subtask(e, 1), plan[1].task .. "\n\nPart of a plan, task 1 of 3 (the others run in parallel: do only this one):"
     .. "\n1. Shout two\n2. add b\n3. docs")
   eq(vim.split(agent.subtask(e, 2), "\n")[3], "Done when: make test") -- the orchestrate's check when it has none
 end)

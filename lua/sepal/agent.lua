@@ -128,34 +128,33 @@ function M.parse(text)
   return f["Done when"], first(f.Goal or text, 40) or "task"
 end
 
--- what sepal tells the agent besides the task
-local function notes(e)
+-- what sepal tells the agent besides the task; again: its chat already has them (a reply, a resume)
+local function notes(e, again)
+  if again then return "\n---\n(from sepal: same rules as before, and end the same way)" end
   if e.kind == "btw" then
     return table.concat({ "", "---", "How to answer this (from sepal, not part of the question):",
-      "- This is a question about the project, not a change: answer it from the code as it is now.",
-      "- Read what you need; don't edit files or ask to." }, "\n")
+      "- A question, not a change: answer from the code as it is now. Read what you need; don't edit files or ask to." }, "\n")
   end
   if e.kind == "orchestrate" then
     local models = sepal().plan_models()
     return table.concat({ "", "---", "How to plan this (from sepal, not part of the task):",
-      "- Don't change anything: read the code and plan the work as tasks for other agents. Each task runs alone in its own git worktree,"
-        .. " in parallel with the others, and can't see their changes: each one has to stand on its own.",
-      "- Decide how many tasks: as few as the work needs. Split only where the parts are independent (other files or areas);"
-        .. " one task when it doesn't split.",
-      #models > 0 and ("- Pick the model for each task, only from these: %s (or default: the agent's own); the cheapest one that will do it well.")
-        :format(table.concat(models, ", ")) or "- Pick the model for each task: the cheapest one that will do it well.",
-      "- Each task says what to change and where (Goal), a shell command that proves it (Done when"
-        .. (e.check and (", `%s` if nothing narrower fits"):format(e.check) or "") .. ") and its files.",
-      "- End your reply with the plan in exactly this form, then the decisions a reviewer should know:",
+      "- Change nothing: read the code and plan the work as tasks for other agents. Each runs alone in its own git worktree, in parallel,"
+        .. " blind to the others' changes: each must stand on its own.",
+      "- As few tasks as the work needs: split only into independent parts (other files or areas).",
+      "- Each task's model: the cheapest that will do it well" .. (#models > 0
+        and (", only from these: %s (or default: the agent's own)"):format(table.concat(models, ", ")) or "") .. ".",
+      "- Each task: what to change and where (Goal), a shell command proving it (Done when"
+        .. (e.check and (", `%s` if nothing narrower fits"):format(e.check) or "") .. "), its files.",
+      "- End with the plan in exactly this form, then the decisions a reviewer should know:",
       "Plan:", "1. [model] short title", "   Goal: ...", "   Done when: <command>", "   Files:", "   - @path",
       "2. [model] short title", "   ...", "", "Assumptions:\n- <one per line>\n(or \"Assumptions: none\")" }, "\n")
   end
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
     "- You're in a git worktree: edit here, decide instead of asking. Don't commit, push or switch branches.",
-    "- Your shell already starts in the worktree: run commands as they are, never `cd` to its path." }
-  if e.check then n[#n + 1] = ("- Done when `%s` passes: run exactly that, no other command, and fix until it passes."):format(e.check) end
-  n[#n + 1] = "- End with only what the user must know, no summary of the work:"
-  n[#n + 1] = "Not done:\n- <left undone or unchecked; drop this section if nothing>"
+    "- Your shell starts in the worktree: never `cd` to its path." }
+  if e.check then n[#n + 1] = ("- Done when `%s` passes: run only that, and fix until it passes."):format(e.check) end
+  n[#n + 1] = "- End with only what the user must know, no summary:"
+  n[#n + 1] = "Not done:\n- <left undone or unchecked; drop if nothing>"
   n[#n + 1] = "Assumptions:\n- <a decision the task left open, one per line>\n(or \"Assumptions: none\")"
   return table.concat(n, "\n")
 end
@@ -234,7 +233,7 @@ function M.subtask(e, i)
   local t = plan[i].task
   if e.check and not ("\n" .. t):match("\n%s*Done when:") then t = t .. "\n\nDone when: " .. e.check end
   if #plan > 1 then
-    local o = { "", ("Part of a plan, task %d of %d (the others run on their own, in parallel: do only this one):"):format(i, #plan) }
+    local o = { "", ("Part of a plan, task %d of %d (the others run in parallel: do only this one):"):format(i, #plan) }
     for k, p in ipairs(plan) do o[#o + 1] = ("%d. %s"):format(k, p.title) end
     t = t .. "\n" .. table.concat(o, "\n")
   end
@@ -340,7 +339,7 @@ local function check(e, wt)
     e.attempts = (e.attempts or 0) + 1
     e.status = "running"
     inbox.changed(e)
-    agent(e, ("`%s` failed (exit %d):\n```\n%s\n```\nFix it so it passes. Same rules as before, and end the same way.")
+    agent(e, ("`%s` failed (exit %d):\n```\n%s\n```\nFix it so it passes; same rules as before, and end the same way.")
       :format(e.check, out.code, e.check_out), wt)
   end))
   if not ok then return finish(e, wt, "error", { error = "could not run the check: " .. tostring(job):match("[^\n]*") }) end
@@ -892,7 +891,7 @@ function M.continue(e, text)
   endchat(e) -- the agent goes on with the same chat
   e.attempts, e.checked, e.why, e.error, e.check_out = 0
   e.time = os.time()
-  launch(e, text .. "\n" .. notes(e), e.result or e.base)
+  launch(e, text .. "\n" .. notes(e, e.session), e.result or e.base)
 end
 
 -- c: an agent cut short (nvim quit, x, Esc, it crashed) goes on where it was. A quit leaves its
@@ -904,7 +903,7 @@ function M.resume(e)
   end
   if not e.base and not readonly(e.kind) then return notify("it never started (your work tree wasn't saved): send it again") end
   local function go()
-    M.continue(e, e.session and "You were interrupted. Carry on with the task from where you left off." or e.task)
+    M.continue(e, e.session and "You were interrupted. Carry on from where you left off." or e.task)
   end
   local wt = wtdir(e)
   -- no session: quit before the agent started, the checkout may be half made (it'd read as deletions);

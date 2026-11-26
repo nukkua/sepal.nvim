@@ -28,12 +28,18 @@ local C = {
 local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
 C.models = vim.tbl_extend("force", {}, MODELS)
 local highlight -- below
+-- the supported agent kind of a command's executable basename, without loading sepal.agent
+local function cmd_kind(c)
+  local c1 = type(c) == "string" and c or type(c) == "table" and c[1] or ""
+  local b = vim.fs.basename(c1)
+  return b:match("^claude") and "claude" or b:match("^devin") and "devin" or nil
+end
+M._cmd_kind = cmd_kind
 function M.setup(opts)
   C = vim.tbl_extend("force", C, opts or {})
   C.models = vim.tbl_extend("force", MODELS, (opts or {}).models or {}) -- models = { implement = "opus" } keeps btw's
-  local kind = require("sepal.agent").kind
   local function check(c, where) -- anything else can't run: sepal knows both agents' hooks
-    if c and not kind({ agent = { cmd = c } }) then
+    if c and not cmd_kind(c) then
       M.notify(("%s %s isn't a supported agent: sepal runs claude or devin")
         :format(where, vim.inspect(c)), vim.log.levels.ERROR)
     end
@@ -91,26 +97,35 @@ function M.icon(status, def) return (C.icons or {})[status] or def end
 -- for your statusline: "~2 ●1 ▲1" (running, ready to land, needs you) for the repo you're in, "" when
 -- none. Cheap, it reads what's loaded; User SepalChanged fires (and the statusline redraws) when it moves
 local loading = {} -- cwd -> true: its inbox is being loaded, once
+local status_cwd, status_ver = {}, nil
+local STATUS_PARTS = { { "running", "~" }, { "ready", "●" }, { "needs", "▲" } }
 function M.status()
   local cwd, inbox = vim.fn.getcwd(), require("sepal.inbox")
-  local root
-  for r in pairs(inbox.cache) do
-    if (cwd == r or vim.startswith(cwd, r .. "/")) and (not root or #r > #root) then root = r end
-  end
+  local ver = inbox.roots_ver()
+  if status_ver ~= ver then status_cwd, status_ver = {}, ver end
+  local root = status_cwd[cwd]
+  if root == nil then
+    for r in pairs(inbox.cache) do
+      if (cwd == r or vim.startswith(cwd, r .. "/")) and (not root or #r > #root) then root = r end
+    end
+    status_cwd[cwd] = root or false
+  elseif root == false then root = nil end
   if not root then
     -- not loaded yet (a restart): find it outside the statusline, which can't run git
     if not loading[cwd] then
       loading[cwd] = true
-      vim.schedule(function()
-        local r = require("sepal.git").root(cwd)
+      require("sepal.git").root_bg(cwd, function(r)
         if r then inbox.list(r); inbox.render() end
       end)
     end
     return ""
   end
-  local n, out = inbox.counts(root), {}
-  for i, s in ipairs({ { "running", "~" }, { "ready", "●" }, { "needs", "▲" } }) do
-    if n[i] > 0 then out[#out + 1] = M.icon(s[1], s[2]) .. n[i] end
+  local n1, n2, n3 = inbox.counts_raw(root)
+  if n1 == 0 and n2 == 0 and n3 == 0 then return "" end
+  local out = {}
+  for i, s in ipairs(STATUS_PARTS) do
+    local n = i == 1 and n1 or i == 2 and n2 or n3
+    if n > 0 then out[#out + 1] = M.icon(s[1], s[2]) .. n end
   end
   return table.concat(out, " ")
 end
@@ -120,16 +135,16 @@ end
 -- with the builtin vim.notify they're echoed with a colored icon; a notifier plugin gets plain text
 -- o.icon: { text, hl } instead of the level's; o.key, o.ttl: fidget's (same key replaces, ttl in seconds)
 local ICON = { [vim.log.levels.ERROR] = { "✘", "SepalError" }, [vim.log.levels.WARN] = { "▲", "SepalWarn" } }
-local missing = {} -- module -> 'runtimepath' when require failed
+local missing = {} -- module -> true when require failed; a changed runtimepath tries it again
 local function optional(name)
   local m = package.loaded[name]
   if m ~= nil then return m end
-  local rtp = vim.o.runtimepath
-  if missing[name] == rtp then return nil end
+  if missing[name] then return nil end
   local ok, mod = pcall(require, name)
   if ok then missing[name] = nil; return mod end
-  missing[name] = rtp
+  missing[name] = true
 end
+vim.api.nvim_create_autocmd("OptionSet", { group = "sepal.hl", pattern = "runtimepath", callback = function() missing = {} end })
 -- while you're in the agent (or a chat) they wait, shown once you leave it
 local held = {}
 function M.notify(msg, lvl, o)
@@ -182,8 +197,13 @@ function M.fidget()
   local n = optional("fidget.notification")
   if n then n.suppress(hide); hid_fidget = hide end
 end
+local fidget_pending = false
 vim.api.nvim_create_autocmd({ "BufEnter", "WinClosed" }, { group = vim.api.nvim_create_augroup("sepal.fidget", {}),
-  callback = vim.schedule_wrap(function() M.fidget() end) }) -- scheduled: on WinClosed the window is still there
+  callback = function() -- scheduled: on WinClosed the window is still there
+    if fidget_pending then return end
+    fidget_pending = true
+    vim.schedule(function() fidget_pending = false; M.fidget() end)
+  end })
 
 -- q in sepal's buffers: close the window; in the last one (E444: can't close it) show another buffer there
 function M.close()
@@ -307,12 +327,11 @@ function M.find_check(cwd)
   local ok, pkg = pcall(vim.json.decode, at("package.json") or "")
   local t = ok and type(pkg) == "table" and type(pkg.scripts) == "table" and pkg.scripts.test
   if type(t) == "string" and not t:match("no test specified") then return "npm test", "package.json" end
-  if at("Cargo.toml") then return "cargo test", "Cargo.toml" end
-  if at("go.mod") then return "go test ./...", "go.mod" end
-  for _, name in ipairs({ "pytest.ini", "pyproject.toml" }) do
-    local s = at(name)
-    if s and (name == "pytest.ini" or s:match("%[tool%.pytest")) then return "pytest", name end
-  end
+  if vim.uv.fs_stat(vim.fs.joinpath(root, "Cargo.toml")) then return "cargo test", "Cargo.toml" end
+  if vim.uv.fs_stat(vim.fs.joinpath(root, "go.mod")) then return "go test ./...", "go.mod" end
+  if vim.uv.fs_stat(vim.fs.joinpath(root, "pytest.ini")) then return "pytest", "pytest.ini" end
+  local s = at("pyproject.toml")
+  if s and s:match("%[tool%.pytest") then return "pytest", "pyproject.toml" end
 end
 
 -- the task with each skill it names as /name (the skills option) appended, frontmatter dropped, once each
@@ -400,18 +419,33 @@ end
 -- at the end of the Done when: line, what it does: green lands, red goes back to the agent; and
 -- where sepal found it, while it's still that. A virtual text, so never sent
 local CHECK_NS = vim.api.nvim_create_namespace("sepal.check")
+local CHECK_STATE = {}
 local function check_hint(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
-  vim.api.nvim_buf_clear_namespace(buf, CHECK_NS, 0, -1)
+  local row, val
   for i, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
-    local v = l:match("^%s*Done when:%s*(.-)%s*$")
-    if v then
-      local found = vim.b[buf].sepal_found
-      local chunks = v == "" and { { "  a command that proves it's done; empty: not checked", "SepalDim" } }
-        or { { "  " }, { "✔ green", "SepalOk" }, { " lands  ", "SepalDim" }, { "✘ red", "SepalError" },
-          { " goes back to the agent" .. (found and v == found[1] and "  · found in " .. found[2] .. ", dd: no check" or ""), "SepalDim" } }
-      return vim.api.nvim_buf_set_extmark(buf, CHECK_NS, i - 1, 0, { virt_text = chunks, virt_text_pos = "eol" })
+    if l:find("Done when:", 1, true) then
+      local v = l:match("^%s*Done when:%s*(.-)%s*$")
+      if v then row, val = i, v break end
     end
+  end
+  local found = vim.b[buf].sepal_found
+  local prev = CHECK_STATE[buf]
+  if prev and prev.row == row and prev.val == val and prev.found == found then
+    if not row then return end
+    local m = vim.api.nvim_buf_get_extmarks(buf, CHECK_NS, { row - 1, 0 }, { row, 0 }, {})
+    for _, x in ipairs(m) do
+      if x[2] == row - 1 then return end
+    end
+  end
+  CHECK_STATE[buf] = { row = row, val = val, found = found }
+  vim.api.nvim_buf_clear_namespace(buf, CHECK_NS, 0, -1)
+  if row then
+    local v = val
+    local chunks = v == "" and { { "  a command that proves it's done; empty: not checked", "SepalDim" } }
+      or { { "  " }, { "✔ green", "SepalOk" }, { " lands  ", "SepalDim" }, { "✘ red", "SepalError" },
+        { " goes back to the agent" .. (found and v == found[1] and "  · found in " .. found[2] .. ", dd: no check" or ""), "SepalDim" } }
+    vim.api.nvim_buf_set_extmark(buf, CHECK_NS, row - 1, 0, { virt_text = chunks, virt_text_pos = "eol" })
   end
 end
 
@@ -421,8 +455,12 @@ local KEYS_NS = vim.api.nvim_create_namespace("sepal.keys")
 local KEYS_SIG = {}
 local SPIN = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 local BUSY = {} -- buf -> { label, frame }: task_sharpen is at work on it, a spinner after who works on it
-local function keys(buf)
+local function keys(buf, text_only)
   if not vim.api.nvim_buf_is_valid(buf) then return end
+  if text_only and KEYS_SIG[buf] then
+    local m = vim.api.nvim_buf_get_extmarks(buf, KEYS_NS, 0, -1, {})
+    if #m == 1 and m[1][2] == 0 and m[1][3] == 0 then return end
+  end
   local kind = vim.b[buf].sepal_kind
   local help = kind == "btw" and { "btw", "<c-c><c-c> ask" }
     or kind == "orchestrate" and { "large feat", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
@@ -435,7 +473,8 @@ local function keys(buf)
   if w then table.insert(items, 1, { { w[1], w[2] }, { " " .. w[3], "SepalDim" } }) end
   -- virt_lines don't wrap: the items go on as many lines as the narrowest window needs
   local width = math.huge
-  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+  local wins = vim.fn.win_findbuf(buf)
+  for _, win in ipairs(wins) do
     width = math.min(width, vim.api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff)
   end
   local sig = { width }
@@ -450,7 +489,7 @@ local function keys(buf)
   local lines, used = { {} }, 0
   for _, item in ipairs(items) do
     local iw = 0
-    for _, c in ipairs(item) do iw = iw + vim.fn.strdisplaywidth(c[1]) end
+    for _, c in ipairs(item) do iw = iw + vim.api.nvim_strwidth(c[1]) end
     local line = lines[#lines]
     if #line > 0 and used + 2 + iw > width then line, used = {}, 0; lines[#lines + 1] = line end
     if #line > 0 then line[#line + 1], used = { "  ", "SepalDim" }, used + 2 end
@@ -460,7 +499,7 @@ local function keys(buf)
   lines[#lines + 1] = { { "" } }
   vim.api.nvim_buf_clear_namespace(buf, KEYS_NS, 0, -1) -- all of it: replacing line 1 pushes the mark down
   vim.api.nvim_buf_set_extmark(buf, KEYS_NS, 0, 0, { virt_lines = lines, virt_lines_above = true })
-  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+  for _, win in ipairs(wins) do
     -- lines above line 1 only show with topfill
     vim.api.nvim_win_call(win, function() if vim.fn.line("w0") == 1 then vim.fn.winrestview({ topfill = #lines }) end end)
   end
@@ -540,12 +579,13 @@ function M.task(range, lines, kind, agent)
   vim.wo[w].wrap, vim.wo[w].cursorline = true, false
   -- back to where the draft came from (the inbox for yyp): with splitbelow, closing it would focus the window above
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = function()
+    KEYS_SIG[buf], CHECK_STATE[buf] = nil, nil
     -- not when a new draft opened meanwhile: it keeps the focus
     vim.schedule(function() if vim.api.nvim_win_is_valid(from) and not vim.b.sepal_task then vim.api.nvim_set_current_win(from) end end)
   end })
   keys(buf)
   check_hint(buf)
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf); check_hint(buf) end })
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = buf, callback = function() keys(buf, true); check_hint(buf) end })
   vim.api.nvim_create_autocmd("WinResized", { callback = function()
     if not vim.api.nvim_buf_is_valid(buf) then return true end
     keys(buf)
@@ -712,15 +752,15 @@ end
 -- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
 -- a pick in a bottom split like the inbox (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
 local CHOOSE_NS = vim.api.nvim_create_namespace("sepal.choose")
-local function pad(s, w) return s .. (" "):rep(math.max(0, w - vim.fn.strdisplaywidth(s))) end
+local function pad(s, w) return s .. (" "):rep(math.max(0, w - vim.api.nvim_strwidth(s))) end
 function M.choose(items, opts)
   local kw, iw, lw, diw, has_detail = 0, 0, 0, 0, false
   for _, item in ipairs(items) do
     if not item.sep then
-      kw = math.max(kw, vim.fn.strdisplaywidth(item.key))
-      if item.icon then iw = math.max(iw, vim.fn.strdisplaywidth(item.icon[1])) end
-      lw = math.max(lw, vim.fn.strdisplaywidth(item.label))
-      if item.detail_icon then diw = math.max(diw, vim.fn.strdisplaywidth(item.detail_icon[1])) end
+      kw = math.max(kw, vim.api.nvim_strwidth(item.key))
+      if item.icon then iw = math.max(iw, vim.api.nvim_strwidth(item.icon[1])) end
+      lw = math.max(lw, vim.api.nvim_strwidth(item.label))
+      if item.detail_icon then diw = math.max(diw, vim.api.nvim_strwidth(item.detail_icon[1])) end
       has_detail = has_detail or (item.detail ~= nil and item.detail ~= "")
     end
   end
@@ -760,13 +800,13 @@ function M.choose(items, opts)
         add("●", "SepalAccent")
       end
     end
-    local line, col = "", 0
+    local parts, col = {}, 0
     for _, c in ipairs(chunks) do
-      line = line .. c[1]
+      parts[#parts + 1] = c[1]
       if c[2] and c[1] ~= "" then marks[#marks + 1] = { row - 1, col, col + #c[1], c[2] } end
       col = col + #c[1]
     end
-    lines[row] = line
+    lines[row] = table.concat(parts)
   end
   -- like the inbox: a full-width split at the bottom, its header line first
   local title = "sepal" .. (opts and opts.title and " · " .. opts.title or "")

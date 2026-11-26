@@ -18,15 +18,26 @@ local function base(e)
   return vim.list_extend({}, type(c) == "string" and { c } or c)
 end
 -- the two supported agents, by the executable's basename
-local function claude(e) return vim.fs.basename(base(e)[1] or ""):match("^claude") ~= nil end
-local function devin(e) return vim.fs.basename(base(e)[1] or ""):match("^devin") ~= nil end
+local function raw_cmd(e)
+  local c = e and e.agent and e.agent.cmd or C().cmd
+  return type(c) == "string" and c or type(c) == "table" and c[1] or ""
+end
 M.AGENT_NAMES = { claude = "Claude Code", devin = "Devin" }
+local kind_cache = {} -- executable string -> claude/devin/false: the panel asks once per card per render
 -- e's agent kind ("claude" | "devin"), nil when unsupported. e may be nil (then cmd)
 -- or a pseudo-entry { agent = { cmd = c } }, for setup/health
 function M.kind(e)
-  if claude(e) then return "claude" end
-  if devin(e) then return "devin" end
+  local c = raw_cmd(e)
+  local k = kind_cache[c]
+  if k == nil then
+    local b = vim.fs.basename(c)
+    k = b:match("^claude") and "claude" or b:match("^devin") and "devin" or false
+    kind_cache[c] = k
+  end
+  return k or nil
 end
+local function claude(e) return M.kind(e) == "claude" end
+local function devin(e) return M.kind(e) == "devin" end
 -- added to each run: the agent's own args; the args option is Claude Code's
 local function args(e) return e.agent and e.agent.args or claude(e) and C().args or {} end
 -- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args;
@@ -406,32 +417,43 @@ local function reply_of(ev)
   local f = type(ev.transcript_path) == "string" and io.open(ev.transcript_path)
   if not f then return nil end
   local size = f:seek("end") or 0
-  local chunk = 65536
-  while true do
-    local off = math.max(size - chunk, 0)
+  local chunk, hi, carry = 65536, size, ""
+  while hi > 0 do
+    local off = math.max(hi - chunk, 0)
     f:seek("set", off)
-    local s = f:read("a") or ""
-    if off > 0 then s = s:sub((s:find("\n") or #s + 1) + 1) end -- the first line may be partial
-    local lines = {}
-    for l in s:gmatch("[^\n]+") do lines[#lines + 1] = l end
-    for i = #lines, 1, -1 do
-      local l = lines[i]
-      -- decode only the agent's lines: a transcript can be MBs of tool output
-      local ok, t = false, nil
-      if l:find('"assistant"', 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
-      local c = ok and type(t) == "table" and t.type == "assistant" and type(t.message) == "table" and t.message.content
-      local text = {}
-      for _, b in ipairs(type(c) == "table" and c or {}) do
-        if type(b) == "table" and b.type == "text" and type(b.text) == "string" then text[#text + 1] = b.text end
+    local data = (f:read(hi - off) or "") .. carry
+    local parse = data
+    if off > 0 then
+      local nl = data:find("\n", 1, true)
+      if nl then carry, parse = data:sub(1, nl - 1), data:sub(nl + 1)
+      else carry, parse = data, "" end -- the first line continues into bytes not read yet
+    else carry = "" end
+    local upto = #parse + 1
+    for i = #parse, 0, -1 do
+      if i == 0 or parse:byte(i) == 10 then
+        local l = parse:sub(i + 1, upto - 1)
+        upto = i
+        if l ~= "" then
+          -- decode only the agent's lines: a transcript can be MBs of tool output
+          local ok, t = false, nil
+          if l:find('"assistant"', 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
+          local c = ok and type(t) == "table" and t.type == "assistant" and type(t.message) == "table" and t.message.content
+          local text = {}
+          for _, x in ipairs(type(c) == "table" and c or {}) do
+            if type(x) == "table" and x.type == "text" and type(x.text) == "string" then text[#text + 1] = x.text end
+          end
+          if #text > 0 then f:close() return table.concat(text, "\n") end
+        end
       end
-      if #text > 0 then f:close() return table.concat(text, "\n") end
     end
     if off == 0 then break end
-    chunk = math.min(chunk * 2, size) -- not found yet: a bigger share of the file, up to all of it
+    hi = off
+    chunk = math.min(chunk * 2, hi) -- not found yet: a bigger share of what remains, up to all of it
   end
   f:close()
   return nil
 end
+
 
 -- the whole editor: the agent's terminal is this size from its start to every :Sepal open
 local function screen()
@@ -440,6 +462,13 @@ local function screen()
 end
 -- no line numbers on an agent's window, whatever the buffer shown there before had
 local function termwin(w) vim.wo[w].number, vim.wo[w].relativenumber = false, false end
+
+-- the position after the last newline of s, like s:match(".*\n()"), without pattern matching
+local function last_nl(s)
+  for i = #s, 1, -1 do
+    if s:byte(i) == 10 then return i + 1 end
+  end
+end
 
 -- the agent: Claude Code itself, in a hidden terminal buffer (:Sepal open shows it). Its turn is over
 -- at the Stop hook; then it's closed, and sepal checks and lands what it did
@@ -451,6 +480,14 @@ agent = function(e, prompt, wt)
   local events = wtdir(e) .. ".events" -- beside its worktree: a btw has none, and runs in your repo
   os.remove(events)
   local dv, conf, dvst = devin(e), events .. ".config.json", {} -- dvst: its transcript as last read
+  local dv_sid, dv_path -- session -> transcript path: joining it every tick allocates
+  local function devin_transcript()
+    if e.session ~= dv_sid then
+      dv_sid = e.session
+      dv_path = type(e.session) == "string" and e.session:match("^[%w-]+$") and dvpath(e.session) or nil
+    end
+    return dv_path
+  end
   -- it has to run the check; files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those
   local allow = e.check and { (dv and "Exec(%s)" or "Bash(%s)"):format(e.check) } or {}
   for l in vim.gsplit(e.task, "\n") do
@@ -481,9 +518,11 @@ agent = function(e, prompt, wt)
     e.check and wt and { ("Bash(cd %s && %s)"):format(wt, e.check) } or {})), prompt })
   local b = vim.api.nvim_create_buf(false, true)
   local started, over, timer = false, false, vim.uv.new_timer()
+  local fs_event
   local function close()
     over = true
     timer:stop(); timer:close()
+    if fs_event then fs_event:stop(); fs_event:close(); fs_event = nil end
     os.remove(events)
     os.remove(conf)
     if not vim.api.nvim_buf_is_valid(b) then return end
@@ -513,7 +552,8 @@ agent = function(e, prompt, wt)
       local t, n = vim.uv.new_timer(), 0
       t:start(200, 200, vim.schedule_wrap(function()
         n = n + 1
-        local u = e.session and e.session:match("^[%w-]+$") and devin_usage(dvpath(e.session), dvst)
+        local path = devin_transcript()
+        local u = path and devin_usage(path, dvst)
         if u or n >= 50 then t:stop(); t:close() end
         if u and not vim.deep_equal(u, e.usage) then e.usage = u; inbox.changed(e) end
       end))
@@ -557,9 +597,10 @@ agent = function(e, prompt, wt)
     f:seek("set", toff)
     local s = f:read("a")
     f:close()
-    local cut = s:match(".*\n()")
+    local cut = last_nl(s)
     if not cut then return end
     toff = toff + cut - 1
+    if not s:find("[Request interrupted by user", 1, true) then return end
     for l in s:sub(1, cut - 1):gmatch("[^\n]+") do
       local ok, t = false, nil
       if l:find("[Request interrupted by user", 1, true) then ok, t = pcall(vim.json.decode, l, { luanil = { object = true, array = true } }) end
@@ -627,11 +668,28 @@ agent = function(e, prompt, wt)
     f:seek("set", off)
     local s = f:read("a")
     f:close()
-    local cut = s:match(".*\n()")
+    local cut = last_nl(s)
     if not cut then return end
     off = off + cut - 1
     for l in s:sub(1, cut - 1):gmatch("[^\n]+") do event(l) end
     if dirty then dirty = false; if not over then inbox.render() end end -- one render per read, not per line
+  end
+  local events_base = vim.fs.basename(events)
+  local poll_scheduled = false
+  local ok, handle = pcall(vim.uv.new_fs_event)
+  if ok and handle then
+    local started_watch, res = pcall(function()
+      return handle:start(vim.fs.dirname(events), {}, function(_, fname)
+        if (fname == nil or fname == events_base) and not poll_scheduled then
+          poll_scheduled = true
+          vim.schedule(function()
+            poll_scheduled = false
+            if not over then poll() end
+          end)
+        end
+      end)
+    end)
+    if started_watch and res ~= nil then fs_event = handle else pcall(handle.close, handle) end
   end
   local function exited(_, code)
     if over then return end
@@ -685,8 +743,9 @@ agent = function(e, prompt, wt)
   timer:start(100, 100, vim.schedule_wrap(function()
     if over then return end
     poll()
-    if dv and e.session and e.session:match("^[%w-]+$") then -- it goes in a path
-      local u = devin_usage(dvpath(e.session), dvst)
+    local path = dv and devin_transcript() -- it goes in a path
+    if path then
+      local u = devin_usage(path, dvst)
       if u and not vim.deep_equal(u, e.usage) then e.usage = u; inbox.render() end
     end
     if not over and interrupted() then
@@ -802,29 +861,26 @@ local function snapshot_for(es, root, on_fail)
     M._next()
     return (on_fail or function(why) notify(why, ERROR) end)("could not save your work tree (git add / write-tree failed)")
   end
-  git.snapshot(root, ref(es[1], "base"), function(base)
+  local refs = vim.tbl_map(function(e) return ref(e, "base") end, es)
+  git.snapshot(root, refs, function(base)
     if not base then return fail() end
-    local refs = vim.tbl_map(function(e) return ref(e, "base") end, vim.list_slice(es, 2))
-    git.update_refs_bg(root, refs, base, function(ok)
-      if not ok then return fail() end
-      inbox.batch(function()
-        for _, e in ipairs(es) do
-          local j = jobs[e.id]
-          jobs[e.id] = nil
-          e.base, e.base0 = base, base
-          if j.stopped then
-            e.status = "stopped"
-            inbox.changed(e)
-            notify("stopped: " .. e.title)
-          else
-            queue[#queue + 1] = { e, e.task .. "\n" .. notes(e), base } -- behind the tasks queued before it
-          end
+    inbox.batch(function()
+      for _, e in ipairs(es) do
+        local j = jobs[e.id]
+        jobs[e.id] = nil
+        e.base, e.base0 = base, base
+        if j.stopped then
+          e.status = "stopped"
+          inbox.changed(e)
+          notify("stopped: " .. e.title)
+        else
+          queue[#queue + 1] = { e, e.task .. "\n" .. notes(e), base } -- behind the tasks queued before it
         end
-        for _ = 1, #es do M._next() end
-        for _, e in ipairs(es) do
-          if queued(e) and e.status ~= "queued" then e.status = "queued"; inbox.changed(e) end
-        end
-      end)
+      end
+      for _ = 1, #es do M._next() end
+      for _, e in ipairs(es) do
+        if queued(e) and e.status ~= "queued" then e.status = "queued"; inbox.changed(e) end
+      end
     end)
   end)
 end
@@ -1026,38 +1082,54 @@ M.PASTES = vim.fs.joinpath(vim.fn.stdpath("cache"), "sepal")
 
 -- delete pasted images no inbox lists that are over a day old: discarded drafts' (a day spares an open one's)
 function M.sweep_pastes()
-  local listed = {}
+  local stale = {}
+  if vim.uv.fs_stat(M.PASTES) then
+    for name in vim.fs.dir(M.PASTES) do
+      local p = vim.fs.joinpath(M.PASTES, name)
+      local st = name:match("^paste%-%d+%.png$") and vim.uv.fs_stat(p)
+      if st and os.time() - st.mtime.sec > 86400 then stale[name] = p end
+    end
+  end
+  if not next(stale) then return end
   for name in vim.fs.dir(C().worktrees) do
     local f = name:match("%.json$") and io.open(vim.fs.joinpath(C().worktrees, name))
-    if f then listed[#listed + 1] = f:read("a"); f:close() end
+    if f then
+      local content = f:read("a")
+      f:close()
+      for paste in pairs(stale) do
+        if content:find(paste, 1, true) then stale[paste] = nil end
+      end
+      if not next(stale) then return end
+    end
   end
-  listed = table.concat(listed)
-  for name in vim.fs.dir(M.PASTES) do
-    local p = vim.fs.joinpath(M.PASTES, name)
-    local st = name:match("^paste%-%d+%.png$") and vim.uv.fs_stat(p)
-    if st and os.time() - st.mtime.sec > 86400 and not listed:find(name, 1, true) then os.remove(p) end
-  end
+  for _, path in pairs(stale) do os.remove(path) end
 end
+
 
 -- Claude Code's record of each chat: <config>/projects/<cwd>/<session>.jsonl, and a <session>/ dir
 -- beside it; one pass of the project dirs for all ids, an fs_stat per id in each
 local function rm_sessions(ids)
   local want = {}
-  for _, id in pairs(ids) do if id and id:match("^[%w-]+$") then want[id] = true end end -- it goes in a path
+  for _, id in pairs(ids) do if id and id:match("^[%w-]+$") then want[id .. ".jsonl"] = id end end -- it goes in a path
   if not next(want) then return end
   local dir = vim.fs.joinpath(vim.env.CLAUDE_CONFIG_DIR or vim.fs.joinpath(vim.uv.os_homedir(), ".claude"), "projects")
   if not vim.uv.fs_stat(dir) then return end
-  for name in vim.fs.dir(dir) do
-    local p = vim.fs.joinpath(dir, name)
-    for id in pairs(want) do
-      if vim.uv.fs_stat(vim.fs.joinpath(p, id .. ".jsonl")) then
-        os.remove(vim.fs.joinpath(p, id .. ".jsonl"))
-        vim.fn.delete(vim.fs.joinpath(p, id), "rf")
-        vim.uv.fs_rmdir(p) -- a worktree's project dir, now empty; fails (kept) if not
+  for name, t in vim.fs.dir(dir) do
+    if t == "directory" or t == nil then
+      local p = dir .. "/" .. name
+      for fname, id in pairs(want) do
+        local transcript = p .. "/" .. fname
+        if vim.uv.fs_stat(transcript) then
+          os.remove(transcript)
+          local sub = p .. "/" .. id
+          if vim.uv.fs_stat(sub) then vim.fn.delete(sub, "rf") end
+          vim.uv.fs_rmdir(p) -- a worktree's project dir, now empty; fails (kept) if not
+        end
       end
     end
   end
 end
+
 
 -- forget each entry of list: what drop does per task, but the git work is batched — one
 -- for-each-ref + update-ref per repo for all its dropped tasks, one pass for all chats,
@@ -1117,9 +1189,18 @@ function M.show(e)
   local a, z = e.base0 or e.base, e.result
   -- the two diffs run concurrently; once the file list is in, one cat-file starts for every
   -- file's before and after contents, overlapping the -U0 diff and the window setup below
+  local spec_idx = { {}, {} } -- rev side (after, before) -> file index -> batch index; binaries aren't read
   local st, first, cat = git.review(e.root, a, z, function(s)
     local specs = {}
-    for _, rev in ipairs({ z, a }) do for _, p in ipairs(s.paths) do specs[#specs + 1] = rev .. ":" .. p end end
+    for side, rev in ipairs({ z, a }) do
+      for i, p in ipairs(s.paths) do
+        if s.list[i]:sub(-7) == " binary" then spec_idx[side][i] = false
+        else
+          specs[#specs + 1] = rev .. ":" .. p
+          spec_idx[side][i] = #specs
+        end
+      end
+    end
     return git.files_start(e.root, specs)
   end)
   if st.files == 0 then return notify("no changes") end
@@ -1143,7 +1224,8 @@ function M.show(e)
   local all = git.files_wait(cat) -- a missing side reads as ""
   local function content(rev, i)
     if st.list[i]:match(" binary$") then return { "binary file" } end
-    return vim.split(((all[(rev == a and #st.paths or 0) + i] or ""):gsub("\n$", "")), "\n")
+    local idx = spec_idx[rev == a and 2 or 1][i]
+    return vim.split(((idx and all[idx] or ""):gsub("\n$", "")), "\n")
   end
   -- the after side of each file, for the quickfix list to point at. Filled now: filling it later
   -- would move the list's line numbers; the before buffers are made lazily, from the same batch

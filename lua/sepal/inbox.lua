@@ -4,6 +4,7 @@
 local M = {}
 
 local cache = {} -- root -> list of entries, newest first
+local roots_version = 0
 
 local function cfg() return require("sepal").config() end
 local keys = {}
@@ -33,6 +34,7 @@ function M.list(root)
     if e.status == "split" then e.status, e.swarm, e.split = "swarmed", e.split, nil end -- older inboxes: split was renamed swarmed
   end
   cache[root] = list
+  roots_version = roots_version + 1
   return list
 end
 
@@ -40,11 +42,17 @@ local batching, pending = 0, { roots = {}, render = false } -- >0: saves and ren
 
 local function save(root)
   if batching > 0 then pending.roots[root] = true return end
-  local keep = vim.tbl_map(function(e) -- a shallow copy is enough: it's only encoded
-    local c = {}
-    for k, v in pairs(e) do if k ~= "activity" and k ~= "subagents" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
-    return c
-  end, M.list(root))
+  local list = M.list(root)
+  local keep = {}
+  for i = 1, #list do
+    local e = list[i]
+    if e.activity == nil and e.subagents == nil and e.reply == nil then keep[i] = e
+    else
+      local c = {}
+      for k, v in pairs(e) do if k ~= "activity" and k ~= "subagents" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
+      keep[i] = c
+    end
+  end
   local f = io.open(file(root), "w")
   if not f then
     vim.fn.mkdir(cfg().worktrees, "p")
@@ -57,11 +65,18 @@ M.save = save
 
 -- what the statusline shows (sepal.status): tasks running, ready to land, needing you
 local COUNTS = { running = 1, checking = 1, queued = 1, ready = 2, planned = 2, needs = 3, failed = 3, error = 3 }
-function M.counts(root)
-  local n = { 0, 0, 0 }
-  for _, e in ipairs(cache[root] or {}) do local i = COUNTS[e.status]; if i then n[i] = n[i] + 1 end end
-  return n
+function M.counts_raw(root)
+  local n1, n2, n3 = 0, 0, 0
+  for _, e in ipairs(cache[root] or {}) do
+    local i = COUNTS[e.status]
+    if i == 1 then n1 = n1 + 1
+    elseif i == 2 then n2 = n2 + 1
+    elseif i == 3 then n3 = n3 + 1 end
+  end
+  return n1, n2, n3
 end
+function M.counts(root) return { M.counts_raw(root) } end
+function M.roots_ver() return roots_version end
 M.cache = cache
 
 local draw -- below
@@ -71,8 +86,11 @@ local function render() -- in a batch only flagged, drawn once at its end
   draw()
   -- render runs on every tool call of every running task; the counts move a few times a task
   local sig = {}
-  for root in pairs(cache) do sig[#sig + 1] = root .. table.concat(M.counts(root), ",") end
-  table.sort(sig)
+  for root in pairs(cache) do
+    local n1, n2, n3 = M.counts_raw(root)
+    sig[#sig + 1] = root .. n1 .. "," .. n2 .. "," .. n3
+  end
+  if #sig > 1 then table.sort(sig) end
   sig = table.concat(sig, ";")
   if sig == counted then return end
   counted = sig
@@ -145,12 +163,26 @@ local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue
 local PLAN = "^%s+(%d+)%.%s*%[([^%]]*)%]"
 local function plan_line(i, p) return ("%d. [%s] %s"):format(i, p.model or "default", p.title) end
 
-local function ago(t)
-  local s = os.time() - (t or os.time())
-  for _, u in ipairs({ { 86400, "d" }, { 3600, "h" }, { 60, "m" } }) do
-    if s >= u[1] then return math.floor(s / u[1]) .. u[2] end
-  end
+local function strwidth(s) return not s:find("[^\32-\126]") and #s or vim.api.nvim_strwidth(s) end
+M.strwidth = strwidth
+local function ago(t, now)
+  local n = now or os.time()
+  local s = n - (t or n)
+  if s >= 86400 then return math.floor(s / 86400) .. "d" end
+  if s >= 3600 then return math.floor(s / 3600) .. "h" end
+  if s >= 60 then return math.floor(s / 60) .. "m" end
   return "now"
+end
+-- the next unix time at which ago(t) changes: the 1 s tick redraws only then
+local function next_age_change(t, now)
+  local n = now or os.time()
+  t = t or n
+  local s = n - t
+  if s < 0 then return t + 60 end
+  if s >= 86400 then return t + (math.floor(s / 86400) + 1) * 86400 end
+  if s >= 3600 then return t + (math.floor(s / 3600) + 1) * 3600 end
+  if s >= 60 then return t + (math.floor(s / 60) + 1) * 60 end
+  return t + 60
 end
 local fit_c, fit_n = {}, 0 -- render calls it per entry per column: memoized by w.."\0"..s
 local function fit(s, w)
@@ -158,8 +190,17 @@ local function fit(s, w)
   local v = fit_c[k]
   if not v then
     if fit_n > 4096 then fit_c, fit_n = {}, 0 end
-    if vim.api.nvim_strwidth(s) > w then s = vim.fn.strcharpart(s, 0, w - 1) .. "…" end
-    v = s .. string.rep(" ", w - vim.api.nvim_strwidth(s))
+    if not s:find("[^\32-\126]") then
+      if #s > w then v = w >= 1 and (s:sub(1, w - 1) .. "…") or "…"
+      else v = s .. string.rep(" ", w - #s) end
+    else
+      local sw = vim.api.nvim_strwidth(s)
+      if sw > w then
+        s = vim.fn.strcharpart(s, 0, w - 1) .. "…"
+        sw = vim.api.nvim_strwidth(s)
+      end
+      v = s .. string.rep(" ", math.max(0, w - sw))
+    end
     fit_c[k], fit_n = v, fit_n + 1
   end
   return v
@@ -203,9 +244,10 @@ end
 
 local opened = {} -- task id -> true when you opened its fold: tasks start folded
 local heads = {} -- row -> true for each task's first line, where its fold starts
-local drawn -- what the inbox shows, its spinners blanked: a redraw that only moves them rewrites just those
-local clocked -- clock()'s value at the last draw: a tick redraws for the ages only when it moved
+local drawn -- true once drawn: the timer may move its spinners
+local next_age, last_now = math.huge, 0 -- when the first shown age rolls over, and when the draw happened
 local spun = {} -- the rows drawn with a spinner
+local prev_inbox -- the last draw's rows, for patching only those that changed
 local inbox_buf -- kept, not searched for: render runs on every tool call of every running task
 local function buf() return inbox_buf and vim.api.nvim_buf_is_valid(inbox_buf) and inbox_buf or nil end
 -- the buffer is edited like oil: a task's line is known by its text past the status icon (which spins)
@@ -221,28 +263,50 @@ local function quiet(b, f)
 end
 
 local function spin(b)
+  if #spun == 0 then return end
+  local f = SPIN[frame]
+  local fs = { f }
   quiet(b, function()
-    for _, row in ipairs(spun) do vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #SPIN[frame], { SPIN[frame] }) end
+    for _, row in ipairs(spun) do
+      vim.api.nvim_buf_set_text(b, row - 1, 0, row - 1, #f, fs)
+      if prev_inbox and prev_inbox.buf == b and prev_inbox.lines[row] then
+        prev_inbox.lines[row] = f .. prev_inbox.lines[row]:sub(#f + 1)
+      end
+    end
   end)
 end
 
--- what the ages say now, all of them: changes to entries already redraw, so between redraws this
--- only moves when an age rolls over — that's when a tick still wants a full draw
-local function clock()
-  local t = {}
-  for _, list in pairs(cache) do for _, e in ipairs(list) do t[#t + 1] = ago(e.time) end end
-  return table.concat(t)
+local function same_marks(a, b)
+  if a == b then return true end
+  if not a or not b or #a ~= #b then return false end
+  for i = 1, #a do
+    local x, y = a[i], b[i]
+    if x[1] ~= y[1] or x[2] ~= y[2] or x[3] ~= y[3] or (x[4] == true) ~= (y[4] == true) then return false end
+  end
+  return true
 end
 
 draw = function()
-  clocked = clock() -- the ages as drawn (by the panel too): a tick redraws only when this moves
+  local now = os.time()
+  last_now = now
   local panel = package.loaded["sepal.panel"] -- the side panel shows the same tasks: it redraws with the inbox
   local live = panel and panel.render() or false
   local b = buf()
   local w = b and vim.fn.win_findbuf(b)[1]
   local root = w and vim.b[b].sepal_inbox
   local list = w and M.list(root) or {}
-  live = live or vim.iter(list):any(function(e) return M.LIVE[e.status] end)
+  for _, e in ipairs(list) do
+    if M.LIVE[e.status] then live = true break end
+  end
+  next_age = math.huge
+  if live then -- integer arithmetic over the cache: any age either view shows rolls over on time
+    for _, l in pairs(cache) do
+      for _, e in ipairs(l) do
+        local n = next_age_change(e.time, now)
+        if n < next_age then next_age = n end
+      end
+    end
+  end
   -- one timer spins both while a task they show runs, and stops when none does
   if live and not timer then
     timer = assert(vim.uv.new_timer())
@@ -250,7 +314,10 @@ draw = function()
       frame, ticks = frame % #SPIN + 1, ticks + 1
       -- every change redraws at once, so a tick only moves the spinners; once a turn (1s) a whole
       -- redraw moves the ages — only when one actually rolled over since the last draw
-      if frame == 1 and clock() ~= clocked then return render() end
+      if frame == 1 then
+        local n = os.time()
+        if n < last_now or n >= next_age then return render() end
+      end
       if package.loaded["sepal.panel"] then package.loaded["sepal.panel"].spin() end
       local b = buf()
       if drawn and b and vim.fn.win_findbuf(b)[1] and not vim.bo[b].modified then spin(b) end
@@ -259,50 +326,109 @@ draw = function()
     timer:stop(); timer:close(); timer = nil
   end
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
-  if not w then drawn = nil; return end -- what it showed is stale now: no tick may touch it
-  if vim.bo[b].modified then return end -- your edits wait for :w (or u): a redraw would throw them away
-  local lines, rows, marks, spans, spins, agents, plans = { HELP, "" }, {}, {}, {}, {}, {}, {}
+  if not w then drawn, prev_inbox = nil, nil; return end -- what it showed is stale now: no tick may touch it
+  if vim.bo[b].modified then prev_inbox = nil; return end -- your edits wait for :w (or u): a redraw would throw them away
+  local lines, rows, marks, spins, agents, plans = { HELP, "" }, {}, {}, {}, {}, {}
+  local row_marks, fold_ranges, spin_rows = {}, {}, {}
+  local function mark(row, col, end_col, hl)
+    local m = row_marks[row]
+    if not m then m = {}; row_marks[row] = m end
+    m[#m + 1] = { col, end_col, hl }
+  end
+  local function line_mark(row, hl)
+    local m = row_marks[row]
+    if not m then m = {}; row_marks[row] = m end
+    m[#m + 1] = { 0, -1, hl, true }
+  end
+  mark(1, 0, #HELP, "SepalDim")
   if #list == 0 then lines[#lines + 1] = "no tasks yet: :Sepal task" end
   -- every column padded to its widest value in the list, so every line is the same width
   local cols, wid = {}, { 0, 0, 0, 0 }
   for i, e in ipairs(list) do
     cols[i] = facts(e)
-    for c = 1, 4 do wid[c] = math.max(wid[c], vim.api.nvim_strwidth(cols[i][c])) end
+    for c = 1, 4 do wid[c] = math.max(wid[c], strwidth(cols[i][c])) end
   end
+  local new_heads = {}
   for i, e in ipairs(list) do
     local st = STATUS[e.status] or { "?", e.status, "Normal" }
     local head = ("%s %s "):format(M.LIVE[e.status] and SPIN[frame] or cfg_icon(e.status, st[1]), fit(st[2], 12))
-    local pre = ("%s%s  %s  "):format(head, fit(ago(e.time), 3), fit(e.title or "", 34))
+    local pre = ("%s%s  %s  "):format(head, fit(ago(e.time, now), 3), fit(e.title or "", 34))
     local c = cols[i]
     local f = wid[1] > 0 and ("%s %s %s"):format(fit(c[1], wid[1]), fit(c[2], wid[2]), fit(c[3], wid[3])) or ""
     f = f .. (wid[1] > 0 and wid[4] > 0 and "  " or "") .. fit(c[4], wid[4])
     lines[#lines + 1] = pre .. f
-    if M.LIVE[e.status] then spins[#spins + 1] = #lines end
-    rows[#lines], marks[#lines] = e.id, { st[3], #head - 1 }
+    local hrow = #lines
+    if M.LIVE[e.status] then spins[#spins + 1] = hrow; spin_rows[hrow] = true end
+    rows[hrow], marks[hrow], new_heads[hrow] = e.id, { st[3], #head - 1 }, true
+    mark(hrow, 0, #head - 1, st[3])
     -- the age dimmed, the diff counts colored like a diff
-    spans[#spans + 1] = { #lines, #head, #head + 3, "SepalDim" }
-    for a, z in f:gmatch("()%+%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAdded" } end
-    for a, z in f:gmatch("()−%d+()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalRemoved" } end
-    for a, z in f:gmatch("()✔()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalOk" } end
-    for a, z in f:gmatch("()✘()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalError" } end
-    for a, z in f:gmatch("()↳ %d+ subagents?()") do spans[#spans + 1] = { #lines, #pre + a - 1, #pre + z - 1, "SepalAgent" } end
+    mark(hrow, #head, #head + 3, "SepalDim")
+    if f:find("+", 1, true) then for a, z in f:gmatch("()%+%d+()") do mark(hrow, #pre + a - 1, #pre + z - 1, "SepalAdded") end end
+    if f:find("−", 1, true) then for a, z in f:gmatch("()−%d+()") do mark(hrow, #pre + a - 1, #pre + z - 1, "SepalRemoved") end end
+    if f:find("✔", 1, true) then for a, z in f:gmatch("()✔()") do mark(hrow, #pre + a - 1, #pre + z - 1, "SepalOk") end end
+    if f:find("✘", 1, true) then for a, z in f:gmatch("()✘()") do mark(hrow, #pre + a - 1, #pre + z - 1, "SepalError") end end
+    if f:find("↳ ", 1, true) then for a, z in f:gmatch("()↳ %d+ subagents?()") do mark(hrow, #pre + a - 1, #pre + z - 1, "SepalAgent") end end
     for _, d in ipairs(details(e)) do
       lines[#lines + 1] = "    " .. d; rows[#lines] = e.id
       if d:match("^↳ ") then agents[#lines] = true -- not dimmed: these are what's running
       elseif e.status == "planned" and lines[#lines]:match(PLAN) then -- nor these: what s makes, the model to edit in color
         plans[#lines] = true
-        local a, z = lines[#lines]:find("%[[^%]]*%]")
-        spans[#spans + 1] = { #lines, a - 1, z, "SepalAccent" }
+        local aa, zz = lines[#lines]:find("%[[^%]]*%]")
+        mark(#lines, aa - 1, zz, "SepalAccent")
+      end
+    end
+    if #lines > hrow then fold_ranges[#fold_ranges + 1] = { hrow, #lines, e.id } end
+  end
+  for row = 3, #lines do
+    if agents[row] then line_mark(row, "SepalAgent")
+    elseif not marks[row] and not plans[row] and lines[row]:sub(1, 4) == "    " then line_mark(row, "SepalDim") end
+  end
+  spun = spins
+  drawn = true
+  local same = prev_inbox and prev_inbox.buf == b and prev_inbox.win == w and prev_inbox.root == root
+    and #lines == #prev_inbox.lines
+  local unchanged = same
+  if same then
+    for row = 1, #lines do
+      if rows[row] ~= prev_inbox.rows[row] or (new_heads[row] == true) ~= (prev_inbox.heads[row] == true) then same, unchanged = false, false break end
+      if unchanged then
+        local line_same
+        if spin_rows[row] then
+          line_same = lines[row]:sub(#SPIN[frame] + 1) == prev_inbox.lines[row]:sub(#SPIN[frame] + 1)
+        else
+          line_same = lines[row] == prev_inbox.lines[row]
+        end
+        if not line_same or not same_marks(row_marks[row], prev_inbox.row_marks[row]) then unchanged = false end
       end
     end
   end
-  local key = { w }
-  for row, l in ipairs(lines) do key[#key + 1] = tostring(rows[row]) .. "\0" .. l end
-  for _, row in ipairs(spins) do key[row + 1] = rows[row] .. "\0\1" .. lines[row]:sub(#SPIN[frame] + 1) end
-  key = table.concat(key, "\n")
-  spun = spins
-  if key == drawn then return spin(b) end -- only the spinners moved: every frame is 3 bytes, so the other marks and folds stay put
-  drawn = key
+  if unchanged then return spin(b) end -- only the spinners moved: every frame is 3 bytes, so the other marks and folds stay put
+  local function set_marks(row)
+    for _, m in ipairs(row_marks[row] or {}) do
+      if m[4] then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = m[3] })
+      else vim.api.nvim_buf_set_extmark(b, NS, row - 1, m[1], { end_col = m[2], hl_group = m[3] }) end
+    end
+  end
+  if same then
+    quiet(b, function()
+      for row = 1, #lines do
+        local line_same = lines[row] == prev_inbox.lines[row]
+        if not line_same or not same_marks(row_marks[row], prev_inbox.row_marks[row]) then
+          vim.api.nvim_buf_set_lines(b, row - 1, row, false, { lines[row] })
+          vim.api.nvim_buf_clear_namespace(b, NS, row - 1, row)
+          set_marks(row)
+        end
+      end
+    end)
+    ids = {}
+    for row, id in pairs(rows) do
+      if marks[row] then local k = tkey(lines[row]); ids[k] = ids[k] or {}; table.insert(ids[k], id) end
+    end
+    vim.b[b].sepal_rows = rows
+    heads = new_heads
+    prev_inbox = { buf = b, win = w, root = root, lines = lines, rows = rows, heads = heads, row_marks = row_marks }
+    return
+  end
   -- each task is a fold (za/zc/zo/zM/zR); the lines change on every redraw, so its state is kept by task
   local old = vim.b[b].sepal_rows or {}
   vim.api.nvim_win_call(w, function()
@@ -318,26 +444,16 @@ draw = function()
     if marks[row] then local k = tkey(lines[row]); ids[k] = ids[k] or {}; table.insert(ids[k], id) end
   end
   vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
-  vim.api.nvim_buf_set_extmark(b, NS, 0, 0, { end_row = 0, end_col = #HELP, hl_group = "SepalDim" })
-  for row, m in pairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { end_col = m[2], hl_group = m[1] }) end
-  for _, sp in ipairs(spans) do vim.api.nvim_buf_set_extmark(b, NS, sp[1] - 1, sp[2], { end_col = sp[3], hl_group = sp[4] }) end
-  for row = 3, #lines do
-    if agents[row] then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalAgent" })
-    elseif not marks[row] and not plans[row] and lines[row]:match("^    ") then vim.api.nvim_buf_set_extmark(b, NS, row - 1, 0, { line_hl_group = "SepalDim" }) end
-  end
+  for row = 1, #lines do set_marks(row) end
   vim.b[b].sepal_rows = rows
-  heads = {}
-  for row = 1, #lines do heads[row] = marks[row] ~= nil end
+  heads = new_heads
+  prev_inbox = { buf = b, win = w, root = root, lines = lines, rows = rows, heads = heads, row_marks = row_marks }
   vim.api.nvim_win_call(w, function()
     local cmds = { "silent! normal! zE" }
-    for row = 1, #lines do
-      local last = row
-      while heads[row] and rows[last + 1] == rows[row] do last = last + 1 end
-      if last > row then
-        cmds[#cmds + 1] = ("%d,%dfold"):format(row, last)
-        local o = opened[rows[row]]
-        if o or (o == nil and planned[rows[row]]) then cmds[#cmds + 1] = row .. "foldopen" end
-      end
+    for _, fr in ipairs(fold_ranges) do
+      cmds[#cmds + 1] = ("%d,%dfold"):format(fr[1], fr[2])
+      local o = opened[fr[3]]
+      if o or (o == nil and planned[fr[3]]) then cmds[#cmds + 1] = fr[1] .. "foldopen" end
     end
     vim.cmd(table.concat(cmds, "\n"))
   end)
@@ -416,7 +532,7 @@ function M.write(b)
   local dropping = {}
   for _, id in ipairs(gone) do local e = by[id]; if e then dropping[#dropping + 1] = e end end
   agent.drop_many(dropping) -- a running one stays
-  drawn = nil
+  drawn, prev_inbox = nil, nil
   render()
   local queue = {}
   for _, id in ipairs(copies) do queue[#queue + 1] = M.find(root, id) end
@@ -510,6 +626,6 @@ function M.open(root)
   vim.fn.winrestview({ topline = 1 }) -- keep the key help in view
 end
 
-M._t = { reset = function() cache, drawn, ids = {}, nil, {} end }
+M._t = { reset = function() cache, drawn, ids, prev_inbox = {}, nil, {}, nil; roots_version = roots_version + 1 end }
 
 return M

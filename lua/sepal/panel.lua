@@ -79,7 +79,9 @@ end
 M.logo, M.model = logo, model -- :Sepal task's picker and draft show them too
 
 local panel_buf
-local drawn -- what it shows, spinners blanked: see render
+local drawn -- true once drawn: the timer may move its spinners
+local prev -- the last draw, for patching only the rows that changed
+local anim_lit = false -- shimmer extmarks are set
 local spun = {} -- { row, col } of each spinner drawn
 local glows = {} -- a list of { row, col, end_col } of the "▎" of each drawn row, per card
 local shines = {} -- { row, col, text } of each live status label drawn
@@ -95,6 +97,7 @@ function M.shown() return win() ~= nil end -- sepal.fidget checks on every BufEn
 
 local memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} -- card() measures a lot of text per redraw: memoized
 local function dw(s)
+  if not s:find("[^\32-\126]") then return #s end
   local v = dw_c[s]
   if not v then
     if memo_n > 4096 then memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} end
@@ -103,6 +106,7 @@ local function dw(s)
   end
   return v
 end
+
 local function wrap(s, w)
   local k = w .. "\0" .. s
   local out = wrap_c[k]
@@ -147,34 +151,70 @@ local function bar(u, kind)
 end
 
 -- everything card reads of e, as a string: the cache key for its rows
-local function card_sig(e, w)
-  local s, subs, C, u = e.stat, {}, require("sepal").config(), e.usage
+local function card_sig(e, w, now, C, icons_sig)
+  local s, subs, u = e.stat, {}, e.usage
   for _, a in ipairs(e.subagents or {}) do subs[#subs + 1] = tostring(a.name) end
   if e.status == "planned" then
     for _, p in ipairs(e.plan or {}) do subs[#subs + 1] = tostring(p.model) .. "\2" .. tostring(p.title) end
   end
-  return table.concat({ tostring(e.status), inbox.ago(e.time), tostring(e.title), w, tostring(e.attempts),
+  return table.concat({ tostring(e.status), inbox.ago(e.time, now), tostring(e.title), w, tostring(e.attempts),
     tostring(e.check), tostring(e.checked), tostring(s and s.files), tostring(s and s.add), tostring(s and s.del),
     tostring(e.activity), table.concat(subs, "\1"), tostring(e.why), tostring(e.error), tostring(e.summary),
     tostring(not e.summary and e.task), #(e.assumptions or {}), tostring(e.model),
     tostring(u and u.used), tostring(u and u.limit), tostring(u and u.out), tostring(agent.kind(e)),
     tostring(e.agent and e.agent.cmd), tostring(require("sepal").icon(e.status, "?")),
-    tostring(C.retries), tostring(C.sakura),
-    tostring(inbox.LIVE[e.status] and inbox.spin()) }, "\0")
+    tostring(C.retries), tostring(C.sakura), icons_sig }, "\0")
+end
+
+
+-- chunks as one immutable row: byte columns for its marks, and a spinner slot blanked in text
+local EMPTY_MARKS = {}
+local EMPTY_ROW = { text = "", marks = EMPTY_MARKS }
+local function same_row(a, b)
+  if a == b then return true end
+  if not a or not b or a.text ~= b.text or #a.marks ~= #b.marks then return false end
+  if a.spin_col ~= b.spin_col or a.pulse_col ~= b.pulse_col or a.shimmer_col ~= b.shimmer_col or a.shimmer_text ~= b.shimmer_text then return false end
+  for i = 1, #a.marks do
+    local x, y = a.marks[i], b.marks[i]
+    if x[1] ~= y[1] or x[2] ~= y[2] or x[3] ~= y[3] then return false end
+  end
+  return true
+end
+local function bake(chunks)
+  if #chunks == 0 then return EMPTY_ROW end
+  local parts, at, r = {}, 0, { marks = {} }
+  for _, c in ipairs(chunks) do
+    local text, hl = c[1], c[2]
+    parts[#parts + 1] = text
+    if hl and hl ~= "Normal" and #text > 0 then r.marks[#r.marks + 1] = { at, at + #text, hl } end
+    if c.spin and not r.spin_col then r.spin_col = at end
+    if c.pulse and not r.pulse_col then r.pulse_col = at end
+    if c.shimmer and not r.shimmer_col then r.shimmer_col, r.shimmer_text = at, text end
+    at = at + #text
+  end
+  local full = table.concat(parts)
+  if r.spin_col then
+    r.spin_prefix = full:sub(1, r.spin_col)
+    r.spin_suffix = full:sub(r.spin_col + 4) -- every braille spinner is three bytes
+    r.text = r.spin_prefix .. "\1" .. r.spin_suffix
+  else
+    r.text = full
+  end
+  if #r.marks == 0 then r.marks = EMPTY_MARKS end
+  return r
 end
 
 -- a task as rows of { text, hl } chunks, behind a rail in its status's color (each row starts
 -- with the " " margin chunk: rows are cached whole by card_sig)
-local function card(e, w)
-  -- with custom icons the sig can't tell a provider's logo apart: don't cache then
-  local sig = not next(require("sepal").config().icons or {}) and card_sig(e, w)
-  local cached = sig and card_c[sig]
+local function card(e, w, now, C, icons_sig)
+  local sig = card_sig(e, w, now, C, icons_sig)
+  local cached = card_c[sig]
   if cached then return cached end
   if memo_n > 4096 then memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} end
   local st = inbox.STATUS[e.status] or { "?", e.status, "Normal" }
   local live = inbox.LIVE[e.status]
   local icon = live and inbox.spin() or require("sepal").icon(e.status, st[1])
-  local rail, age = { "▎ ", st[3], pulse = live or nil }, inbox.ago(e.time)
+  local rail, age = { "▎ ", st[3], pulse = live or nil }, inbox.ago(e.time, now)
   local inner = w - 2
   local pad = { " ", "Normal" }
   local out = {
@@ -195,7 +235,7 @@ local function card(e, w)
   local meta = { { st[2], st[3], shimmer = live } }
   if HINT[e.status] then meta[#meta + 1] = { "  " .. HINT[e.status], "SepalDim" } end
   local function add(t, hl) meta[#meta + 1] = { " · ", "SepalDim" }; meta[#meta + 1] = { t, hl or "SepalDim" } end
-  if (e.attempts or 0) > 0 then add(("try %d/%d"):format(e.attempts + 1, (require("sepal").config().retries or 0) + 1)) end
+  if (e.attempts or 0) > 0 then add(("try %d/%d"):format(e.attempts + 1, (C.retries or 0) + 1)) end
   if e.check then
     add(e.check .. (e.checked == true and " ✔" or e.checked == false and " ✘" or ""),
       e.checked == true and "SepalOk" or e.checked == false and "SepalError" or "SepalDim")
@@ -234,54 +274,77 @@ local function card(e, w)
   end
   local n = #(e.assumptions or {})
   if n > 0 then row({ ("· %d decision%s to read"):format(n, n == 1 and "" or "s"), "SepalDim" }) end
-  if sig then card_c[sig], memo_n = out, memo_n + 1 end
-  return out
+  local baked = {}
+  for i, r in ipairs(out) do baked[i] = bake(r) end
+  card_c[sig], memo_n = baked, memo_n + 1
+  return baked
 end
 
--- the light on a working card: only highlights, redrawn every tick — never the text, so the key
--- render diffs on stays put
+-- the light on a working card: only highlights, redrawn every tick — never the text, so the rows stay put
 local function animate(b)
   vim.api.nvim_buf_clear_namespace(b, ANIM, 0, -1)
   local t = inbox.tick()
+  local aopts = { hl_group = "SepalShimmer", priority = 4200 }
+  local lit = false
   for _, g in ipairs(glows) do -- a light two rows tall slides down the card's rail, then rests
     local h = t % (#g + 4) + 1
-    for i, r in ipairs(g) do
-      if i == h or i == h - 1 then
-        vim.api.nvim_buf_set_extmark(b, ANIM, r[1], r[2], { end_col = r[3], hl_group = "SepalShimmer", priority = 4200 })
-      end
+    local r = g[h - 1]
+    if r then
+      aopts.end_col = r[3]
+      vim.api.nvim_buf_set_extmark(b, ANIM, r[1], r[2], aopts)
+      lit = true
+    end
+    r = g[h]
+    if r then
+      aopts.end_col = r[3]
+      vim.api.nvim_buf_set_extmark(b, ANIM, r[1], r[2], aopts)
+      lit = true
     end
   end
   for _, s in ipairs(shines) do -- and a glint three chars wide sweeps its status label off both ends
     local h = t % (#s[3] + 6) - 1
-    for k = 0, #s[3] - 1 do
-      if math.abs(k - h) <= 1 then
-        vim.api.nvim_buf_set_extmark(b, ANIM, s[1], s[2] + k, { end_col = s[2] + k + 1, hl_group = "SepalShimmer", priority = 4200 })
-      end
+    for k = math.max(0, h - 1), math.min(#s[3] - 1, h + 1) do
+      aopts.end_col = s[2] + k + 1
+      vim.api.nvim_buf_set_extmark(b, ANIM, s[1], s[2] + k, aopts)
+      lit = true
     end
   end
+  anim_lit = lit
 end
+
 
 -- returns whether a task it shows is running, for the inbox's spinner timer
 function M.render()
   local w = win()
-  if not w then drawn = nil; return false end -- stale once hidden: no tick may touch it
-  local list = inbox.list(vim.b[buf()].sepal_panel)
+  if not w then drawn, prev = nil, nil; return false end -- stale once hidden: no tick may touch it
+  local b = buf()
+  local root = vim.b[b].sepal_panel
+  local list = inbox.list(root)
   local width = vim.api.nvim_win_get_width(w) - 1
-  local root = vim.b[buf()].sepal_panel
-  local out = { { { " ", "Normal" }, { require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" },
+  local now, C = os.time(), require("sepal").config()
+  local icons_sig = ""
+  if next(C.icons or {}) then
+    local names = {}
+    for k in pairs(C.icons) do names[#names + 1] = k end
+    table.sort(names)
+    local parts = {}
+    for _, k in ipairs(names) do parts[#parts + 1] = k .. "=" .. C.icons[k] end
+    icons_sig = table.concat(parts, "\1")
+  end
+  local header = { { { " ", "Normal" }, { require("sepal").icon("landed", "◆") .. " sepal", "SepalTitle" },
     { "  " .. vim.fs.basename(root), "SepalDim" } } }
   local counts = { { " ", "Normal" } }
   local by = {}
   for _, e in ipairs(list) do by[e.status] = (by[e.status] or 0) + 1 end
   for _, c in ipairs(COUNTS) do
     local k = 0
-    for s in pairs(c[2]) do k = k + (by[s] or 0) end
+    for st in pairs(c[2]) do k = k + (by[st] or 0) end
     if k > 0 then
       if #counts > 1 then counts[#counts + 1] = { " · ", "SepalDim" } end
       counts[#counts + 1] = { k .. " " .. c[1], c[3] }
     end
   end
-  out[#out + 1] = counts
+  header[#header + 1] = counts
   local fullest, n = nil, 0 -- the fullest context window among the running tasks: it can't hide in a card
   for _, e in ipairs(list) do
     if e.status == "running" and e.usage and e.usage.limit then
@@ -295,67 +358,112 @@ function M.render()
     -- say which task and why that one: with several, it's the closest to its limit (short: 46 columns
     -- must leave room for the title)
     local text = " " .. p .. (n > 1 and "% · fullest of " .. n .. ": " or "% context · ")
-    out[#out + 1] = { { " ", "Normal" }, full, empty,
+    header[#header + 1] = { { " ", "Normal" }, full, empty,
       { (text .. inbox.fit(fullest.title or "", width - dw(" ") - 10 - dw(text))):gsub("%s+$", ""), hl } }
   end
-  out[#out + 1] = { { " ", "Normal" }, { "o watch · q close", "SepalDim" } }
-  out[#out + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
-  rows = {}
+  header[#header + 1] = { { " ", "Normal" }, { "o watch · q close", "SepalDim" } }
+  header[#header + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
+  local all_rows = {}
+  for i, r in ipairs(header) do all_rows[i] = bake(r) end
+  local new_rows = {}
   if #list == 0 then -- the empty state: centered under the divider, saying how to start
-    out[#out + 1] = {}
+    all_rows[#all_rows + 1] = EMPTY_ROW
     for _, l in ipairs({ { "◇", "SepalDim" }, {}, { "no tasks yet", "SepalPanelTitle" }, { "start one with :Sepal task", "SepalDim" } }) do
-      out[#out + 1] = l[1] and { { string.rep(" ", math.max(0, math.floor((width - dw(l[1])) / 2))) .. l[1], l[2] } } or {}
+      all_rows[#all_rows + 1] = l[1] and bake({ { string.rep(" ", math.max(0, math.floor((width - dw(l[1])) / 2))) .. l[1], l[2] } }) or EMPTY_ROW
     end
   end
   for _, e in ipairs(list) do
-    out[#out + 1] = {}
-    for _, r in ipairs(card(e, width - 1)) do -- its margin chunk is part of the row: never mutated, card may return it cached
-      out[#out + 1] = r
-      rows[#out] = e.id
+    all_rows[#all_rows + 1] = EMPTY_ROW
+    for _, r in ipairs(card(e, width - 1, now, C, icons_sig)) do
+      all_rows[#all_rows + 1] = r
+      new_rows[#all_rows] = e.id
     end
   end
-  local lines, marks, spins, key = {}, {}, {}, { w, root }
+  rows = new_rows
+  local cur_spin = inbox.spin()
+  local lines, spins = {}, {}
   local glow, shine, last = {}, {}, nil -- this draw's rail groups and status labels
-  for i, r in ipairs(out) do
-    local text, k, at = {}, { tostring(rows[i]) }, 0
-    for _, c in ipairs(r) do
-      marks[#marks + 1] = { i - 1, at, at + #c[1], c[2] }
-      if c.spin then spins[#spins + 1] = { i - 1, at } end
-      if c.pulse then -- the "▎" of a live card's row; the pulse is per card, so group by task
-        if last ~= rows[i] then glow[#glow + 1], last = {}, rows[i] end
-        local g = glow[#glow]
-        g[#g + 1] = { i - 1, at, at + #"▎" }
-      end
-      if c.shimmer then shine[#shine + 1] = { i - 1, at, c[1] } end -- the status label
-      k[#k + 1] = c.spin and "\1" .. c[1]:sub(#inbox.spin() + 1) or c[1]
-      text[#text + 1] = c[1]
-      at = at + #c[1]
+  local same = prev and prev.buf == b and prev.win == w and prev.root == root and prev.width == width
+  local unchanged = same and #all_rows == #prev.rows
+  for i, r in ipairs(all_rows) do
+    if r.spin_col then
+      lines[i] = r.spin_prefix .. cur_spin .. r.spin_suffix
+      spins[#spins + 1] = { i - 1, r.spin_col }
+    else
+      lines[i] = r.text
     end
-    lines[i], key[#key + 1] = table.concat(text), table.concat(k, "\0")
+    if r.pulse_col then -- the "▎" of a live card's row; the pulse is per card, so group by task
+      if last ~= rows[i] then glow[#glow + 1], last = {}, rows[i] end
+      local g = glow[#glow]
+      g[#g + 1] = { i - 1, r.pulse_col, r.pulse_col + #"▎" }
+    end
+    if r.shimmer_col then shine[#shine + 1] = { i - 1, r.shimmer_col, r.shimmer_text } end -- the status label
+    if unchanged and (rows[i] ~= prev.task_rows[i] or not same_row(r, prev.rows[i])) then unchanged = false end
   end
-  key = table.concat(key, "\n")
   spun, glows, shines = spins, glow, shine
-  if key == drawn then M.spin(); return #spins > 0 end
-  drawn = key
-  local b = buf()
-  vim.bo[b].modifiable = true
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
-  vim.bo[b].modifiable, vim.bo[b].modified = false, false
-  vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
-  for _, m in ipairs(marks) do vim.api.nvim_buf_set_extmark(b, NS, m[1], m[2], { end_col = m[3], hl_group = m[4] }) end
-  animate(b) -- the lines were all replaced, so its marks were too; nothing live: this clears them
+  if unchanged then M.spin(); return #spins > 0 end
+  drawn = true
+  local mopts = {}
+  local function set_row_marks(i, r)
+    for _, m in ipairs(r.marks) do
+      mopts.end_col, mopts.hl_group = m[2], m[3]
+      vim.api.nvim_buf_set_extmark(b, NS, i - 1, m[1], mopts)
+    end
+  end
+  local function row_matches(i, j)
+    return same_row(all_rows[i], prev.rows[j]) and (not all_rows[i].spin_col or cur_spin == prev.spin)
+  end
+  if same and #lines == #prev.lines then
+    vim.bo[b].modifiable = true
+    for i = 1, #lines do
+      if not row_matches(i, i) then
+        vim.api.nvim_buf_set_lines(b, i - 1, i, false, { lines[i] })
+        vim.api.nvim_buf_clear_namespace(b, NS, i - 1, i)
+        set_row_marks(i, all_rows[i])
+      end
+    end
+    vim.bo[b].modifiable, vim.bo[b].modified = false, false
+  elseif same then
+    local lo, hi_new, hi_old = 1, #lines, #prev.lines
+    local n = math.min(hi_new, hi_old)
+    while lo <= n and row_matches(lo, lo) do lo = lo + 1 end
+    while hi_new >= lo and hi_old >= lo and row_matches(hi_new, hi_old) do
+      hi_new, hi_old = hi_new - 1, hi_old - 1
+    end
+    local repl = {}
+    for i = lo, hi_new do repl[#repl + 1] = lines[i] end
+    vim.bo[b].modifiable = true
+    if hi_old >= lo then vim.api.nvim_buf_clear_namespace(b, NS, lo - 1, hi_old) end
+    vim.api.nvim_buf_set_lines(b, lo - 1, hi_old, false, repl)
+    vim.bo[b].modifiable, vim.bo[b].modified = false, false
+    for i = lo, hi_new do set_row_marks(i, all_rows[i]) end
+  else
+    vim.bo[b].modifiable = true
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+    vim.bo[b].modifiable, vim.bo[b].modified = false, false
+    vim.api.nvim_buf_clear_namespace(b, NS, 0, -1)
+    for i, r in ipairs(all_rows) do set_row_marks(i, r) end
+  end
+  prev = { buf = b, win = w, root = root, lines = lines, rows = all_rows, task_rows = rows, width = width, spin = cur_spin }
+  if #glows > 0 or #shines > 0 or anim_lit then animate(b) end -- the lines changed, so its marks may have moved
   return #spins > 0
 end
 
 -- only the spinners moved (each frame is 3 bytes): rewrite just them, in what render drew last
 function M.spin()
   local b = buf()
-  if not (drawn and win()) then return end
+  if not (drawn and b) then return end
+  local w = vim.fn.bufwinid(b)
+  if w == -1 then return end
   local f = inbox.spin()
-  vim.bo[b].modifiable = true
-  for _, s in ipairs(spun) do vim.api.nvim_buf_set_text(b, s[1], s[2], s[1], s[2] + #f, { f }) end
-  vim.bo[b].modifiable, vim.bo[b].modified = false, false
-  animate(b)
+  if #spun > 0 then
+    local fs = { f }
+    vim.bo[b].modifiable = true
+    for _, s in ipairs(spun) do vim.api.nvim_buf_set_text(b, s[1], s[2], s[1], s[2] + #f, fs) end
+    if prev and prev.buf == b then prev.spin = f end
+    vim.bo[b].modifiable, vim.bo[b].modified = false, false
+  end
+  if #glows > 0 or #shines > 0 or anim_lit then animate(b) end
 end
 
 -- :Sepal panel: shows the board of root's tasks at the right, or hides it
@@ -380,7 +488,10 @@ function M.toggle(root)
       if e then require("sepal.agent").open(e) end
     end, o("Watch the agent, or open the task's chat"))
     local g = vim.api.nvim_create_augroup("sepal.panel", {})
-    vim.api.nvim_create_autocmd("WinResized", { group = g, callback = function() M.render() end })
+    vim.api.nvim_create_autocmd("WinResized", { group = g, callback = function()
+      local pw = win()
+      if pw and vim.api.nvim_win_get_width(pw) - 1 ~= (prev and prev.width) then M.render() end
+    end })
     vim.api.nvim_create_autocmd("VimResized", { group = g, callback = function() -- "30%" follows the editor's width
       local pw = win()
       if pw then vim.api.nvim_win_set_width(pw, M.width()) end

@@ -44,6 +44,20 @@ local function bg(dir, args, o, on_done)
   if not ok then vim.schedule(function() on_done({ code = -1, stdout = "", stderr = tostring(err) }) end) end
 end
 
+-- M.root off the main loop, to cb(root or nil) on it
+function M.root_bg(cwd, cb)
+  local known = roots[cwd]
+  if known and vim.uv.fs_stat(vim.fs.joinpath(known, ".git")) then return vim.schedule(function() cb(known) end) end
+  bg(cwd, { "rev-parse", "--show-toplevel" }, nil, function(r)
+    local root = r.code == 0 and vim.trim(r.stdout) or nil
+    if not root or root == "" then roots[cwd] = nil; return cb(nil) end
+    local real = vim.uv.fs_realpath(cwd)
+    if real and vim.startswith(real, root) and vim.endswith(cwd, real:sub(#root + 1)) then root = cwd:sub(1, #cwd - (#real - #root)) end
+    roots[cwd] = root
+    cb(root)
+  end)
+end
+
 -- each of refs pointing at commit, in one git process off the main loop, to cb(ok)
 function M.update_refs_bg(root, refs, commit, cb)
   if #refs == 0 then return vim.schedule(function() cb(true) end) end
@@ -59,6 +73,7 @@ function M.commit_bg(root, tree, parent, ref, cb)
   bg(root, args, { env = ENV }, function(r)
     local c = r.code == 0 and vim.trim(r.stdout) or nil
     if not (c and ref) then return cb(c) end
+    if type(ref) == "table" then return M.update_refs_bg(root, ref, c, function(ok) cb(ok and c or nil) end) end
     bg(root, { "update-ref", ref, c }, nil, function() cb(c) end)
   end)
 end
@@ -80,18 +95,21 @@ function M.snapshot(root, ref, on_done)
   bg(root, { "rev-parse", "--git-path", "index", "--verify", "-q", "HEAD" }, nil, function(rp)
     local lines = vim.split(vim.trim(rp.stdout or ""), "\n")
     local real, head = lines[1], rp.code == 0 and lines[2] or nil
+    local function scan()
+      step({ "add", "-A" }, function(r)
+        if r.code ~= 0 then return fail() end
+        step({ "write-tree" }, function(w)
+          os.remove(idx)
+          if w.code ~= 0 then return on_done(nil) end
+          M.commit_bg(root, vim.trim(w.stdout), head, ref, on_done)
+        end)
+      end)
+    end
     if real and real ~= "" then
       if not real:match("^/") then real = vim.fs.joinpath(root, real) end
-      vim.uv.fs_copyfile(real, idx) -- no index yet (fresh repo): start empty
-    end
-    step({ "add", "-A" }, function(r)
-      if r.code ~= 0 then return fail() end
-      step({ "write-tree" }, function(w)
-        os.remove(idx)
-        if w.code ~= 0 then return on_done(nil) end
-        M.commit_bg(root, vim.trim(w.stdout), head, ref, on_done)
-      end)
-    end)
+      -- no index yet (fresh repo): the copy errors and it starts empty
+      vim.uv.fs_copyfile(real, idx, vim.schedule_wrap(scan))
+    else scan() end
   end)
 end
 
@@ -173,19 +191,35 @@ end
 
 -- the -U0 diff of a -> b parsed: { [path] = line of its first change }
 local function firsts_of(s)
-  local t, path = {}, nil
-  for l in s:gmatch("[^\n]+") do
-    local b = l:byte(1)
-    if b == 43 then
-      local header = l:match("^%+%+%+ (.*)$")
-      if header then path = unquote((header:gsub("\t$", ""))):match("^b/(.*)$") end
-    elseif b == 64 then
-      local n = l:match("^@@ %-%S+ %+(%d+)")
-      if n and path and not t[path] then t[path] = math.max(1, tonumber(n)) end
+  local t = {}
+  local sec_start
+  if s:sub(1, 11) == "diff --git " then sec_start = 1
+  else
+    local p = s:find("\ndiff --git ", 1, true)
+    sec_start = p and p + 1 or nil
+  end
+  while sec_start do
+    local nxt = s:find("\ndiff --git ", sec_start + 1, true)
+    local sec_end = nxt and nxt or #s
+    local p = s:find("\n+++ ", sec_start, true)
+    if p and p < sec_end then
+      local eol = s:find("\n", p + 1, true) or #s + 1
+      local header = s:sub(p + 5, eol - 1)
+      local path = unquote((header:gsub("\t$", ""))):match("^b/(.*)$")
+      if path then
+        local h = s:find("\n@@ ", eol, true)
+        if h and h < sec_end then
+          local heol = s:find("\n", h + 1, true) or #s + 1
+          local n = s:sub(h + 1, heol - 1):match("^@@ %-%S+ %+(%d+)")
+          if n then t[path] = math.max(1, tonumber(n)) end
+        end
+      end
     end
+    sec_start = nxt and nxt + 1 or nil
   end
   return t
 end
+
 
 local NUMSTAT = function(a, b) return { "diff", "--numstat", "-z", "--no-renames", a, b } end
 local FIRSTS = function(a, b) return { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b } end
@@ -294,14 +328,14 @@ end
 
 -- ":<mode> <mode> <old oid> <new oid> <status>\0<path>\0" per file -> the files, and the oids to read
 local function parse_diff(s)
-  local files, oids = {}, {}
+  local files, oids, seen = {}, {}, {}
   local raw = vim.split(s, "\0", { plain = true })
   for i = 1, #raw - 1, 2 do
     local oldmode, newmode, old, new, status = raw[i]:match("^:(%d+) (%d+) (%x+) (%x+) (%a)")
     if old then
       files[#files + 1] = { status = status, rel = raw[i + 1], old = old, new = new, oldmode = oldmode, newmode = newmode }
-      if status ~= "A" then oids[#oids + 1] = old end
-      if status ~= "D" then oids[#oids + 1] = new end
+      if status ~= "A" and not seen[old] then seen[old] = true; oids[#oids + 1] = old end
+      if status ~= "D" and not seen[new] then seen[new] = true; oids[#oids + 1] = new end
     end
   end
   return files, oids
@@ -363,12 +397,12 @@ local function decide(root, files, blob, on_done)
       pending = pending + 1
       merge3(root, c, cur, old or "", new, function()
         pending = pending - 1
-        if pending == 0 then on_done(changes) end
+        if pending == 0 then on_done(changes, true) end
       end)
     end
     if not c.skip then changes[#changes + 1] = c end
   end
-  if pending == 0 then on_done(changes) end
+  if pending == 0 then on_done(changes, false) end
 end
 
 -- what applying a -> b to the work tree would do, to cb({ { rel, path, content (nil: delete),
@@ -379,7 +413,11 @@ function M.plan_bg(root, a, b, cb, tries)
   tries = tries or 0
   bg(root, { "diff", "--raw", "-z", "--no-renames", "--no-abbrev", a, b }, { binary = true }, function(r)
     local files, oids = parse_diff(r.code == 0 and r.stdout or "")
-    local function check(changes)
+    local function check(changes, had_async)
+      if not had_async then
+        for _, c in ipairs(changes) do c.seen = nil end
+        return cb(changes)
+      end
       for _, c in ipairs(changes) do
         local mode, cur = observe(c.path)
         if mode ~= c.seen.mode or cur ~= c.seen.cur then

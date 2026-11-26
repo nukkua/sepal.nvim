@@ -45,9 +45,6 @@ logo and model (see Devin). Any other key cancels. A buffer opens above your cod
 ```
 Goal: Finish queued tasks in ThreadPool::shutdown() before stopping, refuse new ones.
 
-Constraints:
-- don't change the public API
-
 Done when: make test
 
 Selection: src/pool.cpp:40-52
@@ -69,7 +66,7 @@ A new task starts with your project's test command already there, found in this 
 `check`). `<c-c><c-f>` adds more files. Pytest is detected from `pytest.ini` or a `[tool.pytest…]`
 section in `pyproject.toml`.
 
-Fields you leave empty (`Constraints:` with an empty `- `, say) aren't sent; code in a ``` block is
+Fields you leave empty (`Done when:` or `Files:` with nothing under it, say) aren't sent; code in a ``` block is
 sent as it is. An empty `Goal:` sends nothing.
 
 **3. Send it.** `<c-c><c-c>`. The buffer closes and you get `working on it: Finish queued tasks…`.
@@ -335,7 +332,7 @@ keeping its `Done when:` and `Files:`. The answer replaces the buffer; `u` undoe
 require("sepal").setup({
   task_sharpen = { "claude", "-p", "--model", "opus", "--effort", "medium",
     "--no-session-persistence", "--tools=Read,Grep,Glob",
-    "Turn the rough idea on stdin into a short task: Goal, Constraints, Done when "
+    "Turn the rough idea on stdin into a short task: Goal, Done when "
     .. "(one shell command that proves it works, e.g. the test to run), Files (as @path). "
     .. "Read the files so it matches the code. Output only the task, no code fences, no filler." },
 })

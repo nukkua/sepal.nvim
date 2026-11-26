@@ -179,7 +179,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   `SEPAL_DEMO_REAL=1 nvim -u tests/demo.lua` uses the real
                   Claude Code.
                   Implement: write a task in a buffer above the code: Goal,
-                  Constraints, Done when, Files. Fields left
+                  Done when, Files. Fields left
                   empty aren't sent; an empty Goal: sends nothing.
                   Done when: starts as the project's test command when
                   sepal finds one: a `Tests:` line with a `command` in

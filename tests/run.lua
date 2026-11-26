@@ -1191,7 +1191,7 @@ local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n';
 test("with task_sharpen a short feat keeps its fields; a large feat starts as the idea", function()
   sepal.setup({ task_sharpen = suggest })
   sepal.task()
-  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 3, false), { "Goal: ", "", "Constraints:" })
+  eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 3, false), { "Goal: ", "", "Done when: " })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   sepal.task(nil, nil, "orchestrate")
   local b = task_buf()
@@ -1448,7 +1448,7 @@ test("task opens the template above, <c-c><c-f> adds files with fff", function()
   sepal.task()
   local b = task_buf()
   eq(vim.api.nvim_get_current_buf(), b)
-  eq(vim.api.nvim_buf_get_lines(b, 0, 3, false), { "Goal: ", "", "Constraints:" })
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Done when: ", "", "Files:" })
   package.loaded.fff = { find_files = function(o) o.on_submit({}, { relative_path = "src/pool.cpp" }) end }
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-f>"), "tx", false)
   package.loaded.fff.find_files = function(o) o.on_submit({}, { relative_path = "src/pool.h" }) end
@@ -1463,10 +1463,10 @@ test("a new task's Done when: is the project's test command, found and said so; 
   put("AGENTS.md", "# x\n\n- Tests: `grep -q one a.txt` from the repo root\n")
   sepal.task()
   local b = task_buf()
-  eq(vim.api.nvim_buf_get_lines(b, 5, 6, false), { "Done when: grep -q one a.txt" })
+  eq(vim.api.nvim_buf_get_lines(b, 2, 3, false), { "Done when: grep -q one a.txt" })
   local hint = vim.api.nvim_buf_get_extmarks(b, vim.api.nvim_create_namespace("sepal.check"), 0, -1, { details = true })[1]
   local text = table.concat(vim.tbl_map(function(c) return c[1] end, hint[4].virt_text))
-  eq({ hint[2], text }, { 5, "  ✔ green lands  ✘ red goes back to the agent  · found in AGENTS.md, dd: no check" })
+  eq({ hint[2], text }, { 2, "  ✔ green lands  ✘ red goes back to the agent  · found in AGENTS.md, dd: no check" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
   os.remove(vim.fs.joinpath(work, "AGENTS.md"))
   put("Makefile", "all:\n\ttrue\ntest:\n\ttrue\n")
@@ -1518,15 +1518,15 @@ test(":'<,'>Sepal task puts the selected lines in the task and lists the file", 
   key("s")
   vim.cmd("2,3Sepal task")
   local b = task_buf()
-  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Constraints:", "- ", "",
-    "Done when: ", "", "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
+  eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Done when: ", "",
+    "Selection: tests/pool.lua:2-3", "```lua", "local b = a", "-", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("a selection joins the open draft, its file listed once", function()
   vim.cmd.wincmd("j")
   vim.cmd("4Sepal task")
   local lines = vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false)
-  eq(vim.list_slice(lines, 14), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
+  eq(vim.list_slice(lines, 11), { "Selection: tests/pool.lua:4", "```lua", "return b", "```", "", "Files:", "- @tests/pool.lua" })
 end)
 
 test("code in a selection is sent as it is, even a line that is just -", function()
@@ -1686,7 +1686,7 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   local d = task_buf()
   eq(vim.b[d].sepal_kind, "implement")
   local l = vim.api.nvim_buf_get_lines(d, 0, -1, false)
-  eq({ l[1], l[8], l[9], l[11], l[12], l[#l] }, { "Goal: ", "Asked:", "how does landing work?", "Answer:", "Did it.", "Files:" })
+  eq({ l[1], l[5], l[6], l[8], l[9], l[#l] }, { "Goal: ", "Asked:", "how does landing work?", "Answer:", "Did it.", "Files:" })
   vim.api.nvim_buf_delete(d, { force = true })
   assert(vim.wait(1000, function() return task_buf() ~= nil end, 10), "the second copy's draft never opened")
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, -1, false), { "Goal: hogs the slot" })

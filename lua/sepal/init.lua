@@ -330,7 +330,7 @@ function M.skills(text)
 end
 
 local function template(check)
-  return { "Goal: ", "", "Constraints:", "- ", "", "Done when: " .. (check or ""), "", "Files:" }
+  return { "Goal: ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
 local IDEA = { "", "", "Files:" } -- a large feat with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
 local HINT = { btw = "ask anything about the project; it answers, nothing changes",
@@ -347,7 +347,7 @@ Then rewrite my task to ask for exactly that. Have it ask the agent to prototype
 experiment can settle and recommend an option from what it observed; leave product or preference
 choices no experiment can settle to me.
 
-Output only the rewritten task in its fields (Goal:, Constraints:, Done when:, Files: as @path),
+Output only the rewritten task in its fields (Goal:, Done when:, Files: as @path),
 keeping Done when: and Files: unless wrong; no code fences, no filler. The task:
 ]]
 

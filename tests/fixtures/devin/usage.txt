@@ -1,0 +1,26 @@
+Warning: Ignoring invalid value for "hooks" in /tmp/sepal-rec/dv-config.json: unknown variant `SubagentStart`, expected one of `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `PostCompaction`
+, `ContextInput`, `PreCompact`, `PostCompact`, `SessionStart`, `SessionEnd`, `PermissionRequest`, `Notification`, `SubagentStop`. Using the default ({}) for this setting.
+⠀⣴⣾⣶⡄⠀⠀⠀⠀
+⠀⠛⠿⠟⠻⣶⣾⣶⡄  Devin CLI
+⠀⣤⣶⣦⣴⠿⢿⠿⠃  v3000.14.30821
+⠀⠻⢿⠿⠃⠀⠀⠀⠀
+ Max · 87% remaining (resets in 2d 18h)
+❭ Append the line two to a.txt with your edit tool, then reply with just: done
+ ▲ Ignoring invalid value for "hooks" in /tmp/sepal-rec/dv-config.json: unknown variant `SubagentStart`, expected one of `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `PostCompaction`,
+   `ContextInput`, `PreCompact`, `PostCompact`, `SessionStart`, `SessionEnd`, `PermissionRequest`, `Notification`, `SubagentStop`. Using the default ({}) for this setting.
+ ✓ Read ./a.txt · 1 lines
+ ✓ Edited ./a.txt +2 -1
+ done
+❭ /usage
+ Usage
+ Weekly          ■■■■■■■■■■■■■■■■■■■■  14% used · resets in 2d 18h
+ This session
+ Agent messages  3 messages
+ Activity        1 turn · 2 tool calls · 1 file · 0 commands
+ Tokens          38k in · 252 out
+ Model           SWE-2.1 Medium
+ ● /tmp/sepal-rec/dv
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Append line two to a.txt via edit tool ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ INSERT  SWE-2.1 Medium · accept edits                                                                                                                                            ctrl+o to expand edits

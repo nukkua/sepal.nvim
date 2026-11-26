@@ -1,0 +1,28 @@
+✻ Crunched for 3s · done 9:17 AM                                                                               1 file changed                                                                         ✕
+   Settings  Status   Config   Usage   Stats
+   Session
+   Total cost:            $0.0821
+   Total duration (API):  5s
+   Total duration (wall): 1m 14s
+   Total code changes:    1 line added, 0 lines removed
+   Usage by model:
+       claude-haiku-5-5:  1.2k input, 18 output, 0 cache read, 0 cache write ($0.0001)
+      claude-sonnet-5-5:  512 input, 194 output, 135.9k cache read, 16.4k cache write ($0.0820)
+   Prompt cache (main):   3 requests · 86% of input tokens from cache · no misses · warm (1h TTL, last activity 45s ago)
+   Current session
+   █▌                                                 3% used
+   Resets 2:09pm (America/La_Paz)
+   Current week (all models)
+   ███████▌                                           15% used
+   Resets Nov 29, 1:59am (America/La_Paz)
+   What's contributing to your usage?
+   Approximate · sessions on this machine only
+   Last 24h · shares overlap
+   54%  Turn off skills you don't use · 10k tokens per request
+   Skills, subagents, plugins, and MCP servers
+   No attribution data yet · accumulates as you use Claude
+   f to fix this · d to day · w to week
+   Usage credits
+                                                      0% used
+   $0.00 / $10.00 spent · Resets Dec 1 (America/La_Paz)
+   Esc to cancel

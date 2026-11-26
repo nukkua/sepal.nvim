@@ -159,8 +159,8 @@ tasks. `SEPAL_DEMO_REAL=1 nvim -u tests/demo.lua` uses the real Claude Code inst
 
 ```lua
 require("sepal").setup({
-  cmd = { "claude" },                            -- the agent
-  args = { "--permission-mode", "acceptEdits" }, -- added to each run (see Permissions)
+  cmd = { "claude" },                            -- the agent: claude or devin
+  args = { "--permission-mode", "acceptEdits" }, -- added to each Claude Code run (see Permissions)
   auto_mode = false,   -- true: auto mode for implementation runs and chats; questions/plans stay read-only
   check = nil,         -- the check for tasks without a `Done when:` line, e.g. "make test"
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
@@ -183,7 +183,9 @@ require("sepal").setup({
 With `agents`, `:Sepal task` asks which agent after the kind: by its `key`, or `1`, `2`… (its place
 in the list) without one. With only one agent, it is used without asking; unset, `cmd` is used.
 Each entry accepts `cmd` (a command string or argv), `model`, `args`, `name` (picker label), and `key`.
-A `cmd` whose executable name starts with `devin`
+sepal runs two agents, known by the executable's name: `claude…` is Claude Code, `devin…` the Devin
+CLI. Any other `cmd` (in `cmd` or `agents`) is an error in `setup()` and `:checkhealth sepal`, and a
+task sent to it fails. A `cmd` whose executable name starts with `devin`
 runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code, the same way: sepal adds its hooks
 and the check's allow rule to a copy of your `~/.config/devin/config.json`, so the panel shows what it
 does, a permission prompt warns you, and ctrl-c in it stops the task (what it did is kept). It runs
@@ -347,6 +349,23 @@ checking; the rest wait as `queued`. Btw and orchestrate runs bypass this limit.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal warns
 (`▲ …: Claude Code asks to trust the worktree · :Sepal open`), and you answer it there.
+
+### Context bar
+
+A running task's card in the panel shows its context window: a 10-cell bar, the tokens used
+against the window, and the percent, e.g. `██████░░░░ 120k/200k · 60%`. It turns amber at 70% and
+red at 90%; past the window it says `over the limit`. The panel header shows the fullest running
+task's bar. Queued tasks aren't paused at a limit: the bar only shows it. The numbers are the
+agent's own, never estimates:
+
+- Claude Code: the statusLine JSON (sepal sets its own statusLine in its hidden terminals, so your
+  statusline doesn't show there): `current_usage` (input + cache creation + cache read) against
+  `context_window_size`, the model's window. Its percent is Claude Code's `used_percentage`.
+- Devin: its transcript's totals (`final_metrics`, read 4 KiB from its end, only when it changed),
+  shown as `in · out` like its `/usage`. Devin exposes no context limit anywhere, so there is no
+  bar, only the count: `37.8k in · 252 out · no limit: Devin exposes none`.
+
+Nothing shows until the agent reports its first usage.
 
 `:checkhealth sepal` checks Neovim, git, agent executables, arguments, checks/retries, landing,
 preparation, concurrency, models and plan models, task suggestions, appearance and optional plugins.

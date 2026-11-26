@@ -17,10 +17,18 @@ local function base(e)
   local c = e and e.agent and e.agent.cmd or C().cmd
   return vim.list_extend({}, type(c) == "string" and { c } or c)
 end
--- the Devin CLI instead of Claude Code: same hooks, through a --config of its own (see devin_config)
+-- the two supported agents, by the executable's basename
+local function claude(e) return vim.fs.basename(base(e)[1] or ""):match("^claude") ~= nil end
 local function devin(e) return vim.fs.basename(base(e)[1] or ""):match("^devin") ~= nil end
--- added to each run: the agent's own args; Claude Code's (args option) aren't Devin's flags
-local function args(e) return e.agent and e.agent.args or not devin(e) and C().args or {} end
+M.AGENT_NAMES = { claude = "Claude Code", devin = "Devin" }
+-- e's agent kind ("claude" | "devin"), nil when unsupported. e may be nil (then cmd)
+-- or a pseudo-entry { agent = { cmd = c } }, for setup/health
+function M.kind(e)
+  if claude(e) then return "claude" end
+  if devin(e) then return "devin" end
+end
+-- added to each run: the agent's own args; the args option is Claude Code's
+local function args(e) return e.agent and e.agent.args or claude(e) and C().args or {} end
 -- cmd plus extra: with auto_mode, Claude Code's auto mode instead of the --permission-mode in args;
 -- mode: that permission mode instead of either (a btw's read-only "plan")
 local function cmd(extra, mode, e)
@@ -287,7 +295,7 @@ local function finish(e, wt, status, extra)
   local j = jobs[e.id]
   jobs[e.id] = nil
   if wt and wt ~= e.root then git.remove_worktree(e.root, wt) end -- a btw runs in your repo: never that
-  e.status, e.activity, e.subagents = status, nil, nil
+  e.status, e.activity, e.subagents, e.usage = status, nil, nil, nil
   for k, v in pairs(extra or {}) do e[k] = v end
   inbox.changed(e)
   if j and j.done then j.done(true) end
@@ -341,9 +349,11 @@ end
 
 -- Claude Code reports back through hooks: each one appends its input (a JSON line) to $SEPAL_EVENTS
 local HOOK = { { hooks = { { type = "command", command = [[{ tr -d '\n'; echo; } >> "$SEPAL_EVENTS"]] } } } }
--- allow: rules that would otherwise stop the turn for approval (read-only git, the check behind a `cd`)
+-- allow: rules that would otherwise stop the turn for approval (read-only git, the check behind a `cd`);
+-- statusLine appends its stdin JSON to the same file: it carries the context window
 local function settings(allow)
-  return vim.json.encode({ permissions = { allow = allow }, hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
+  return vim.json.encode({ permissions = { allow = allow }, statusLine = { type = "command", command = HOOK[1].hooks[1].command },
+    hooks = { SessionStart = HOOK, PreToolUse = { { matcher = "*", hooks = HOOK[1].hooks } },
     Notification = HOOK, Stop = HOOK, SubagentStart = HOOK, SubagentStop = HOOK } })
 end
 
@@ -362,6 +372,28 @@ local function devin_config(path, allow)
   local w = assert(io.open(path, "w"))
   w:write(vim.json.encode(c))
   w:close()
+end
+
+-- Devin says nothing live about its context window: its transcript's final_metrics has the totals
+-- (what /usage shows as "in · out"). Read only its tail (a transcript can be MBs), and only when it
+-- changed; st is per-run { size, mtime }. Returns { used, out } (nil with no match yet) and the
+-- number of bytes read.
+local function devin_usage(path, st)
+  local s = vim.uv.fs_stat(path)
+  if not s or (st.size == s.size and st.mtime and st.mtime.sec == s.mtime.sec and st.mtime.nsec == s.mtime.nsec) then
+    return nil, 0
+  end
+  local f = io.open(path)
+  if not f then return nil, 0 end
+  local off = math.max(s.size - 4096, 0)
+  f:seek("set", off)
+  local tail = f:read("a") or ""
+  f:close()
+  st.size, st.mtime = s.size, s.mtime
+  local prompt = tail:match('"total_prompt_tokens"%s*:%s*(%d+)')
+  if not prompt then return nil, s.size - off end
+  local completion = tail:match('"total_completion_tokens"%s*:%s*(%d+)')
+  return { used = tonumber(prompt), out = tonumber(completion) }, s.size - off
 end
 
 -- the agent's last reply: from the Stop hook, else the end of its transcript (read backwards:
@@ -410,6 +442,9 @@ local function termwin(w) vim.wo[w].number, vim.wo[w].relativenumber = false, fa
 -- at the Stop hook; then it's closed, and sepal checks and lands what it did
 agent = function(e, prompt, wt)
   local j = jobs[e.id]
+  if not M.kind(e) then -- before anything: only claude or devin run
+    return finish(e, wt, "error", { error = "unsupported agent " .. tostring(base(e)[1]) .. ": sepal runs claude or devin" })
+  end
   local events = wtdir(e) .. ".events" -- beside its worktree: a btw has none, and runs in your repo
   os.remove(events)
   local dv, conf = devin(e), events .. ".config.json"
@@ -501,7 +536,7 @@ agent = function(e, prompt, wt)
       rest()
     end)
   end
-  local transcript, toff = nil, 0
+  local transcript, toff, dvst = nil, 0, {}
   -- an Esc in Claude Code ends the turn without a Stop hook: its transcript says so
   local function interrupted()
     local st = transcript and vim.uv.fs_stat(transcript) -- polled 10 times a second: open it only when it grew
@@ -528,6 +563,17 @@ agent = function(e, prompt, wt)
   local function event(line)
     local ok, ev = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
     if over or not ok or type(ev) ~= "table" then return end
+    -- a statusLine line (no hook_event_name, a context_window table): the context window only,
+    -- and not an event — it must not end the trust-prompt detection
+    if not ev.hook_event_name and type(ev.context_window) == "table" then
+      local u = ev.context_window.current_usage
+      if type(u) == "table" then
+        local usage = { used = (u.input_tokens or 0) + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0),
+          limit = type(ev.context_window.context_window_size) == "number" and ev.context_window.context_window_size or nil }
+        if not vim.deep_equal(usage, e.usage) then e.usage, dirty = usage, true end
+      end
+      return
+    end
     started = true
     if not transcript and type(ev.transcript_path) == "string" then -- a resumed chat's old turns don't count
       transcript = ev.transcript_path
@@ -627,6 +673,11 @@ agent = function(e, prompt, wt)
   timer:start(100, 100, vim.schedule_wrap(function()
     if over then return end
     poll()
+    if dv and e.session and e.session:match("^[%w-]+$") then -- it goes in a path
+      local dir = vim.env.XDG_DATA_HOME or vim.fs.joinpath(vim.uv.os_homedir(), ".local", "share")
+      local u = devin_usage(vim.fs.joinpath(dir, "devin", "cli", "transcripts", e.session .. ".json"), dvst)
+      if u and not vim.deep_equal(u, e.usage) then e.usage = u; inbox.render() end
+    end
     if not over and interrupted() then
       j.stopped = true -- what it did so far is kept, as with x
       return stopped({ transcript_path = transcript })
@@ -1304,6 +1355,6 @@ vim.api.nvim_create_autocmd("VimLeavePre", { group = vim.api.nvim_create_augroup
   for _, j in pairs(jobs) do if j.job then pcall(j.job.kill, j.job, 15) end end
 end })
 
-M._t = { jobs = jobs, queue = queue, landing = landing, reply_of = reply_of, about = about }
+M._t = { jobs = jobs, queue = queue, landing = landing, reply_of = reply_of, about = about, devin_usage = devin_usage }
 
 return M

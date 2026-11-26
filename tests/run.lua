@@ -1,4 +1,5 @@
 -- nvim -l tests/run.lua  (from the repo root)
+local FIXTURES = vim.fn.getcwd() .. "/tests/fixtures" -- real sessions, recorded; read, never written
 vim.opt.rtp:prepend(vim.fn.getcwd())
 vim.cmd.runtime("plugin/sepal.lua")
 
@@ -10,18 +11,50 @@ local inbox = require("sepal.inbox")
 local T = vim.fn.tempname()
 local work = vim.fs.joinpath(T, "work")
 vim.fn.mkdir(work, "p")
+vim.fn.mkdir(T .. "/bin", "p")
 vim.fn.chdir(work)
 local function sh(cmd) return vim.system({ "sh", "-c", cmd }, { cwd = work, text = true }):wait() end
 sh("git init -q && printf 'one\\ntwo\\nthree\\n' > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm init")
 vim.env.SEPAL_T = T
 vim.env.CLAUDE_CONFIG_DIR = vim.fs.joinpath(T, "claude") -- drop deletes chats from there
 
+-- replay FILE, shared by the fakes: the fixture's lines to $SEPAL_EVENTS, /tmp/sepal-rec/<dir>
+-- rewritten to the run's $PWD and transcript_path to the fake's transcript; after a line number in
+-- the space-separated $SEPAL_PAUSE it waits for $SEPAL_T/go (a test's go()), then removes it
+local replay = vim.fs.joinpath(T, "replay.sh")
+local f = assert(io.open(replay, "w"))
+f:write([[
+replay() {
+  n=0
+  while IFS= read -r l; do
+    n=$((n+1))
+    l=$(printf '%s\n' "$l" | sed -e "s|/tmp/sepal-rec/[^\"/]*|$PWD|g" \
+      -e "s|\"transcript_path\":\"[^\"]*\"|\"transcript_path\":\"$SEPAL_EVENTS.jsonl\"|g")
+    printf '%s\n' "$l" >> "$SEPAL_EVENTS"
+    case " $SEPAL_PAUSE " in
+      *" $n "*) while [ ! -f "$SEPAL_T/go" ]; do sleep 0.05; done; rm "$SEPAL_T/go";;
+    esac
+  done < "$1"
+}
+]])
+f:close()
+
+local function exe(name, body) -- a fake CLI: a real executable, its basename is its agent
+  local p = vim.fs.joinpath(T, "bin", name)
+  local w = assert(io.open(p, "w"))
+  w:write("#!/bin/sh\n. \"$SEPAL_T/replay.sh\"\n" .. body)
+  w:close()
+  vim.uv.fs_chmod(p, 493) -- 0755
+  return p
+end
+
 -- a fake Claude Code: logs where it runs, its arguments (without --settings and the prompt) and the
 -- prompt (its last argument), reports through the hooks ($SEPAL_EVENTS), runs $SEPAL_EDIT ($SEPAL_FIX
 -- when it continues a chat), ends its turn with a reply with assumptions, and stays open like claude.
 -- $SEPAL_FAIL=start: dies before starting; =quit: quits mid-turn. $SEPAL_ASK: asks for permission.
--- $SEPAL_REPLY: a file with the transcript line of its reply instead of the usual one
-local fake = [[
+-- $SEPAL_REPLY: a file with the transcript line of its reply instead of the usual one.
+-- $SEPAL_REPLAY=file: runs $SEPAL_EDIT, then replays that file instead of the usual events
+local claude = exe("claude", [[
 n=$#; i=0; logged=; skip=
 for a; do
   i=$((i+1))
@@ -39,6 +72,11 @@ if [ -n "$SEPAL_TRUST" ]; then echo "Quick safety check: Is this a project you t
 ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
 t="$SEPAL_EVENTS.jsonl"
 : > "$t"
+if [ -n "$SEPAL_REPLAY" ]; then
+  if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
+  replay "$SEPAL_REPLAY"
+  while :; do sleep 1; done
+fi
 ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"model\":\"claude-opus-5-5[1m]\",\"transcript_path\":\"$t\"}"
 ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/a.txt\"}}"
 if [ -n "$SEPAL_SUB" ]; then
@@ -61,8 +99,44 @@ if [ -n "$SEPAL_ASK" ]; then ev '{"hook_event_name":"Notification","session_id":
 if [ -n "$SEPAL_REPLY" ]; then { printf '%s\n' '{"type":"user","message":{"content":"go"}}'; cat "$SEPAL_REPLY"; } > "$t"
 else printf '%s\n' '{"type":"user","message":{"content":"go"}}' '{"type":"assistant","message":{"content":[{"type":"text","text":"Did it.\n\nAssumptions:\n- kept the old API\n- no new deps"}]}}' > "$t"; fi
 ev "{\"hook_event_name\":\"Stop\",\"session_id\":\"s1\",\"transcript_path\":\"$t\"}"
-while :; do sleep 1; done]]
-sepal.setup({ cmd = { "sh", "-c", fake, "sh" }, worktrees = vim.fs.joinpath(T, "state") })
+while :; do sleep 1; done]])
+
+-- a fake Devin CLI: logs its arguments (without the config path and the prompt), keeps the config,
+-- reports through the hooks, edits, ends its turn and stays open. $SEPAL_INTERRUPT: ctrl-c (state
+-- escapes only). $SEPAL_REPLAY=file: $SEPAL_EDIT, then that file's lines as its hooks
+local dv = exe("devin", [[
+logged=; skip=; resumed=
+for a; do
+  if [ -n "$skip" ]; then skip=; cp "$a" "$SEPAL_T/devin.json"
+  elif [ "$a" = --config ]; then skip=1
+  elif [ "$a" = -- ]; then break
+  elif [ "$a" = -r ]; then resumed=1; logged="$logged${logged:+ }$a"
+  else logged="$logged${logged:+ }$a"; fi
+done
+printf '%s\n' "$logged" >> "$SEPAL_T/args"
+if [ -n "$resumed" ]; then
+  printf 'Resume this session from which directory?\n'
+  read ans
+  printf '%s\n' "$ans" >> "$SEPAL_T/resume_answer"
+  printf 'the chat so far\n'
+  while :; do sleep 1; done
+fi
+ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
+if [ -n "$SEPAL_REPLAY" ]; then
+  if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
+  replay "$SEPAL_REPLAY"
+  while :; do sleep 1; done
+fi
+ev '{"hook_event_name":"SessionStart","source":"startup","session_id":"dv1","model":"claude-opus-5-5"}'
+printf '\033]7501;state=working:app=devin\007'
+if [ -n "$SEPAL_INTERRUPT" ]; then sleep 0.2; printf '\033]7501;state=idle:app=devin\007'; while :; do sleep 1; done; fi
+ev "{\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"exec\",\"tool_input\":{\"command\":\"rm -rf x\"},\"session_id\":\"dv1\"}"
+if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
+ev '{"hook_event_name":"Stop","last_assistant_message":"Did it.\n\nAssumptions:\n- used devin","session_id":"dv1"}'
+printf '\033]7501;state=done:app=devin\007'
+while :; do sleep 1; done]])
+
+sepal.setup({ cmd = { claude }, worktrees = vim.fs.joinpath(T, "state") })
 
 local fails, n = 0, 0
 local function test(name, fn)
@@ -87,8 +161,15 @@ end
 local function args() return vim.split(vim.trim(read(T .. "/args") or ""), "\n") end
 local function prompts() return read(T .. "/prompts") or "" end
 local function reset()
-  for _, f in ipairs({ "args", "prompts", "cwd" }) do os.remove(T .. "/" .. f) end
-  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT", "SEPAL_SUB", "SEPAL_REPLY" }) do vim.env[k] = nil end
+  for _, f in ipairs({ "args", "prompts", "cwd", "go" }) do os.remove(T .. "/" .. f) end
+  for _, k in ipairs({ "SEPAL_EDIT", "SEPAL_FIX", "SEPAL_SLEEP", "SEPAL_FAIL", "SEPAL_ASK", "SEPAL_TRUST", "SEPAL_INTERRUPT", "SEPAL_SUB",
+    "SEPAL_REPLY", "SEPAL_REPLAY", "SEPAL_PAUSE" }) do vim.env[k] = nil end
+end
+-- a paused fake goes on: touch T/go and wait until it consumed it
+local function go()
+  local w = assert(io.open(T .. "/go", "w"))
+  w:close()
+  assert(vim.wait(10000, function() return vim.uv.fs_stat(T .. "/go") == nil end, 10), "the fake never went")
 end
 local function idle()
   assert(vim.wait(10000, function() return next(agent._t.jobs) == nil and #agent._t.queue == 0 and next(agent._t.landing) == nil end, 10), "the task never finished")
@@ -1694,57 +1775,23 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   key("b"); sepal.pick()
   local btw = draft()
   sepal.setup({ agents = { { cmd = "claude", name = "claude" }, { cmd = "devin", model = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high" },
-    { cmd = "codex", model = "gpt-5", key = "t" }, { cmd = "devin" } } })
+    { cmd = "devin", model = "gpt-5", key = "t" }, { cmd = "devin" } } })
   local g = vim.fn.getcharstr
   vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("t"); return "s" end
   sepal.pick()
-  local codex = draft()
+  local gpt = draft()
   vim.api.nvim_echo = echo
   sepal.setup({ models = {}, agents = nil })
-  eq(shown, { "sepal l large feat ◇ sh   s short feat ✻ opus 5.5   b btw ✻ sonnet   ",
+  eq(shown, { "sepal l large feat ✻ claude   s short feat ✻ opus 5.5   b btw ✻ sonnet   ",
     "sepal l large feat   s short feat   b btw   ",
-    "sepal 1 ✻ claude                                  2 ❖ devin  · opus 5.5 medium + swe 2 high   t ֎ codex  · gpt 5\n"
+    "sepal 1 ✻ claude                                  2 ❖ devin  · opus 5.5 medium + swe 2 high   t ֎ devin  · gpt 5\n"
       .. "4 ❖ devin" })
-  eq({ btw, codex }, { { "✻", "SepalClaude", " sonnet" }, { "֎", "SepalDim", " gpt 5" } })
+  eq({ btw, gpt }, { { "✻", "SepalClaude", " sonnet" }, { "֎", "SepalDim", " gpt 5" } })
 end)
 
 test(":Sepal task asks which agent with agents set: devin runs with sepal's hooks in its config; ctrl-c is caught", function()
   clean(); reset()
-  -- a fake Devin CLI: logs its arguments (without the config path and the prompt), keeps the config,
-  -- reports through the hooks, edits, ends its turn and stays open. $SEPAL_INTERRUPT: ctrl-c (state escapes only)
-  local dv = vim.fs.joinpath(T, "bin", "devin")
-  vim.fn.mkdir(vim.fs.dirname(dv), "p")
-  local f = assert(io.open(dv, "w"))
-  f:write([[#!/bin/sh
-logged=; skip=; resumed=
-for a; do
-  if [ -n "$skip" ]; then skip=; cp "$a" "$SEPAL_T/devin.json"
-  elif [ "$a" = --config ]; then skip=1
-  elif [ "$a" = -- ]; then break
-  elif [ "$a" = -r ]; then resumed=1; logged="$logged${logged:+ }$a"
-  else logged="$logged${logged:+ }$a"; fi
-done
-printf '%s\n' "$logged" >> "$SEPAL_T/args"
-if [ -n "$resumed" ]; then
-  printf 'Resume this session from which directory?\n'
-  read ans
-  printf '%s\n' "$ans" >> "$SEPAL_T/resume_answer"
-  printf 'the chat so far\n'
-  while :; do sleep 1; done
-fi
-ev() { printf '%s\n' "$1" >> "$SEPAL_EVENTS"; }
-ev '{"hook_event_name":"SessionStart","source":"startup","session_id":"dv1","model":"claude-opus-5-5"}'
-printf '\033]7501;state=working:app=devin\007'
-if [ -n "$SEPAL_INTERRUPT" ]; then sleep 0.2; printf '\033]7501;state=idle:app=devin\007'; while :; do sleep 1; done; fi
-ev "{\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"exec\",\"tool_input\":{\"command\":\"rm -rf x\"},\"session_id\":\"dv1\"}"
-if [ -n "$SEPAL_EDIT" ]; then sh -c "$SEPAL_EDIT"; fi
-ev '{"hook_event_name":"Stop","last_assistant_message":"Did it.\n\nAssumptions:\n- used devin","session_id":"dv1"}'
-printf '\033]7501;state=done:app=devin\007'
-while :; do sleep 1; done
-]])
-  f:close()
-  vim.uv.fs_chmod(dv, 493)
-  sepal.setup({ agents = { { cmd = { "sh", "-c", fake, "sh" }, name = "claude" }, { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } } } })
+  sepal.setup({ agents = { { cmd = { claude }, name = "claude" }, { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } } } })
   vim.env.SEPAL_EDIT = [[echo dv > a.txt]]
   local got = msgs(notified(function()
     key("s")
@@ -1781,6 +1828,146 @@ while :; do sleep 1; done
   notified(function() agent.start("Goal: cut short", work, "auto", nil, nil, { cmd = { dv } }); idle() end)
   eq(newest().status, "stopped")
   sepal.setup({ agents = false })
+end)
+
+-- the context bar, from the recorded sessions: what each CLI emitted, and what it printed for it
+local function lines_of(p) return vim.split(vim.trim(assert(read(p), p)), "\n") end
+local function panel_lines()
+  return vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)
+end
+local function hl_on(text) -- the highlight groups on the panel line that is text
+  local b = vim.fn.bufnr("sepal://panel")
+  local row
+  for i, l in ipairs(panel_lines()) do if l == text then row = i - 1 end end
+  assert(row, text .. " not in " .. vim.inspect(panel_lines()))
+  local hls = {}
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, vim.api.nvim_create_namespace("sepal.panel"), { row, 0 }, { row, -1 }, { details = true })) do
+    hls[#hls + 1] = m[4].hl_group
+  end
+  return hls
+end
+local function has_bar() -- a bar row of a card: cells or a "no limit"
+  for _, l in ipairs(panel_lines()) do if vim.startswith(l, " ▎ █") or vim.startswith(l, " ▎ ░") or l:find("no limit", 1, true) then return l end end
+end
+
+test("the card's context bar is Claude Code's statusLine: none yet, its numbers, over the limit, a reset; the header shows the fullest", function()
+  clean(); reset()
+  local ev, sl = lines_of(FIXTURES .. "/claude/events.jsonl"), lines_of(FIXTURES .. "/claude/statusline.jsonl")
+  local four = vim.json.decode(sl[4])
+  local u = four.context_window.current_usage
+  local function sized(sum, size) -- line 4, its cache reads making the sum, in a window of size
+    local d = vim.deepcopy(four)
+    d.context_window.current_usage.cache_read_input_tokens = sum - u.input_tokens - u.cache_creation_input_tokens
+    d.context_window.context_window_size = size
+    return vim.json.encode(d)
+  end
+  local feed = vim.fs.joinpath(T, "claude-feed.jsonl")
+  local w = assert(io.open(feed, "w"))
+  w:write(table.concat({ ev[1], sl[1], ev[3], ev[5], sl[2], sl[3], sl[4], sized(1100000, 1000000), sized(150000, 200000), ev[7] }, "\n") .. "\n")
+  w:close()
+  vim.env.SEPAL_REPLAY, vim.env.SEPAL_PAUSE, vim.env.SEPAL_EDIT = feed, "2 7 8 9", [[echo x > a.txt]]
+  vim.cmd("Sepal panel")
+  notified(function()
+    send({ "Goal: fed" })
+    local e = newest()
+    assert(vim.wait(5000, function() return e.session ~= nil end, 10), "no SessionStart")
+    vim.wait(300)
+    eq({ e.usage, has_bar() }, { nil, nil }) -- statusLine's first line has no current_usage yet
+    go()
+    assert(vim.wait(5000, function() return e.usage and e.usage.used == 39149 end, 10), vim.inspect(e.usage))
+    eq(e.usage, { used = 39149, limit = four.context_window.context_window_size })
+    eq(require("sepal.panel").pct(e.usage), four.context_window.used_percentage) -- Claude Code's own percent
+    eq(has_bar(), " ▎ ░░░░░░░░░░ 39.1k/1M · 4%")
+    eq(panel_lines()[3], " ░░░░░░░░░░ 4% of context · fed")
+    go()
+    assert(vim.wait(5000, function() return e.usage.used == 1100000 end, 10), vim.inspect(e.usage))
+    eq(has_bar(), " ▎ ██████████ 1.1M/1M · 110% · over the limit") -- the card's cache refreshed
+    assert(vim.tbl_contains(hl_on(has_bar()), "SepalError"), vim.inspect(hl_on(has_bar())))
+    eq(panel_lines()[3], " ██████████ 110% of context · fed")
+    go()
+    assert(vim.wait(5000, function() return e.usage.limit == 200000 end, 10), vim.inspect(e.usage))
+    eq(has_bar(), " ▎ ████████░░ 150k/200k · 75%")
+    assert(vim.tbl_contains(hl_on(has_bar()), "SepalWarn"), vim.inspect(hl_on(has_bar())))
+    go()
+    idle()
+  end)
+  local e = newest()
+  eq({ e.status, e.usage, has_bar() }, { "landed", nil, nil })
+  assert(not panel_lines()[3]:find("of context", 1, true), panel_lines()[3])
+  vim.cmd("Sepal panel")
+  local s = vim.json.decode(read(T .. "/settings") or "{}")
+  eq(s.statusLine and s.statusLine.type, "command")
+end)
+
+test("a Devin card's bar is its transcript's totals, like its /usage; it exposes no limit, so none is shown", function()
+  clean(); reset()
+  local data = vim.env.XDG_DATA_HOME
+  vim.env.XDG_DATA_HOME = vim.fs.joinpath(T, "data")
+  vim.env.SEPAL_REPLAY, vim.env.SEPAL_PAUSE, vim.env.SEPAL_EDIT = FIXTURES .. "/devin/events.jsonl", "1", [[echo dv > a.txt]]
+  vim.cmd("Sepal panel")
+  local ok, err = pcall(notified, function()
+    agent.start("Goal: devin's tokens", work, "auto", nil, nil, { cmd = { dv } })
+    local e = newest()
+    assert(vim.wait(5000, function() return e.session == "quiver-snapper" end, 10), "no SessionStart")
+    vim.wait(300)
+    eq({ e.usage, has_bar() }, { nil, nil }) -- no transcript yet
+    local dir = vim.fs.joinpath(T, "data", "devin", "cli", "transcripts")
+    vim.fn.mkdir(dir, "p")
+    vim.uv.fs_copyfile(FIXTURES .. "/devin/transcript.json", vim.fs.joinpath(dir, "quiver-snapper.json"))
+    assert(vim.wait(5000, function() return e.usage ~= nil end, 10), "the transcript was never read")
+    eq(e.usage, { used = 37846, out = 252 })
+    local k, out = read(FIXTURES .. "/devin/usage.txt"):match("Tokens%s+(%d+)k in · (%d+) out") -- what its /usage printed
+    eq({ math.floor(e.usage.used / 1000 + 0.5), e.usage.out }, { tonumber(k), tonumber(out) })
+    eq(has_bar(), " ▎ 37.8k in · 252 out · no limit: Devin exposes none")
+    assert(not panel_lines()[3]:find("of context", 1, true), "no limit: not in the header")
+    go()
+    idle()
+  end)
+  vim.env.XDG_DATA_HOME = data
+  vim.cmd("Sepal panel")
+  assert(ok, err)
+  eq({ newest().status, file("a.txt") }, { "landed", "dv\n" })
+end)
+
+test("reading Devin's usage from a multi-MB transcript costs one 4 KiB tail read, and none when it's unchanged", function()
+  local fixture = read(FIXTURES .. "/devin/transcript.json")
+  local tail = fixture:sub(fixture:find('"final_metrics"', 1, true) - 4)
+  local p = vim.fs.joinpath(T, "big.json")
+  local w = assert(io.open(p, "w"))
+  w:write('{\n  "steps": [\n')
+  local step = '    { "source": "agent", "message": "' .. ("x"):rep(1000) .. '" },\n'
+  for _ = 1, 5000 do w:write(step) end
+  w:write('    {}\n  ],\n' .. tail)
+  w:close()
+  local size = vim.uv.fs_stat(p).size
+  assert(size > 5e6, size)
+  local st = {}
+  local t0 = vim.uv.hrtime()
+  local u, bytes = agent._t.devin_usage(p, st)
+  local ms = (vim.uv.hrtime() - t0) / 1e6
+  eq(u, { used = 37846, out = 252 })
+  assert(bytes <= 4096, bytes)
+  assert(ms < 20, ms .. " ms")
+  print(("  devin usage: %.1f MB transcript, read %d bytes in %.2f ms"):format(size / 1e6, bytes, ms))
+  eq({ agent._t.devin_usage(p, st) }, { nil, 0 }) -- unchanged: not even opened
+  w = assert(io.open(p, "w"))
+  w:write('{ "pad": "' .. ("y"):rep(6e6) .. '",\n' .. tail:gsub("37846", "40000"))
+  w:close()
+  u, bytes = agent._t.devin_usage(p, st)
+  eq(u, { used = 40000, out = 252 })
+  assert(bytes <= 4096, bytes)
+end)
+
+test("a cmd that isn't claude or devin fails clearly: in setup, when it runs, in checkhealth", function()
+  clean(); reset()
+  local got = notified(function() sepal.setup({ cmd = { "sh" } }) end)
+  eq(got, { { 'cmd { "sh" } isn\'t a supported agent: sepal runs claude or devin', vim.log.levels.ERROR } })
+  got = msgs(notified(function() agent.start("Goal: by sh", work, "auto"); idle() end))
+  local e = newest()
+  eq(e.status, "error")
+  assert(e.error:find("unsupported agent sh", 1, true), e.error)
+  require("sepal.health").check()
+  sepal.setup({ cmd = { claude } })
 end)
 
 print(("%d/%d passed"):format(n - fails, n))

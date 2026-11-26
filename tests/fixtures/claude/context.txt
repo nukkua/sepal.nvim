@@ -1,0 +1,29 @@
+❯ /context
+  ⎿  Context Usage
+     ⛀ ⛁ ⛁ ⛁ ⛁ ⛀ ⛀ ⛀ ⛁ ⛀   Sonnet 5.5
+     ⛁ ⛁ ⛁ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   claude-sonnet-5-5
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   39.2k/400k tokens (10%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   Estimated usage by category
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ System prompt: 2.7k tokens (0.7%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ System tools: 17.6k tokens (4.4%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ MCP tools: 790 tokens (0.2%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ MCP server instructions: 717 tokens (0.2%)
+     ⛶ ⛶ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝   ⛁ Custom agents: 59 tokens (0.0%)
+                           ⛁ Skills: 6.3k tokens (1.6%)
+                           ⛁ Messages: 11.1k tokens (2.8%)
+                           ⛶ Free space: 327.8k (81.9%)
+                           ⛝ Autocompact buffer: 33k tokens (8.3%)
+
+     Auto-compact window: 400k tokens
+
+     MCP tools · /mcp (loaded on-demand)
+     └ 14 tools · 790 tokens
+
+     Custom agents · .claude/agents/
+     └ 1 agent · 59 tokens
+
+     Skills · /skills
+     └ 35 skills · 6.3k tokens
+
+     /context all to expand

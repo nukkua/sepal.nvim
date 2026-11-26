@@ -58,9 +58,12 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 <
 `cmd`        the agent: Claude Code. A task runs `cmd <args> <task>` in a
              hidden terminal in its worktree; hooks passed with --settings
-             tell sepal what it does and when its turn is over.
+             tell sepal what it does and when its turn is over. sepal runs
+             two agents, by the executable's name: claude… (Claude Code) and
+             devin… (|sepal-agents|). Any other `cmd`, here or in `agents`,
+             is an error in setup() and |sepal-health|, and its tasks fail.
                                                                 *sepal-args*
-`args`       added to each run. The task's check is always allowed. When the
+`args`       added to each Claude Code run. The task's check is always allowed. When the
              agent asks for permission it waits for you: sepal warns
              ("▲ …: Claude needs your permission to use Bash · :Sepal open")
              and you answer in |:Sepal-open|. Allow what you trust upfront:
@@ -310,6 +313,20 @@ No diff: nochange ("no changes"); exhausted checks: failed ("check failed");
 agent/setup errors: error ("failed"); unsafe auto-landing: needs ("needs you").
 Stopping gives stopped; undo gives undone. Btw finishes as answered;
 orchestrate as planned, then swarmed when its tasks are made.
+
+                                                        *sepal-context*
+A running task's card in the panel shows its context window: 10 cells, used
+/ window and the percent ("████░░░░░░ 80k/200k · 40%"), amber at 70%, red at
+90%, "over the limit" past it. The panel header shows the fullest running
+task's. Queued tasks aren't paused at a limit. Only the agent's own numbers:
+Claude Code    its statusLine JSON (sepal sets its own statusLine in its
+               hidden terminals): current_usage (input + cache creation +
+               cache read) against context_window_size.
+Devin          its transcript's final_metrics (a 4 KiB read from its end,
+               only when it changed), "in · out" like its /usage. Devin
+               exposes no limit: no bar, only the count, and "no limit:
+               Devin exposes none".
+Nothing shows before the agent reports its first usage.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal
 warns ("▲ …: Claude Code asks to trust the worktree · :Sepal open"); answer

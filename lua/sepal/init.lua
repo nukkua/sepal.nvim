@@ -7,8 +7,8 @@
 local M = {}
 
 local C = {
-  cmd = { "claude" },  -- the agent. A task runs Claude Code (cmd <args> <task>) in a hidden terminal in its worktree
-  args = { "--permission-mode", "acceptEdits" }, -- added to each run: --model, --allowedTools…
+  cmd = { "claude" },  -- the agent (claude or devin). A task runs it in a hidden terminal in its worktree
+  args = { "--permission-mode", "acceptEdits" }, -- added to each Claude Code run: --model, --allowedTools…
   auto_mode = false,   -- true: every run and chat in Claude Code's auto mode (--permission-mode auto, instead of args')
   check = nil,         -- the check for tasks without a `Done when:` line, e.g. "make test"; nil: no check
   retries = 1,         -- when the check fails, the agent gets its output and this many more tries
@@ -17,7 +17,7 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: Claude Code's default, or args'), btw, orchestrate (the planner)
+  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, orchestrate (the planner)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
@@ -30,6 +30,15 @@ local highlight -- below
 function M.setup(opts)
   C = vim.tbl_extend("force", C, opts or {})
   C.models = vim.tbl_extend("force", MODELS, (opts or {}).models or {}) -- models = { implement = "opus" } keeps btw's
+  local kind = require("sepal.agent").kind
+  local function check(c, where) -- anything else can't run: sepal knows both agents' hooks
+    if c and not kind({ agent = { cmd = c } }) then
+      M.notify(("%s %s isn't a supported agent: sepal runs claude or devin")
+        :format(where, vim.inspect(c)), vim.log.levels.ERROR)
+    end
+  end
+  check(C.cmd, "cmd")
+  for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do check(a.cmd, "agents: cmd") end
   highlight()
 end
 function M.config() return C end

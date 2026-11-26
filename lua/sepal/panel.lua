@@ -5,6 +5,7 @@
 
 local M = {}
 
+local agent = require("sepal.agent")
 local inbox = require("sepal.inbox")
 local NS = vim.api.nvim_create_namespace("sepal.panel")
 local ANIM = vim.api.nvim_create_namespace("sepal.panel.anim") -- the light on a working card, redrawn each tick
@@ -110,9 +111,36 @@ local function wrap(s, w)
   return out
 end
 
+-- the context window as text: 39149 -> "39.1k", 200000 -> "200k", 1000000 -> "1M"
+local function fmt(n)
+  if n < 1000 then return ("%d"):format(n) end
+  if n < 1e6 then return ("%.1f"):format(n / 1e3):gsub("%.0$", "") .. "k" end
+  return ("%.1f"):format(n / 1e6):gsub("%.0$", "") .. "M"
+end
+M.fmt = fmt
+local function pct(u) return math.floor(u.used * 100 / u.limit + 0.5) end
+M.pct = pct
+-- p percent as 10 cells (filled, empty) and the highlight for the text after them
+local function cells(p)
+  local hl = p >= 90 and "SepalError" or p >= 70 and "SepalWarn" or "SepalAccent"
+  local n = math.max(0, math.min(10, math.floor(p / 10 + 0.5)))
+  return { ("█"):rep(n), hl }, { ("░"):rep(10 - n), "SepalDim" }, p < 70 and "SepalDim" or hl
+end
+-- a card's bar row chunks, 10 cells: 70% amber, 90% red (the user's thresholds). No limit is no
+-- denominator — "in · out" like Devin's /usage, and it says why
+local function bar(u, kind)
+  if not u.limit then
+    return { (u.out and fmt(u.used) .. " in · " .. fmt(u.out) .. " out" or fmt(u.used)) .. " · no limit: "
+      .. (agent.AGENT_NAMES[kind] or "the agent") .. (kind == "devin" and " exposes none" or " reported none"), "SepalDim" }
+  end
+  local p = pct(u)
+  local full, empty, hl = cells(p)
+  return full, empty, { " " .. fmt(u.used) .. "/" .. fmt(u.limit) .. " · " .. p .. "%" .. (u.used > u.limit and " · over the limit" or ""), hl }
+end
+
 -- everything card reads of e, as a string: the cache key for its rows
 local function card_sig(e, w)
-  local s, subs, C = e.stat, {}, require("sepal").config()
+  local s, subs, C, u = e.stat, {}, require("sepal").config(), e.usage
   for _, a in ipairs(e.subagents or {}) do subs[#subs + 1] = tostring(a.name) end
   if e.status == "planned" then
     for _, p in ipairs(e.plan or {}) do subs[#subs + 1] = tostring(p.model) .. "\2" .. tostring(p.title) end
@@ -121,6 +149,7 @@ local function card_sig(e, w)
     tostring(e.check), tostring(e.checked), tostring(s and s.files), tostring(s and s.add), tostring(s and s.del),
     tostring(e.activity), table.concat(subs, "\1"), tostring(e.why), tostring(e.error), tostring(e.summary),
     tostring(not e.summary and e.task), #(e.assumptions or {}), tostring(e.model),
+    tostring(u and u.used), tostring(u and u.limit), tostring(u and u.out), tostring(agent.kind(e)),
     tostring(e.agent and e.agent.cmd), tostring(require("sepal").icon(e.status, "?")),
     tostring(C.retries), tostring(C.sakura),
     tostring(inbox.LIVE[e.status] and inbox.spin()) }, "\0")
@@ -145,16 +174,14 @@ local function card(e, w)
       { " " .. age, "SepalDim" } },
   }
   local function row(...) out[#out + 1] = { pad, rail, ... } end
-  -- who works on it, under its name: its model's provider logo, else ❖ for a devin agent
+  -- who works on it, under its name: its model's provider logo, else its agent's logo row
   if e.model then
     local l, hl = logo(e.model)
     row({ l, hl }, { (inbox.fit(" " .. model(e.model), inner - dw(l)):gsub("%s+$", "")), "SepalDim" })
-  elseif e.agent then
-    local c = e.agent.cmd
-    if vim.fs.basename((type(c) == "string" and c:match("^%S+") or c and c[1] or "")):match("^devin") then
-      local l = require("sepal").icon("devin", "❖")
-      row({ l, "SepalDim" }, { " devin", "SepalDim" })
-    end
+  else
+    local kind = agent.kind(e)
+    if kind == "devin" then row({ require("sepal").icon("devin", "❖"), "SepalDim" }, { " devin", "SepalDim" })
+    elseif kind == "claude" then row({ require("sepal").icon("claude", "✻"), "SepalClaude" }, { " claude", "SepalDim" }) end
   end
   -- status · try · check
   local meta = { { st[2], st[3], shimmer = live } }
@@ -166,6 +193,7 @@ local function card(e, w)
       e.checked == true and "SepalOk" or e.checked == false and "SepalError" or "SepalDim")
   end
   row(unpack(meta))
+  if e.status == "running" and e.usage then row(bar(e.usage, agent.kind(e))) end -- its context window
   local s = e.stat
   if s and s.files > 0 then
     row({ ("%d file%s "):format(s.files, s.files == 1 and "" or "s"), "SepalDim" }, { "+" .. s.add, "SepalAdded" },
@@ -246,6 +274,17 @@ function M.render()
     end
   end
   out[#out + 1] = counts
+  local fullest -- the fullest context window among the running tasks: it can't hide in a card
+  for _, e in ipairs(list) do
+    if e.status == "running" and e.usage and e.usage.limit and (not fullest or pct(e.usage) > pct(fullest.usage)) then fullest = e end
+  end
+  if fullest then
+    local p = pct(fullest.usage)
+    local full, empty, hl = cells(p)
+    local text = " " .. p .. "% of context · "
+    out[#out + 1] = { { " ", "Normal" }, full, empty,
+      { (text .. inbox.fit(fullest.title or "", width - dw(" ") - 10 - dw(text))):gsub("%s+$", ""), hl } }
+  end
   out[#out + 1] = { { " ", "Normal" }, { "o watch · q close", "SepalDim" } }
   out[#out + 1] = { { " " .. string.rep("─", width - 2), "SepalDim" } }
   rows = {}

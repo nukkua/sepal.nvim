@@ -59,7 +59,14 @@ printf '%s\n' '{"type":"user","message":{"content":"go"}}' \
 ev "{\"hook_event_name\":\"Stop\",\"session_id\":\"$sid\",\"transcript_path\":\"$t\"}"
 while :; do sleep 1; done]]
 
-local cmd = { "sh", "-c", fake, "sh" }
+-- an executable named claude: sepal runs only claude or devin, known by the executable's name
+local bin = vim.fs.joinpath(T, ".sepal", "bin", "claude")
+vim.fn.mkdir(vim.fs.dirname(bin), "p")
+local f = assert(io.open(bin, "w"))
+f:write("#!/bin/sh\n" .. fake)
+f:close()
+vim.uv.fs_chmod(bin, 493) -- 0755
+local cmd = { bin }
 local real = vim.env.SEPAL_DEMO_REAL == "1"
 sepal.setup({
   cmd = real and { "claude" } or cmd,

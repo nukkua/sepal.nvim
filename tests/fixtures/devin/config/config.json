@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "devin": {
+    "org_id": "org-redacted"
+  },
+  "shell": {
+    "setup_complete": true
+  },
+  "theme_mode": "dark",
+  "agent": {
+    "model": "swe-2-1-medium",
+    "preferred_family_models": {
+      "fusion": "fusion-claude-opus-5-5-high-sidekick-swe-2-high",
+      "swe-2-1": "swe-2-1-medium"
+    }
+  },
+  "vim_mode": true,
+  "keymap": {
+    "vim": {
+      "normal_mode": [
+        "esc",
+        "ctrl-["
+      ]
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ tr -d '\\n'; echo; } >> \"$SEPAL_EVENTS\""
+          }
+        ]
+      }
+    ]
+  }
+}

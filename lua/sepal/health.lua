@@ -9,8 +9,12 @@ function M.check()
   h.start("sepal")
   if vim.fn.has("nvim-0.12") == 1 then h.ok("Neovim " .. tostring(vim.version())) else h.error("Neovim 0.12+ is required") end
   if vim.fn.executable("git") == 1 then h.ok("git found") else h.error("git not found: tasks run in git worktrees") end
+  local kind = require("sepal.agent").kind
+  local unsupported = "%s isn't a supported agent: sepal runs claude or devin"
   if not argv(C.cmd) then
     h.error("cmd must be an argv list, e.g. { \"claude\" }")
+  elseif not kind({ agent = { cmd = C.cmd } }) then
+    h.error(unsupported:format("cmd " .. vim.inspect(C.cmd)))
   elseif vim.fn.executable(C.cmd[1]) == 0 then
     h.error("cmd: " .. C.cmd[1] .. " is not executable")
   else
@@ -19,6 +23,8 @@ function M.check()
   if C.auto_mode then h.ok("auto_mode: tasks and chats run in Claude Code's auto mode") end
   if type(C.args) ~= "table" then h.error("args must be a list of arguments, e.g. { \"--permission-mode\", \"acceptEdits\" }")
   else h.ok("tasks run with: " .. table.concat(C.args, " ")) end
+  -- where each running task's context-window bar reads from
+  h.info("context bar: Claude Code from its statusLine JSON; Devin from its transcript's totals, \"in · out\" like its /usage — it exposes no limit")
   if C.check == nil then h.info("check not set: tasks without a `Done when:` line aren't checked")
   elseif type(C.check) ~= "string" then h.error("check must be a shell command, e.g. \"make test\"")
   else h.ok("check: " .. C.check) end
@@ -31,8 +37,8 @@ function M.check()
   elseif type(C.max_running) ~= "number" or C.max_running < 1 then h.error("max_running must be a number, 1 or more")
   else h.ok("max_running: " .. C.max_running .. " at once, the rest wait") end
   if type(C.models) ~= "table" then h.error("models must be a table: { implement = \"opus\", btw = \"sonnet\" }")
-  else h.ok(("models: implement %s, btw %s, orchestrate %s"):format(C.models.implement or "Claude Code's default",
-    C.models.btw or "Claude Code's default", C.models.orchestrate or "Claude Code's default")) end
+  else h.ok(("models: implement %s, btw %s, orchestrate %s"):format(C.models.implement or "the agent's default",
+    C.models.btw or "the agent's default", C.models.orchestrate or "the agent's default")) end
   local pm = require("sepal").plan_models()
   if #pm == 0 then h.info("an orchestrate's tasks run on the default model: give your agents a model to pick from")
   else h.ok("an orchestrate picks its tasks' models from your agents': " .. table.concat(pm, ", ")) end
@@ -41,6 +47,7 @@ function M.check()
     for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do
       local c = type(a) == "table" and (type(a.cmd) == "table" and a.cmd[1] or a.cmd)
       if type(c) ~= "string" then h.error("agents: each one needs a cmd, e.g. { cmd = \"devin\" }")
+      elseif not kind({ agent = { cmd = a.cmd } }) then h.error(unsupported:format("agents: cmd " .. vim.inspect(a.cmd)))
       elseif vim.fn.executable(c) == 0 then h.error("agents: " .. c .. " is not executable")
       else h.ok("agent: " .. c .. (a.model and " · " .. a.model or "")) end
     end

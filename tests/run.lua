@@ -1376,8 +1376,8 @@ test("a task shows its keys on top, like the inbox", function()
   local b = help()
   sepal.config().task_sharpen = nil
   vim.api.nvim_buf_delete(task_buf(), { force = true })
-  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-m> model  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true },
-    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-m> model  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true } })
+  eq({ a, b }, { { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-o> model  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true },
+    { 0, "<c-c><c-c> send  <c-c><c-w> wait  <c-c><c-s> sharpen  <c-c><c-o> model  <c-c><c-f> file  <c-c><c-p> image  <c-c><c-k> discard", true } })
 end)
 
 test("a draft in a narrow window wraps its keys into lines that fit", function()
@@ -1399,7 +1399,7 @@ test("a draft in a narrow window wraps its keys into lines that fit", function()
   for _, s in ipairs(lines) do assert(vim.fn.strdisplaywidth(s) <= width, s) end
   local joined = table.concat(lines, "  ")
   for _, k in ipairs({ "<c-c><c-c> send", "<c-c><c-w> wait", "<c-c><c-s> sharpen",
-    "<c-c><c-m> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" }) do
+    "<c-c><c-o> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" }) do
     assert(joined:find(k, 1, true), k .. " was cut off")
   end
   eq(vim.fn.winsaveview().topfill, #m[4].virt_lines)
@@ -1408,7 +1408,7 @@ test("a draft in a narrow window wraps its keys into lines that fit", function()
   sepal.config().task_sharpen = nil
 end)
 
-test("<c-c><c-m> picks the model a draft runs on, from the list or typed", function()
+test("<c-c><c-o> picks the model a draft runs on, from the list or typed", function()
   clean(); reset()
   sepal.setup({ models = {} })
   sepal.task()
@@ -1418,7 +1418,7 @@ test("<c-c><c-m> picks the model a draft runs on, from the list or typed", funct
     return { l[1][1], l[1][2], l[2][1] }
   end
   local shots = picker_shots({ "1" })
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-m>"), "tx", false)
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-o>"), "tx", false)
   eq(#shots, 1)
   eq(shots[1].lines, { "  1  ✻ sonnet", "", "  d    default  ●", "  o    other…" })
   eq(shots[1].title, "sepal · short feat model")
@@ -1439,7 +1439,7 @@ test("<c-c><c-m> picks the model a draft runs on, from the list or typed", funct
     eq(opts.prompt, "model: ")
     cb("haiku")
   end
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-m>"), "tx", false)
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-o>"), "tx", false)
   vim.ui.input = input
   eq(who()[3], " haiku")
   vim.api.nvim_buf_delete(task_buf(), { force = true })
@@ -1725,7 +1725,7 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   local l = vim.api.nvim_buf_get_lines(d, 0, -1, false)
   eq({ l[1], l[5], l[6], l[8], l[9], l[#l] }, { "Goal: ", "Asked:", "how does landing work?", "Answer:", "Did it.", "Files:" })
   picker_shots({ "1" })
-  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-m>"), "tx", false)
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-o>"), "tx", false)
   local wm = vim.api.nvim_buf_get_extmarks(d, -1, 0, 0, { details = true, type = "virt_lines" })[1]
   eq(wm[4].virt_lines[1][2][1], " sonnet")
   vim.api.nvim_buf_delete(d, { force = true })

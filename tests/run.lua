@@ -977,7 +977,9 @@ test("the panel and the inbox show the running subagents: their count, and their
   vim.env.SEPAL_SLEEP, vim.env.SEPAL_SUB = "1", "1"
   notified(function()
     send({ "Goal: with helpers" })
-    assert(vim.wait(2000, function() return #(newest().subagents or {}) == 2 end, 20), "no subagents seen")
+    assert(vim.wait(2000, function()
+      for _, a in ipairs(newest().subagents or {}) do if a.id == "a3" then return true end end
+    end, 20), "the last subagent never started")
     eq(vim.tbl_map(function(a) return a.name end, newest().subagents), { "Plan", "general-purpose" })
     vim.cmd("Sepal panel")
     local pl = vim.api.nvim_buf_get_lines(vim.fn.bufnr("sepal://panel"), 0, -1, false)

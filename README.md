@@ -37,9 +37,10 @@ vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox
 ```
 
 **2. Write a task.** Select the code you mean (or don't) and press `<leader>as`, then pick what
-kind of task it is: `l` large feat (a bigger job, planned as several tasks, see Orchestrate), `s`
-short feat (a change, below) or `b` btw (a question, see Btw). A buffer opens
-above your code:
+kind of task it is: `l` large feat (a bigger job, planned as several tasks, see Large feat), `s`
+short feat (a change, below) or `b` btw (a question, see Btw). Each kind shows the logo and model
+of the agent that will run it; with several `agents` you pick the agent next, each shown with its
+logo and model (see Devin). Any other key cancels. A buffer opens above your code:
 
 ```
 Goal: Finish queued tasks in ThreadPool::shutdown() before stopping, refuse new ones.
@@ -68,8 +69,13 @@ A new task starts with your project's test command already there, found in this 
 `check`). `<c-c><c-f>` adds more files. Pytest is detected from `pytest.ini` or a `[tool.pytest…]`
 section in `pyproject.toml`.
 
+Fields you leave empty (`Constraints:` with an empty `- `, say) aren't sent; code in a ``` block is
+sent as it is. An empty `Goal:` sends nothing.
+
 **3. Send it.** `<c-c><c-c>`. The buffer closes and you get `working on it: Finish queued tasks…`.
-Keep coding. You can send more tasks, and they run in parallel, each in its own worktree.
+Keep coding. You can send more tasks, and they run in parallel, each in its own worktree (up to
+`max_running`, the rest wait as `queued`). Outside a git repo, or if your work tree can't be saved,
+the task comes back in its buffer.
 
 **4. It lands.** When the check passes:
 
@@ -103,13 +109,21 @@ buffers for affected files before landing or undoing.
 
 The inbox is edited like a buffer, as in oil.nvim: `dd` a task's line and `:w` drops it,
 `u` before `:w` takes it back. Copy a line (`yyp`) and `:w` opens a new task with that task's text,
-to add to and send.
+to add to and send. Several copies open their drafts one after another, each once the one before is
+sent or discarded.
+
+Under each task are the lines worth reading: why it needs you, the error, the first lines of a
+failing check, the `·` decisions, conflict markers it left, its files with their `+`/`−` counts. A
+running task shows what its agent is on (`Edit src/pool.cpp`) and its running subagents (`↳ 2
+subagents`).
 
 - `r` replies to a task ("the timeout is 200ms on CI"). The agent continues from where it was, in the
   same chat, and the task is checked and lands again.
 - `c` continues a task that was cut short (Neovim quit, `x`, Esc, the agent crashed): what it had done
   is kept and the agent picks up in the same chat; one whose agent never started starts over.
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
+- `x` stops a running or queued task (what it did so far is kept), or closes its chat.
+- `L` lands a task, `U` takes a landed one back out, `C` drops the tasks that are over (`:Sepal clean`).
 - `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
   your work tree, `q` closes).
@@ -119,20 +133,23 @@ That's all of it: write, send, keep working, read the `·` lines.
 
 ### Btw
 
-`b` instead of `i` asks the agent something about the project ("where are retries configured?").
-Write the question and send it with `<c-c><c-c>`. It runs on a cheaper model (sonnet by default, see
+`b` instead of `s` asks the agent something about the project ("where are retries configured?").
+The buffer is just a line for the question and `Files:`. Write it and send it with `<c-c><c-c>` (a
+btw is sent as you wrote it: no `<c-c><c-w>`, no `<c-c><c-s>`). It runs on a cheaper model (sonnet by default, see
 `models`) in your repo itself, read-only (Claude Code's plan mode), so it starts at once: no worktree,
 and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
 `<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat. Copying its line (`yyp`, `:w`) turns the answer into
-an implement task: a draft with the question and the answer under `Asked:`/`Answer:` as context,
+a short feat: a draft with the question and the answer under `Asked:`/`Answer:` as context,
 you write the `Goal:` and send it.
 
-### Orchestrate
+### Large feat
 
-`o` is for a job too big for one task. Write it like an implement task and send it: the agent reads
+`l` (an orchestrate, inside sepal) is for a job too big for one task. Write it like a short feat
+(with `task_sharpen` set it starts as just your idea and `Files:`, and `<c-c><c-s>` writes it) and
+send it: `<c-c><c-c>` plans it, `<c-c><c-w>` plans it and has its tasks wait for `L`. The agent reads
 your repo (read-only, like a btw, on `models.orchestrate`) and plans it. It decides how many tasks
-there are, what each one does and checks, and which model runs each one, picked from your `agents`' models.
-The plan waits in the inbox, unfolded:
+there are (as few as the work needs), what each one does and checks, and which model runs each
+one, picked from your `agents`' models. The plan waits in the inbox, unfolded:
 
 ```
 ◇ planned      1m   retries for the client    make test
@@ -140,15 +157,17 @@ The plan waits in the inbox, unfolded:
     2. [haiku] Document the retry option
 ```
 
-- `m` on an item changes its model: one of your `agents`' models (the task then runs on that agent),
-  `default` (the plan's agent's own) or one you type. `m`
+- `m` on an item changes its model: one of your `agents`' models (`1`…`9`, the task then runs on that
+  agent), `d` default (the plan's agent's own) or `o` one you type. `m`
   on the plan's own line changes all of them. You can also edit the `[model]` in the line and `:w`.
   `dd` an item (or move it) and `:w` drops (or reorders) it.
 - `s` swarms it: each item becomes a task of its own, run with its model and checked with its
-  `Done when:` (the plan's own if it has none). All of them start from one snapshot of your work
+  `Done when:` (the plan's own if it has none). Each is told the plan's other tasks, so it does only
+  its part. All of them start from one snapshot of your work
   tree, run in parallel up to `max_running`, and land the way you sent the plan (`<c-c><c-c>` by
-  themselves, `<c-c><c-w>` on `L`).
-- `r` asks for a different plan, `<CR>` reads the agent's whole reply.
+  themselves, `<c-c><c-w>` on `L`). The plan stays as `swarmed`.
+- `r` asks for a different plan, `<CR>` reads the agent's whole reply. A reply without a `Plan:`
+  list fails; `r` asks again.
 
 To try it by hand, run `nvim -u tests/demo.lua`: a throwaway repo with a fake agent that plans two
 tasks. `SEPAL_DEMO_REAL=1 nvim -u tests/demo.lua` uses the real Claude Code instead.
@@ -279,16 +298,37 @@ it does not rerun the check. Dropping a task removes its refs, chat and pasted i
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |
 | `<c-c><c-k>` | discard the task                                                       |
 
-A dim line on top of the task lists these keys, like the one on top of the inbox.
+A dim line on top of the task shows who will work on it (the provider's logo and the model, or
+the agent's name) and lists these keys, like the one on top of the inbox. A large feat's
+`<c-c><c-c>` and `<c-c><c-w>` plan it (see Large feat); a btw has only `<c-c><c-c>`. While
+`task_sharpen` works, a spinner shows there; if you edit the task meanwhile, its answer is dropped
+rather than overwriting your text.
 
 `:'<,'>Sepal task` puts the selected lines in the task as a `Selection: path:10-20` code block and
 lists the file. With a draft open, the selection is added to it. Closing the window drops the
 draft, so `:Sepal task` always starts a new one.
 
+A pasted image is saved under `stdpath("cache")/sepal` and listed under `Files:` by its path; the
+agent is allowed to read it. It stays while its task is in the inbox (`r` may need it again) and is
+deleted with the task; images of discarded drafts go after a day.
+
+### Skills
+
+`skills` names skills a task can ask for: `/name` as a word in the task appends that skill to what
+the agent gets (`Skill /name:` and its text, the frontmatter dropped), once per skill. Each value is
+a path to a `SKILL.md` or the skill's text itself:
+
+```lua
+require("sepal").setup({ skills = { how = "~/.claude/skills/how/SKILL.md", terse = "Answer in one line." } })
+```
+
 ### Writing the task for you
 
 Set `task_sharpen` and a large feat starts as just your idea and `Files:`, and `<c-c><c-s>` has
-the command write the task. A short feat keeps its fields, and `<c-c><c-s>` sharpens them:
+the command write the task. A short feat keeps its fields, and `<c-c><c-s>` sharpens them: its
+filled-in fields go to the command under a prompt asking for a deeper task, not a bigger one (what
+an expert would do, from the rawest material, with which methods, and what would prove it right),
+keeping its `Done when:` and `Files:`. The answer replaces the buffer; `u` undoes it:
 
 ```lua
 require("sepal").setup({
@@ -313,8 +353,11 @@ require("sepal").setup({ prepare = "cp $SEPAL_ROOT/.env . && cargo fetch" })
 
 ## Permissions
 
-Tasks run with `--permission-mode acceptEdits`, plus the task's check: the agent can read files,
-edit them, and run `Done when:`. When it asks for permission for anything else it waits for you,
+Tasks run with `--permission-mode acceptEdits`, plus a few rules sepal adds to each run: the task's
+check (also as `cd <worktree> && <check>`), read-only git (`git status`, `git diff`, `git log`,
+`git show`) and reading the absolute paths under `Files:` (the images you paste). Devin gets the
+check and those reads in its config copy. So the agent can read files, edit them,
+and run `Done when:` without stopping. When it asks for permission for anything else it waits for you,
 and sepal tells you: `▲ …: Claude needs your permission to use Bash · :Sepal open`. Allow what you
 trust upfront in `args`:
 
@@ -337,18 +380,37 @@ Each task runs the real Claude Code in a hidden terminal inside Neovim, so it wo
 emulator, no tmux needed. `o` in the inbox, or `:Sepal open`, shows it full screen: you see the
 agent at work and can type to it. `q` in normal mode hides it again and it keeps going, and so
 does `:Sepal open` itself, so one key toggles it. Once the
-task is done, the same key opens its chat with `claude --resume <id>`: it too keeps going when
-hidden, until `x` or `:Sepal stop` ends it.
+task is done, the same key opens its chat with `claude --resume <id>` (`devin -r <id>`): it too keeps going when
+hidden, until `x` or `:Sepal stop` ends it. If you're watching when its turn ends, the same screen
+shows `Running the check` (when it has one), then its chat.
 
 sepal follows the agent through Claude Code hooks (passed with `--settings`, your own hooks still
-run): what tool it's on, when it asks for something, and when its turn is over. Then it closes it
-and runs the check.
+run): what tool it's on, its subagents, when it asks for something, and when its turn is over.
+Then it closes it and runs the check. Esc in Claude Code (or ctrl-c in Devin) ends the turn too: the
+task stops with what it did kept, and `c` continues it.
+
+While you're in an agent or a chat, sepal's notifications wait and show once you leave it. With
+fidget.nvim, info goes there (warnings and errors stay in `vim.notify`), and fidget's window is
+hidden while you're in an agent, the inbox or with the panel open.
 
 At most `max_running` implementation tasks (3 by default) run at once, including preparation and
 checking; the rest wait as `queued`. Btw and orchestrate runs bypass this limit.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal warns
-(`▲ …: Claude Code asks to trust the worktree · :Sepal open`), and you answer it there.
+(`▲ …: Claude Code asks to trust the worktree · :Sepal open`), and you answer it there. Devin runs
+with `--respect-workspace-trust false`, so it doesn't ask.
+
+## Panel
+
+`:Sepal panel` toggles a board at the right that only shows; your cursor stays where it is. Its
+header counts the tasks by state (running, queued, need you, ready, answered, planned, landed).
+Each task is a card behind a rail in its state's color: its title and age, the logo and model
+working on it, its state with what to do about it (`r in :Sepal inbox to fix it`), the try
+(`try 2/2`) and the check, its `+`/`−` counts, what the agent is doing right now and its
+subagents, a plan's tasks with their models, why it needs you or its error, a short summary of
+what the agent said, and how many decisions there are to read. A working card's icon spins and a
+light runs down its rail and over its state. `o` watches the task under the cursor (or opens its
+chat), `q` closes the panel. To act on a task, use the inbox.
 
 ### Context bar
 
@@ -367,13 +429,26 @@ agent's own, never estimates:
 
 Nothing shows until the agent reports its first usage.
 
-`:checkhealth sepal` checks Neovim, git, agent executables, arguments, checks/retries, landing,
-preparation, concurrency, models and plan models, task suggestions, appearance and optional plugins.
+## Health
+
+`:checkhealth sepal` checks Neovim, git, `cmd`, `args`, `check`, `retries`, `land`, `prepare`,
+`max_running`, `models`, `agents` and their executables, plan models, `task_sharpen`, `sakura`,
+`highlights`, `icons`, fidget.nvim and fff.nvim. It also reports `auto_mode`, where worktrees and the
+inbox live, where the context bar reads from, and the worktree trust prompt.
+
+## Lua
+
+`require("sepal")`: `.pick(range)` is `:Sepal task`; `.task(range, lines, kind, agent)` opens a draft
+without the picker (`kind`: `"implement"`, `"btw"` or `"orchestrate"`); `.inbox()`, `.panel()`,
+`.land()`, `.undo()`, `.open()`, `.stop()`, `.clean()` are the commands; `.status()` is the
+statusline; `.draft()` is the open task draft's buffer (nil when none).
 
 ## Tests
 
 ```sh
-nvim -l tests/run.lua
+nvim -l tests/run.lua                         # all of them, with a fake agent: no Claude Code needed
+SEPAL_TEST="lands" nvim -l tests/run.lua      # only the tests whose name contains it
+SEPAL_DEMO_CHECK=1 nvim --headless -u tests/demo.lua  # the large feat demo, draft to two landed tasks
 ```
 
 Designed and developed with AI-assisted implementation. I defined the requirements, workflows, and desired behavior.

@@ -295,7 +295,7 @@ local function finish(e, wt, status, extra)
   local j = jobs[e.id]
   jobs[e.id] = nil
   if wt and wt ~= e.root then git.remove_worktree(e.root, wt) end -- a btw runs in your repo: never that
-  e.status, e.activity, e.subagents, e.usage = status, nil, nil, nil
+  e.status, e.activity, e.subagents = status, nil, nil -- usage stays: the card shows what the run used
   for k, v in pairs(extra or {}) do e[k] = v end
   inbox.changed(e)
   if j and j.done then j.done(true) end
@@ -378,6 +378,10 @@ end
 -- (what /usage shows as "in · out"). Read only its tail (a transcript can be MBs), and only when it
 -- changed; st is per-run { size, mtime }. Returns { used, out } (nil with no match yet) and the
 -- number of bytes read.
+local function dvpath(session)
+  local dir = vim.env.XDG_DATA_HOME or vim.fs.joinpath(vim.uv.os_homedir(), ".local", "share")
+  return vim.fs.joinpath(dir, "devin", "cli", "transcripts", session .. ".json")
+end
 local function devin_usage(path, st)
   local s = vim.uv.fs_stat(path)
   if not s or (st.size == s.size and st.mtime and st.mtime.sec == s.mtime.sec and st.mtime.nsec == s.mtime.nsec) then
@@ -447,7 +451,7 @@ agent = function(e, prompt, wt)
   end
   local events = wtdir(e) .. ".events" -- beside its worktree: a btw has none, and runs in your repo
   os.remove(events)
-  local dv, conf = devin(e), events .. ".config.json"
+  local dv, conf, dvst = devin(e), events .. ".config.json", {} -- dvst: its transcript as last read
   -- it has to run the check; files from outside the repo (<c-c><c-p>'s pasted images): read-only access to just those
   local allow = e.check and { (dv and "Exec(%s)" or "Bash(%s)"):format(e.check) } or {}
   for l in vim.gsplit(e.task, "\n") do
@@ -506,6 +510,15 @@ agent = function(e, prompt, wt)
   end
   local function stopped(ev) -- the turn is over: what it did is kept even when its check fails
     close()
+    if dv then -- Devin writes its transcript as it exits: its totals come after the turn, read them for 10 s
+      local t, n = vim.uv.new_timer(), 0
+      t:start(200, 200, vim.schedule_wrap(function()
+        n = n + 1
+        local u = e.session and e.session:match("^[%w-]+$") and devin_usage(dvpath(e.session), dvst)
+        if u or n >= 50 then t:stop(); t:close() end
+        if u and not vim.deep_equal(u, e.usage) then e.usage = u; inbox.changed(e) end
+      end))
+    end
     local reply = reply_of(ev)
     if readonly(e.kind) then -- its answer is what it did: kept whole, nothing to land
       e.answer, e.summary = reply or e.answer, first(reply, 100) or e.summary
@@ -536,7 +549,7 @@ agent = function(e, prompt, wt)
       rest()
     end)
   end
-  local transcript, toff, dvst = nil, 0, {}
+  local transcript, toff = nil, 0
   -- an Esc in Claude Code ends the turn without a Stop hook: its transcript says so
   local function interrupted()
     local st = transcript and vim.uv.fs_stat(transcript) -- polled 10 times a second: open it only when it grew
@@ -674,8 +687,7 @@ agent = function(e, prompt, wt)
     if over then return end
     poll()
     if dv and e.session and e.session:match("^[%w-]+$") then -- it goes in a path
-      local dir = vim.env.XDG_DATA_HOME or vim.fs.joinpath(vim.uv.os_homedir(), ".local", "share")
-      local u = devin_usage(vim.fs.joinpath(dir, "devin", "cli", "transcripts", e.session .. ".json"), dvst)
+      local u = devin_usage(dvpath(e.session), dvst)
       if u and not vim.deep_equal(u, e.usage) then e.usage = u; inbox.render() end
     end
     if not over and interrupted() then

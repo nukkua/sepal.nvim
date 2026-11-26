@@ -201,7 +201,7 @@ local function card(e, w)
       e.checked == true and "SepalOk" or e.checked == false and "SepalError" or "SepalDim")
   end
   row(unpack(meta))
-  if e.status == "running" and e.usage then row(bar(e.usage, agent.kind(e))) end -- its context window
+  if e.usage then row(bar(e.usage, agent.kind(e))) end -- its context window, kept after the run
   local s = e.stat
   if s and s.files > 0 then
     row({ ("%d file%s "):format(s.files, s.files == 1 and "" or "s"), "SepalDim" }, { "+" .. s.add, "SepalAdded" },

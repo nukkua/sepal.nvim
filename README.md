@@ -415,7 +415,7 @@ chat), `q` closes the panel. To act on a task, use the inbox.
 
 ### Context bar
 
-A running task's card in the panel shows its context window: a 10-cell bar, the tokens used
+A task's card in the panel shows its context window: a 10-cell bar, the tokens used
 against the window, and the percent, e.g. `██████░░░░ 120k/200k · 60%`. It turns amber at 70% and
 red at 90%; past the window it says `over the limit`. The panel header shows the fullest running
 task's bar. Queued tasks aren't paused at a limit: the bar only shows it. The numbers are the
@@ -428,7 +428,9 @@ agent's own, never estimates:
   shown as `in · out` like its `/usage`. Devin exposes no context limit anywhere, so there is no
   bar, only the count: `37.8k in · 252 out · no limit: Devin exposes none`.
 
-Nothing shows until the agent reports its first usage.
+Nothing shows until the agent reports its first usage. Devin writes its transcript only as it
+exits, so its count shows right after the turn. The last count stays on the card (and in the inbox
+store) after the task finishes.
 
 ## Health
 

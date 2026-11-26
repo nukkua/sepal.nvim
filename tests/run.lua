@@ -1920,7 +1920,7 @@ test("the card's context bar is Claude Code's statusLine: none yet, its numbers,
     idle()
   end)
   local e = newest()
-  eq({ e.status, e.usage, has_bar() }, { "landed", nil, nil })
+  eq({ e.status, e.usage, has_bar() }, { "landed", { used = 150000, limit = 200000 }, " ▎ ████████░░ 150k/200k · 75%" }) -- kept after the run
   assert(not panel_lines()[3]:find("of context", 1, true), panel_lines()[3])
   vim.cmd("Sepal panel")
   local s = vim.json.decode(read(T .. "/settings") or "{}")
@@ -1955,6 +1955,33 @@ test("a Devin card's bar is its transcript's totals, like its /usage; it exposes
   vim.cmd("Sepal panel")
   assert(ok, err)
   eq({ newest().status, file("a.txt") }, { "landed", "dv\n" })
+end)
+
+test("Devin writes its transcript as it exits: the totals read after the turn stay on the card, and are saved", function()
+  clean(); reset()
+  local data = vim.env.XDG_DATA_HOME
+  vim.env.XDG_DATA_HOME = vim.fs.joinpath(T, "data")
+  vim.env.SEPAL_REPLAY, vim.env.SEPAL_PAUSE, vim.env.SEPAL_EDIT = FIXTURES .. "/devin/events.jsonl", "1", [[echo dv > a.txt]]
+  vim.cmd("Sepal panel")
+  local dir = vim.fs.joinpath(T, "data", "devin", "cli", "transcripts")
+  os.remove(vim.fs.joinpath(dir, "quiver-snapper.json")) -- the test before left one
+  local ok, err = pcall(notified, function()
+    agent.start("Goal: devin's late tokens", work, "auto", nil, nil, { cmd = { dv } })
+    local e = newest()
+    assert(vim.wait(5000, function() return e.session == "quiver-snapper" end, 10), "no SessionStart")
+    go()
+    idle()
+    eq({ e.status, e.usage }, { "landed", nil })
+    vim.fn.mkdir(dir, "p")
+    vim.uv.fs_copyfile(FIXTURES .. "/devin/transcript.json", vim.fs.joinpath(dir, "quiver-snapper.json"))
+    assert(vim.wait(5000, function() return e.usage ~= nil end, 10), "the transcript was never read after the turn")
+    eq(has_bar(), " ▎ 37.8k in · 252 out · no limit: Devin exposes none")
+    inbox._t.reset() -- a restart reads it back
+    eq(newest().usage, { used = 37846, out = 252 })
+  end)
+  vim.env.XDG_DATA_HOME = data
+  vim.cmd("Sepal panel")
+  assert(ok, err)
 end)
 
 test("reading Devin's usage from a multi-MB transcript costs one 4 KiB tail read, and none when it's unchanged", function()

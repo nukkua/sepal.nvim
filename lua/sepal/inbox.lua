@@ -42,7 +42,7 @@ local function save(root)
   if batching > 0 then pending.roots[root] = true return end
   local keep = vim.tbl_map(function(e) -- a shallow copy is enough: it's only encoded
     local c = {}
-    for k, v in pairs(e) do if k ~= "activity" and k ~= "subagents" and k ~= "reply" and k ~= "usage" then c[k] = v end end -- reply: older inboxes had it
+    for k, v in pairs(e) do if k ~= "activity" and k ~= "subagents" and k ~= "reply" then c[k] = v end end -- reply: older inboxes had it
     return c
   end, M.list(root))
   local f = io.open(file(root), "w")

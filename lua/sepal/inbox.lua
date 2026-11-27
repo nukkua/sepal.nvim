@@ -221,32 +221,10 @@ local function facts(e)
     s and "−" .. s.del or "", table.concat(f, "  ") }
 end
 
-local function is_test(path)
-  local l = "/" .. path:lower()
-  return l:find("/tests?/") or l:find("/specs?/") or l:find("/__tests__/")
-    or l:find("[/_%.%-]tests?[_%.%-]") or l:find("[/_%.%-]specs?[_%.%-]")
-    or l:find("[/_%.%-]tests?$") or l:find("[/_%.%-]specs?$")
-    or path:find("Tests?%.") or path:find("Specs?%.")
-end
-
--- what should make you suspicious of a green check: one green before the agent proves nothing,
--- and changing existing tests can move the goalposts (new ones are fine)
-function M.warnings(e)
-  local w = {}
-  if e.vacuous then w[#w + 1] = "▲ the check already passed before the agent started: it proves nothing" end
-  local t = {}
-  for _, p in ipairs(e.stat and e.stat.paths or {}) do
-    if is_test(p) and not (e.stat.new and e.stat.new[p]) then t[#t + 1] = p end
-  end
-  if #t > 0 then w[#w + 1] = "▲ it changed tests: " .. table.concat(t, ", ") end
-  return w
-end
-
 -- the lines under an entry: what you should read
 local function details(e)
   local d = {}
   if e.why then d[#d + 1] = e.why end
-  for _, w in ipairs(M.warnings(e)) do d[#d + 1] = w end
   if e.error then d[#d + 1] = e.error end
   if e.status == "running" then
     for _, a in ipairs(e.subagents or {}) do d[#d + 1] = "↳ " .. a.name end
@@ -350,7 +328,7 @@ draw = function()
   -- hidden, it stays loaded: skip it (every tool call of every task redraws); M.open redraws when shown
   if not w then drawn, prev_inbox = nil, nil; return end -- what it showed is stale now: no tick may touch it
   if vim.bo[b].modified then prev_inbox = nil; return end -- your edits wait for :w (or u): a redraw would throw them away
-  local lines, rows, marks, spins, agents, plans, warns = { HELP, "" }, {}, {}, {}, {}, {}, {}
+  local lines, rows, marks, spins, agents, plans = { HELP, "" }, {}, {}, {}, {}, {}
   local row_marks, fold_ranges, spin_rows = {}, {}, {}
   local function mark(row, col, end_col, hl)
     local m = row_marks[row]
@@ -393,7 +371,6 @@ draw = function()
     for _, d in ipairs(details(e)) do
       lines[#lines + 1] = "    " .. d; rows[#lines] = e.id
       if d:match("^↳ ") then agents[#lines] = true -- not dimmed: these are what's running
-      elseif d:match("^▲ ") then warns[#lines] = true -- nor a warning: amber, not dimmed
       elseif d:match("^· ") then -- nor a decision: what you read, plain text after an accent bullet
         plans[#lines] = true
         mark(#lines, 4, 4 + #"·", "SepalAccent")
@@ -410,7 +387,6 @@ draw = function()
   end
   for row = 3, #lines do
     if agents[row] then line_mark(row, "SepalAgent")
-    elseif warns[row] then line_mark(row, "SepalWarn")
     elseif not marks[row] and not plans[row] and lines[row]:sub(1, 4) == "    " then line_mark(row, "SepalDim") end
   end
   spun = spins

@@ -293,7 +293,6 @@ local function facts(e)
   local f = {}
   if e.stat and e.stat.files > 0 then f[#f + 1] = ("%s +%d −%d"):format(plural(e.stat.files, "file"), e.stat.add, e.stat.del) end
   if e.check and e.checked ~= nil then f[#f + 1] = e.check .. (e.checked and " ✔" or " ✘") end
-  if e.vacuous then f[#f + 1] = "▲ the check passed before the agent" end
   return #f > 0 and " · " .. table.concat(f, " · ") or ""
 end
 local function with_assumptions(msg, e)
@@ -813,26 +812,7 @@ function M._prepare(e, prompt, wt)
   local update = jobs[e.id].update
   local prepare = C().prepare
   e.exclude = nil -- on e, not the job: c salvages a worktree left by a quit after a restart
-  local function go()
-    if e.check and not e.result then
-      update(e.title .. ": checking the base")
-      local cok, job = pcall(vim.system, { "sh", "-c", e.check }, { cwd = wt, text = true }, vim.schedule_wrap(function(out)
-        local j = jobs[e.id]
-        if not j or j.stopped then return finish(e, wt, "stopped") end
-        if out.code == 0 then
-          e.vacuous = true
-          inbox.changed(e)
-          notify("▲ " .. e.title .. ": the check already passes · x stops it, r gives a better check", WARN)
-        end
-        agent(e, prompt, wt)
-      end))
-      if not cok then return agent(e, prompt, wt) end
-      jobs[e.id].job = job
-      return
-    end
-    agent(e, prompt, wt)
-  end
-  if not prepare then return go() end
+  if not prepare then return agent(e, prompt, wt) end
   update(e.title .. ": preparing")
   local pok, job = pcall(vim.system, { "sh", "-c", prepare }, { cwd = wt, text = true, env = { SEPAL_ROOT = e.root } }, vim.schedule_wrap(function(out)
     local j = jobs[e.id]
@@ -846,7 +826,7 @@ function M._prepare(e, prompt, wt)
       if not j or j.stopped then return finish(e, wt, "stopped") end
       e.exclude = {}
       for entry in st:gmatch("[^%z]+") do e.exclude[#e.exclude + 1] = entry:sub(4) end
-      go()
+      agent(e, prompt, wt)
     end)
   end))
   if not pok then return finish(e, wt, "error", { error = "could not run prepare: " .. tostring(job):match("[^\n]*") }) end

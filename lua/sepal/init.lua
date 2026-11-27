@@ -36,6 +36,7 @@ local function cmd_kind(c)
 end
 M._cmd_kind = cmd_kind
 function M.setup(opts)
+  local sakura, hl = C.sakura, C.highlights
   C = vim.tbl_extend("force", C, opts or {})
   C.models = vim.tbl_extend("force", MODELS, (opts or {}).models or {}) -- models = { implement = "opus" } keeps btw's
   local function check(c, where) -- anything else can't run: sepal knows both agents' hooks
@@ -46,7 +47,8 @@ function M.setup(opts)
   end
   check(C.cmd, "cmd")
   for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do check(a.cmd, "agents: cmd") end
-  highlight()
+  -- loading sepal set the colors already: again only when they're asked to change
+  if C.sakura ~= sakura or not vim.deep_equal(C.highlights, hl) then highlight() end
 end
 function M.config() return C end
 

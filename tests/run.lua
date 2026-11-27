@@ -818,6 +818,12 @@ test("the inbox lists the tasks and survives a restart", function()
   eq(newest().title, "listed")
 end)
 
+test("inbox keys are vim.fn.sha256's, without its first-call self-test", function()
+  for _, s in ipairs({ "", "abc", "/home/me/repo", ("x"):rep(55), ("y"):rep(56), ("z"):rep(64), ("é/ü"):rep(50) }) do
+    eq(inbox._t.sha256(s), vim.fn.sha256(s))
+  end
+end)
+
 test("inbox keys isolate roots and read only their own legacy entries", function()
   local a, b = T .. "/foo-bar", T .. "/foo_bar"
   local state = sepal.config().worktrees

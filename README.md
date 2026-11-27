@@ -38,7 +38,7 @@ vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox
 
 **2. Write a task.** Select the code you mean (or don't) and press `<leader>as`, then pick what
 kind of task it is: `p` plan (a bigger job, planned as several tasks, see Plan), `f`
-feat (a change, below) or `b` btw (a question, see Btw). Each kind shows the logo and model
+feat (a change, below), `b` btw (a question, see Btw) or `g` guide (a guide you code from, see Guide). Each kind shows the logo and model
 of the agent that will run it; with several `agents` you pick the agent next, each shown with its
 logo and model (see Devin). Any other key cancels. A buffer opens above your code:
 
@@ -145,6 +145,14 @@ and it doesn't wait for a `max_running` slot. You get the start of the answer as
 a feat: a draft with the question and the answer under `Asked:`/`Answer:` as context,
 you write the `Goal:` and send it. The draft keeps the btw's agent; `<c-c><c-o>` picks another model.
 
+### Guide
+
+`g` is a btw for a change you want to write yourself: describe the bug, feature or change and send it
+with `<c-c><c-c>`. It runs like a btw (read-only in your repo, no worktree, no check, nothing lands) but
+answers with an implementation guide for a senior engineer new to the code: TL;DR, mental model, a
+change plan of steps (where, what, why, watch out), verification and open decisions. `<CR>` in the inbox
+reads it. Its model is `models.guide` (unset: the agent's default).
+
 ### Plan
 
 `p` (`orchestrate` in the `models` keys and the Lua API) is for a job too big for one task. Write it like a feat
@@ -197,7 +205,7 @@ require("sepal").setup({
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
-  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's; verify: v's (nil: the planner's)
+  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); guide: g's; orchestrate: the planner's; verify: v's (nil: the planner's)
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   panel_width = 46,    -- :Sepal panel's width: columns, or a share of the editor's: "30%" (or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
@@ -313,7 +321,7 @@ it does not rerun the check. Dropping a task removes its refs, chat and pasted i
 
 A dim line on top of the task shows who will work on it (the provider's logo and the model, or
 the agent's name) and lists these keys, like the one on top of the inbox. A plan's
-`<c-c><c-c>` and `<c-c><c-w>` plan it (see Plan); a btw has only `<c-c><c-c>`. While
+`<c-c><c-c>` and `<c-c><c-w>` plan it (see Plan); a btw or guide has only `<c-c><c-c>`. While
 `task_sharpen` works, a spinner shows there; if you edit the task meanwhile, its answer is dropped
 rather than overwriting your text.
 
@@ -465,7 +473,7 @@ inbox live, where the context bar reads from, and the worktree trust prompt.
 ## Lua
 
 `require("sepal")`: `.pick(range)` is `:Sepal task`; `.task(range, lines, kind, agent)` opens a draft
-without the picker (`kind`: `"implement"`, `"btw"` or `"orchestrate"`); `.inbox()`, `.panel()`,
+without the picker (`kind`: `"implement"`, `"btw"`, `"guide"` or `"orchestrate"`); `.inbox()`, `.panel()`,
 `.land()`, `.undo()`, `.open()`, `.stop()`, `.clean()` are the commands; `.status()` is the
 statusline; `.draft()` is the open task draft's buffer (nil when none).
 

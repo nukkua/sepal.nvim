@@ -60,7 +60,7 @@ local function model(e)
   return m and { "--model", m } or {}
 end
 -- a btw (a question) and an orchestrate (a plan) read your repo itself and change nothing
-local function readonly(kind) return kind == "btw" or kind == "orchestrate" end
+local function readonly(kind) return kind == "btw" or kind == "guide" or kind == "orchestrate" end
 -- reading your repo itself: Claude Code's plan mode, so it can't change a file
 local function mode(e) return readonly(e.kind) and "plan" or nil end
 -- Devin's args with its mode: dangerous (approves every tool), but auto (read-only tools) for a btw or
@@ -149,6 +149,47 @@ function M.parse(text)
   return f["Done when"], first(f.Goal or text, 40) or "task"
 end
 
+-- a guide's notes: the guideme skill, so the human writes the code from its answer
+local GUIDE = [[
+
+---
+How to answer this (from sepal, not part of the request): produce an implementation guide, not an
+implementation. The human writes the code; you draw the map and explain the terrain, as a well-written
+onboarding ticket for a senior engineer new to this codebase, not a tutorial.
+
+Hard rules:
+- Don't create, edit or write code, config or tests: investigate and explain only.
+- Read the actual code first. Never guess at file names, signatures or call sites: locate them.
+- The reader is a senior engineer: explain architecture, intent, trade-offs and non-obvious coupling,
+  never language syntax, the standard library or general programming concepts.
+- Point to specific anchors: file path + function/block (and line range if stable).
+- When something is genuinely ambiguous, surface it as a decision for the human; don't silently pick.
+
+Workflow:
+1. Restate the request in 1-2 sentences, what's in and out of scope. Too vague to scope: ask up to 3 sharp questions and stop.
+2. Map only the slice it touches: entry points, modules/functions, data flow, the conventions to mirror.
+3. Trace the change from its entry point to every place it ripples: callers, shared state, persistence,
+   public contracts, tests that will break; note the hidden coupling.
+4. Write the guide in the template below; 5. its verification; 6. its open decisions.
+
+Answer in exactly this form (markdown):
+# Guide: <short title of the change>
+## TL;DR
+<one sentence: what changes and why; one: the core approach>
+## Mental model
+<the minimum about how this part works today: the flow, the convention to follow, the constraint that matters>
+## Change plan
+### Step N — <imperative summary>
+- **Where:** `path/to/file` → `function` (lines ~A–B)
+- **What:** change behavior from **X** to **Y**
+- **Why:** what it enables or prevents, the trade-off chosen
+- **Watch out:** non-obvious coupling, edge case, what silently breaks
+(steps ordered so the code stays coherent; name the load-bearing step vs the mechanical follow-ons)
+## Verification
+- <tests to run or add, manual checks, what done looks like>
+## Open decisions
+- **<decision>:** <options> — *Recommended: X, because <reason>.*]]
+
 -- what sepal tells the agent besides the task; again: its chat already has them (a reply, a resume)
 local function notes(e, again)
   if again then return "\n---\n(from sepal: same rules as before, and end the same way)" end
@@ -156,6 +197,7 @@ local function notes(e, again)
     return table.concat({ "", "---", "How to answer this (from sepal, not part of the question):",
       "- A question, not a change: answer from the code as it is now. Read what you need; don't edit files or ask to." }, "\n")
   end
+  if e.kind == "guide" then return GUIDE end
   if e.kind == "orchestrate" then
     local models = sepal().plan_models()
     return table.concat({ "", "---", "How to plan this (from sepal, not part of the task):",
@@ -857,12 +899,12 @@ end
 -- a new entry for text in root's inbox (see M.start for the rest)
 local function entry(text, root, land, kind, agent)
   local check, title = M.parse(text)
-  local btw = kind == "btw"
+  local btw = kind == "btw" or kind == "guide"
   -- a question has nothing to check (nor the check option); a plan's is its tasks'
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
     task = text, check = not btw and (check or C().check) or nil, time = os.time(),
     status = not readonly(kind) and full() and "queued" or "running",
-    attempts = 0, land = land, kind = (btw or kind == "orchestrate") and kind or nil }
+    attempts = 0, land = land, kind = readonly(kind) and kind or nil }
   while inbox.find(root, e.id) do e.id = e.id:sub(1, -5) .. ("%04x"):format((tonumber(e.id:sub(-4), 16) + 1) % 0x10000) end -- several at once
   agent = agent or (C().agents or {})[1]
   if agent then e.agent = { cmd = agent.cmd, model = agent.model, args = agent.args } end -- kept with the task: r and c use it again

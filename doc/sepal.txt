@@ -22,7 +22,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
    vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>")
 <
 2. Select the code you mean (or don't) and press <leader>as. Pick `p`
-   plan (a bigger job, as tasks), `f` feat or `b` btw (a question), then fill in
+   plan (a bigger job, as tasks), `f` feat, `b` btw (a question) or `g` guide, then fill in
    the task. "Done when:" is a shell command to check, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
 4. "✔ landed: …" means it passed the check and is in your files, unstaged.
@@ -96,7 +96,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 `models`     each task kind's model, passed as `--model` (over one in `args`):
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
-             the other's default. `orchestrate`: a plan's planner model (unset:
+             the other's default. `guide`: a guide's (unset: the
+             agent's default). `orchestrate`: a plan's planner model (unset:
              Claude Code's default). `verify`: the model `v` verifies a
              swarmed plan's tasks on (unset: the planner's).
                                                              *sepal-agents*
@@ -174,7 +175,10 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   no wait for a |sepal-max_running| slot.
                   Nothing a btw does lands: <c-c><c-c> asks, the answer's
                   start is a notification, <CR> in the inbox shows all of
-                  it, r asks a follow-up. `p` plan: the same
+                  it, r asks a follow-up. `g` guide: a btw that answers
+                  with an implementation guide (steps with where, what,
+                  why, watch out; verification; open decisions) for you
+                  to write the code from. `p` plan: the same
                   template as a feat, but the agent (read-only, like a
                   btw, on the `orchestrate` model) plans the job as tasks:
                   how many, what each does, its check, and the model for
@@ -316,7 +320,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   landing), each with its entries as "lnum: text" lines.
                   It opens the inbox; `s` swarms it, `m` sets the models.
 
-Lua: `require("sepal").task(range, lines, kind)` (kind "implement", "btw" or "orchestrate", no
+Lua: `require("sepal").task(range, lines, kind)` (kind "implement", "btw", "guide" or "orchestrate", no
 picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
 `.panel()`, `.stop()`, `.clean()`.
 

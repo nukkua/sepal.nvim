@@ -17,7 +17,7 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, orchestrate (the planner), verify (v on a swarmed plan; nil: the planner's)
+  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, guide, orchestrate (the planner), verify (v on a swarmed plan; nil: the planner's)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   panel_width = 46,    -- :Sepal panel's width: columns (46), a share of the editor's ("30%" or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
@@ -396,6 +396,7 @@ local function template(check)
 end
 local IDEA = { "", "", "Files:" } -- a plan with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
 local HINT = { btw = "ask anything about the project; it answers, nothing changes",
+  guide = "a bug, feature or change; it writes you a step-by-step guide, you write the code",
   orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
 -- <c-c><c-s> on a feat: this goes to task_sharpen above the task's filled-in fields (M.tidy's)
@@ -506,6 +507,7 @@ local function keys(buf, text_only)
   end
   local kind = vim.b[buf].sepal_kind
   local help = kind == "btw" and { "btw", "<c-c><c-c> ask" }
+    or kind == "guide" and { "guide", "<c-c><c-c> guide me" }
     or kind == "orchestrate" and { "plan", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
     or { "<c-c><c-c> send", "<c-c><c-w> wait", C.task_sharpen and "<c-c><c-s> sharpen" or nil }
   vim.list_extend(help, { "<c-c><c-o> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
@@ -567,8 +569,8 @@ local function busy(buf, label)
 end
 
 -- the kinds :Sepal task picks from; the shown names (the kinds stay: saved inboxes, models keys)
-local KINDS = { f = "implement", b = "btw", p = "orchestrate" }
-local LABEL = { implement = "feat", btw = "btw", orchestrate = "plan" }
+local KINDS = { f = "implement", b = "btw", p = "orchestrate", g = "guide" }
+local LABEL = { implement = "feat", btw = "btw", orchestrate = "plan", guide = "guide" }
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
@@ -589,7 +591,7 @@ function M.task(range, lines, kind, agent)
       if vim.deep_equal(x.cmd, agent.cmd) and x.model == agent.model then agent = vim.deepcopy(x) break end
     end
   end
-  local btw = kind == "btw"
+  local btw = kind == "btw" or kind == "guide" -- a guide is a btw that answers with an implementation guide
   local block, path
   if range then block, path = selection(range[1], range[2]) end
   local b = M.draft()
@@ -721,7 +723,7 @@ function M.task(range, lines, kind, agent)
     if job then pcall(job.kill, job, 15) end -- sent or discarded before it answered: don't leave it running
   end })
   vim.keymap.set({ "n", "i" }, "<c-c><c-s>", function()
-    if btw then return M.notify("a btw is sent as you wrote it: <c-c><c-c> asks") end
+    if btw then return M.notify("a " .. LABEL[kind] .. " is sent as you wrote it: <c-c><c-c> asks") end
     if not C.task_sharpen then return M.notify("set task_sharpen to have <c-c><c-s> write the task, see :h sepal-task_sharpen", vim.log.levels.WARN) end
     if job then return M.notify("still writing the task") end
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
@@ -897,6 +899,7 @@ function M.pick_model(title, cur, set)
   for _, m in ipairs(M.plan_models()) do add(m) end
   add(C.models.implement)
   add(C.models.btw)
+  add(C.models.guide)
   add(C.models.orchestrate)
   add(C.models.verify)
   add(cur)
@@ -940,7 +943,7 @@ function M.pick(range)
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local items = {}
-  for _, k in ipairs({ "p", "f", "b" }) do
+  for _, k in ipairs({ "p", "f", "b", "g" }) do
     local item = { key = k, label = LABEL[KINDS[k]] }
     if #agents < 2 then
       local l, m, name = who(KINDS[k])

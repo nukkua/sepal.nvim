@@ -1849,6 +1849,22 @@ test("c starts over a task that never got its agent going; x keeps what the agen
   eq({ e.status, e.stat and e.stat.list }, { "stopped", { "d.txt +1 −0" } })
 end)
 
+test(":Sepal task g: a guide runs read-only in your repo and answers with a guide, no check", function()
+  clean(); reset()
+  key("g")
+  sepal.pick()
+  local b = task_buf()
+  eq(vim.b[b].sepal_kind, "guide")
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "add a new task kind" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
+  idle()
+  local e = newest()
+  eq({ e.kind, e.status, e.check }, { "guide", "answered", nil })
+  eq(args()[1], "--permission-mode plan --disallowedTools ExitPlanMode")
+  eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work)
+  assert(prompts():find("an implementation guide, not an", 1, true), prompts())
+end)
+
 test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its model; f implements", function()
   clean(); reset()
   sepal.setup({ max_running = 1 })
@@ -2141,8 +2157,8 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   sepal.pick()
   local btw = draft()
   eq(#shots, 1)
-  eq(shots[1].lines, { "  p  plan  ✻ claude", "  f  feat  ✻ opus 5.5",
-    "  b  btw" .. (" "):rep(3) .. "✻ sonnet" })
+  eq(shots[1].lines, { "  p  plan   ✻ claude", "  f  feat   ✻ opus 5.5",
+    "  b  btw    ✻ sonnet", "  g  guide  ✻ claude" })
   eq({ shots[1].title, shots[1].config.relative }, { "sepal", "" })
   eq(shots[1].wrap, false)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "p"), true)
@@ -2161,7 +2177,7 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   local gpt = draft()
   sepal.setup({ models = {}, agents = nil })
   eq(#shots, 2)
-  eq(shots[1].lines, { "  p  plan", "  f  feat", "  b  btw" })
+  eq(shots[1].lines, { "  p  plan", "  f  feat", "  b  btw", "  g  guide" })
   eq(shots[2].lines, { "  1  ✻ claude", "  2  ❖ fusion review  opus 5.5 medium + swe 2 high",
     "  t  ֎ devin" .. (" "):rep(10) .. "gpt 5", "  4  ❖ devin", "  5  ✻ opus" })
   eq(shots[2].title, "sepal · feat")

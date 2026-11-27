@@ -1795,7 +1795,7 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   sepal.setup({ max_running = 2 })
   assert(prompts():find("not a change", 1, true), prompts())
   agent.show(e)
-  eq({ vim.bo.filetype, vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] }, { "markdown", "Did it." })
+  eq({ vim.bo.filetype, vim.api.nvim_buf_get_lines(0, 0, 1, false)[1], vim.wo.wrap }, { "markdown", "Did it.", true })
   vim.cmd("tabclose")
   -- yyp + :w: the answer becomes the context of an implement draft; copying a task too opens its
   -- draft once that one is discarded

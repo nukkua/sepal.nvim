@@ -1238,7 +1238,9 @@ function M.show(e)
   if not btw and not e.result then return notify("no changes yet") end
   if btw then
     vim.cmd.tabnew()
-    return vim.api.nvim_win_set_buf(0, scratch(vim.split(e.answer, "\n"), nil, "markdown"))
+    vim.api.nvim_win_set_buf(0, scratch(vim.split(e.answer, "\n"), nil, "markdown"))
+    vim.wo.wrap, vim.wo.linebreak = true, true -- not the inbox's nowrap (a tab copies it)
+    return
   end
   local a, z = e.base0 or e.base, e.result
   -- the two diffs run concurrently; once the file list is in, one cat-file starts for every

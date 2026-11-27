@@ -1916,10 +1916,10 @@ test("l (large feat) orchestrates: the agent plans the tasks and their models; e
   local shots = picker_shots({ "q" })
   vim.cmd("normal m")
   eq(#shots, 1)
-  eq(shots[1].lines, { "  1  ✻ lead     opus  ●", "  2  ✻ review   sonnet", "  3  ✻ haiku", "", "  d    default", "  o    other…" })
+  eq(shots[1].lines, { "  2  ✻ lead     opus  ●", "  3  ✻ review   sonnet", "  4  ✻ claude   haiku", "", "  d    default", "  o    other…" })
   eq({ shots[1].title, shots[1].config.relative }, { "sepal · task 1 model", "" })
   eq(shots[1].wrap, false)
-  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "1"), true)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "2"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalDim"), "opus"), true)
   eq(#marked_texts(shots[1], 3), 0) -- the separator has no highlights
   picker_closed(shots[1])
@@ -1931,7 +1931,7 @@ test("l (large feat) orchestrates: the agent plans the tasks and their models; e
   eq(vim.api.nvim_buf_get_lines(b, 3, 4, false), { "    1. [default] Shout two" })
   shots = picker_shots({ "q" })
   vim.cmd("normal m")
-  eq(shots[1].lines[1], "  1  ✻ lead     opus")
+  eq(shots[1].lines[1], "  2  ✻ lead     opus")
   eq(shots[1].lines[5], "  d    default  ●")
   picker_closed(shots[1])
   -- s: one task per item, each with its model, one snapshot of your work tree for all of them
@@ -2014,6 +2014,26 @@ test("m on a queued task sets the model it starts on", function()
   idle()
   eq(args()[2], "--permission-mode acceptEdits --model sonnet")
   sepal.setup({ max_running = slots })
+end)
+
+test("m: an agent with key = o moves other… to / and o picks that agent", function()
+  clean(); reset()
+  sepal.setup({ models = {}, agents = { { cmd = "claude", model = "opus", name = "lead", key = "o" } } })
+  sepal.task()
+  local shots = picker_shots({ "/" })
+  local input = vim.ui.input
+  vim.ui.input = function(_, cb) cb("haiku") end
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-o>"), "tx", false)
+  vim.ui.input = input
+  eq(shots[1].lines, { "  o  ✻ lead     opus  ●", "  2  ✻ sonnet", "", "  d    default", "  /    other…" })
+  local m = vim.api.nvim_buf_get_extmarks(task_buf(), -1, 0, 0, { details = true, type = "virt_lines" })[1]
+  eq(m[4].virt_lines[1][2][1], " haiku")
+  picker_shots({ "o" })
+  vim.api.nvim_feedkeys(vim.keycode("<c-c><c-o>"), "tx", false)
+  m = vim.api.nvim_buf_get_extmarks(task_buf(), -1, 0, 0, { details = true, type = "virt_lines" })[1]
+  eq(m[4].virt_lines[1][2][1], " opus")
+  vim.api.nvim_buf_delete(task_buf(), { force = true })
+  sepal.setup({ agents = false })
 end)
 
 test(":Sepal task shows who works on it: each kind's or agent's provider logo and model, then the draft's", function()

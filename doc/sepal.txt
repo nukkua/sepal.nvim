@@ -198,8 +198,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                 it (its filled-in fields, deeper not bigger);
                                 large feat: write it
                     <c-c><c-o>  pick the model it runs on (your agents'
-                                models, the models option's, default or one
-                                you type; an agents' model runs on that agent)
+                                models by each agent's key, as in :Sepal
+                                task, or its number; the models option's;
+                                d default or o one you type, which move to
+                                - and / when an agent uses those keys; an
+                                agents' model runs on that agent)
                     <c-c><c-f>  add a file under Files: as @path
                     <c-c><c-p>  paste the clipboard's image (wl-paste,
                                 xclip or pngpaste); the agent may read it
@@ -236,9 +239,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     m     on a planned orchestrate, the model of the plan
                           item under the cursor (on the orchestrate's own
                           line: of every item), from your |sepal-agents|'
-                          models, the models option's, "default" or one you
-                          type; an item with an agent's model runs on that
-                          agent. Or edit the `[model]` in the line and :w;
+                          models (each agent's key, as in :Sepal task, or its
+                          number), the models option's, "default" (d) or one
+                          you type (o; they move to - and / when an agent uses
+                          those keys); an item with an agent's model runs on
+                          that agent. Or edit the `[model]` in the line and :w;
                           dd an item (or move it) and :w drops (or reorders)
                           it. On any other task, the model of its next run:
                           a queued one starts on it, r and c use it

@@ -854,28 +854,39 @@ function M.pick_model(title, cur, set)
   add(C.models.orchestrate)
   add(cur)
   local panel, by, items = require("sepal.panel"), {}, {}
-  for n, m in ipairs(choices) do
-    local k = tostring(n)
-    by[k] = m
-    local l, hl = panel.logo(m)
-    local short, name = panel.model(m), nil
-    for _, a in ipairs(C.agents or {}) do
-      if a.model == m and a.name then name = a.name break end
+  local agents, used, n = C.agents or {}, {}, #(C.agents or {})
+  for i, a in ipairs(agents) do used[a.key or tostring(i)] = true end
+  for _, m in ipairs(choices) do
+    local k, ai
+    for i, a in ipairs(agents) do
+      if a.model == m then k, ai = a.key or tostring(i), a break end
     end
-    items[#items + 1] = { key = k, icon = { l, hl }, label = name or short,
-      detail = name and short ~= name and short or nil, current = m == cur }
+    local item = { current = m == cur }
+    if ai then
+      local l, short, name = who(nil, ai)
+      item.icon, item.label, item.detail = l, name, short ~= name and short or nil
+    else
+      repeat n = n + 1 until not used[tostring(n)]
+      k = tostring(n)
+      local l, hl = panel.logo(m)
+      item.icon, item.label = { l, hl }, panel.model(m)
+    end
+    item.key = k
+    by[k] = by[k] or m
+    items[#items + 1] = item
   end
   if #items > 0 then items[#items + 1] = { sep = true } end
-  items[#items + 1] = { key = "d", label = "default", label_hl = "SepalDim", current = cur == nil }
-  items[#items + 1] = { key = "o", label = "other…", label_hl = "SepalDim" }
+  local dk, ok = used.d and "-" or "d", used.o and "/" or "o"
+  items[#items + 1] = { key = dk, label = "default", label_hl = "SepalDim", current = cur == nil }
+  items[#items + 1] = { key = ok, label = "other…", label_hl = "SepalDim" }
   local c = M.choose(items, { title = title })
-  if c == "d" then return set(nil) end
-  if c == "o" then
+  if by[c] then return set(by[c]) end
+  if c == dk then return set(nil) end
+  if c == ok then
     return vim.ui.input({ prompt = "model: " }, function(s)
       if s then set(require("sepal.agent").model_of(s)) end
     end)
   end
-  if by[c] then set(by[c]) end
 end
 function M.pick(range)
   if M.draft() then return M.task(range) end

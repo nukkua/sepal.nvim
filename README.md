@@ -158,8 +158,8 @@ one, picked from your `agents`' models. The plan waits in the inbox, unfolded:
     2. [haiku] Document the retry option
 ```
 
-- `m` on an item changes its model: one of your `agents`' models (`1`…`9`, the task then runs on that
-  agent), one of the `models` option's, `d` default (the plan's agent's own) or `o` one you type. `m`
+- `m` on an item changes its model: one of your `agents`' models (each agent's key, as in `:Sepal task`, or its number; the task then runs on that
+  agent), one of the `models` option's (numbered after the agents), `d` default (the plan's agent's own) or `o` one you type (`d` and `o` move to `-` and `/` when an agent uses those keys). `m`
   on the plan's own line changes all of them. You can also edit the `[model]` in the line and `:w`.
   `dd` an item (or move it) and `:w` drops (or reorders) it. On any other task `m` picks the model of
   its next run: a queued one starts on it, `r` and `c` use it.
@@ -301,7 +301,7 @@ it does not rerun the check. Dropping a task removes its refs, chat and pasted i
 | `<c-c><c-c>` | send the task and close the buffer; it lands by itself once it passes  |
 | `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
 | `<c-c><c-s>` | short feat: have `task_sharpen` sharpen it (deeper, not bigger); large feat: write it (`u` undoes) |
-| `<c-c><c-o>` | pick the model it runs on (your agents' models, the models option's, default or one you type; an agents' model runs on that agent) |
+| `<c-c><c-o>` | pick the model it runs on (your agents' models by each agent's key, as in `:Sepal task`, or its number; the models option's; default `d` or one you type `o`, which move to `-` and `/` when an agent uses those keys; an agents' model runs on that agent) |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |
 | `<c-c><c-k>` | discard the task                                                       |

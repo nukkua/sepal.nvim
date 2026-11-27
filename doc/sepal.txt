@@ -237,7 +237,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     c     continue a task cut short (Neovim quit, x, Esc,
                           a crash): what it did so far is kept and the
                           agent goes on in its chat; one that never started
-                          starts over
+                          starts over. One cut short in sepal's check: only
+                          the check runs again (after `prepare`, with a fresh
+                          `retries` budget), on the result the agent finished
                     o     watch it (running) or open its chat (done)
                     x     stop it
                     s     swarm a planned orchestrate: one task per item of
@@ -337,7 +339,8 @@ merge-file), unstaged. With land = "auto" it only lands when that's clean: no
 overlap with your edits and no unsaved buffer of a file it touches; otherwise
 the task waits as "needs you". Results are kept as refs/sepal/<id>/* until
 the task is dropped. Running, checking and queued tasks show as "interrupted"
-after Neovim quits; `c` continues from what was in the worktree. If the initial
+after Neovim quits; `c` continues from what was in the worktree (a task cut
+short in its check reruns only the check). If the initial
 snapshot never finished, send the task again. Dropping removes the task's refs,
 chat and pasted images, not its landed edits.
 

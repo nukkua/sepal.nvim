@@ -119,7 +119,9 @@ subagents`).
 - `r` replies to a task ("the timeout is 200ms on CI"). The agent continues from where it was, in the
   same chat, and the task is checked and lands again.
 - `c` continues a task that was cut short (Neovim quit, `x`, Esc, the agent crashed): what it had done
-  is kept and the agent picks up in the same chat; one whose agent never started starts over.
+  is kept and the agent picks up in the same chat; one whose agent never started starts over. One cut
+  short while sepal ran its check only has the check run again, on what the agent had finished (with
+  `prepare` and a fresh `retries` budget), and the agent isn't sent anything unless it fails.
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
 - `x` stops a running or queued task (what it did so far is kept), or closes its chat.
 - `m` picks the model of the task's next run: a queued one starts on it, `r` and `c` use it. On a
@@ -282,7 +284,8 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 5. The worktree is removed and the result stays as a commit (`refs/sepal/<id>/*`) until you drop
    the task. The inbox is saved per repo, so it survives a restart. A task that was running when
    Neovim quit (including queued or checking tasks) shows as "interrupted", and `c` continues it
-   with what it had done so far. If its initial snapshot never finished, send it again.
+   with what it had done so far (one cut short in its check reruns just the check). If its initial
+   snapshot never finished, send it again.
 
 Tasks move through `queued`, `running`, `checking`, then `ready` (manual landing) or `landed`.
 No diff gives `no changes`; exhausted checks give `check failed`; agent/setup errors give `failed`;

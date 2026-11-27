@@ -351,18 +351,20 @@ local function done(e, wt)
 end
 
 -- sepal runs the check itself; on a failure the agent gets the output and `retries` more tries
+-- e.in_check (saved): cut short in it, c reruns it on e.result (see M.resume)
 local function check(e, wt)
-  e.status = "checking"
+  e.status, e.in_check = "checking", true
   inbox.changed(e)
   jobs[e.id].update(e.title .. ": " .. e.check)
   local ok, job = pcall(vim.system, { "sh", "-c", e.check }, { cwd = wt, text = true }, vim.schedule_wrap(function(out)
     if not jobs[e.id] or jobs[e.id].stopped then return finish(e, wt, "stopped") end
+    e.in_check = nil
     e.checked = out.code == 0
     if e.checked then e.check_out = nil; return done(e, wt) end
     e.check_out = tail((out.stdout or "") .. "\n" .. (out.stderr or ""), 40)
     if (e.attempts or 0) >= (C().retries or 0) then return finish(e, wt, "failed") end
     e.attempts = (e.attempts or 0) + 1
-    e.status = "running"
+    e.status, e.activity = "running", nil -- saved now (a running one with activity isn't): a quit reads in_check = nil
     inbox.changed(e)
     agent(e, ("`%s` failed (exit %d):\n```\n%s\n```\nFix it so it passes; same rules as before, and end the same way.")
       :format(e.check, out.code, e.check_out), wt)
@@ -807,12 +809,13 @@ local function launch(e, prompt, from)
   jobs[e.id].job = job
 end
 
--- C.prepare in the new worktree (if set), then the agent
+-- C.prepare in the new worktree (if set), then the agent on prompt (nil: only the check, see M.resume)
 function M._prepare(e, prompt, wt)
   local update = jobs[e.id].update
   local prepare = C().prepare
+  local function go() if prompt then return agent(e, prompt, wt) end check(e, wt) end
   e.exclude = nil -- on e, not the job: c salvages a worktree left by a quit after a restart
-  if not prepare then return agent(e, prompt, wt) end
+  if not prepare then return go() end
   update(e.title .. ": preparing")
   local pok, job = pcall(vim.system, { "sh", "-c", prepare }, { cwd = wt, text = true, env = { SEPAL_ROOT = e.root } }, vim.schedule_wrap(function(out)
     local j = jobs[e.id]
@@ -826,7 +829,7 @@ function M._prepare(e, prompt, wt)
       if not j or j.stopped then return finish(e, wt, "stopped") end
       e.exclude = {}
       for entry in st:gmatch("[^%z]+") do e.exclude[#e.exclude + 1] = entry:sub(4) end
-      agent(e, prompt, wt)
+      go()
     end)
   end))
   if not pok then return finish(e, wt, "error", { error = "could not run prepare: " .. tostring(job):match("[^\n]*") }) end
@@ -977,22 +980,26 @@ function M.swarm(e)
 end
 
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
+-- (text nil: no agent, only the check again on its result)
 function M.continue(e, text)
   if M.running(e) then return notify("it's still running") end
   endchat(e) -- the agent goes on with the same chat
-  e.attempts, e.checked, e.why, e.error, e.check_out = 0
+  e.attempts, e.checked, e.why, e.error, e.check_out, e.in_check = 0
   e.time = os.time()
-  launch(e, text .. "\n" .. notes(e, e.session), e.result or e.base)
+  launch(e, text and text .. "\n" .. notes(e, e.session), e.result or e.base)
 end
 
 -- c: an agent cut short (nvim quit, x, Esc, it crashed) goes on where it was. A quit leaves its
--- worktree behind: what's in it is saved as the result first. One that never started starts over
+-- worktree behind: what's in it is saved as the result first. One that never started starts over.
+-- One cut short in sepal's own check (its agent's turn was over) only has its check run again, on
+-- a fresh worktree of its result, with a fresh `retries` budget
 function M.resume(e)
   if M.running(e) then return notify("it's still running") end
   if not vim.tbl_contains({ "interrupted", "stopped", "error" }, e.status) then
     return notify("it wasn't cut short: r replies to it")
   end
   if not e.base and not readonly(e.kind) then return notify("it never started (your work tree wasn't saved): send it again") end
+  if e.in_check and not readonly(e.kind) then return M.continue(e) end -- no text: the check, no agent
   local function go()
     M.continue(e, e.session and "You were interrupted. Carry on from where you left off." or e.task)
   end

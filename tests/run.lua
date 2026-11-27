@@ -1712,6 +1712,71 @@ test("c continues a task nvim quit on: what its worktree had is kept, the agent 
   eq(msgs(notified(function() agent.resume(e) end)), { "it wasn't cut short: r replies to it" })
 end)
 
+-- a task whose check sleeps: it passes only with prepare's file there, and logs the commit it ran on
+local function slow_check(fixed)
+  vim.env.SEPAL_EDIT = [[printf 'new\n' > c.txt]]
+  sepal.config().prepare = "touch made"
+  local chk = [[sleep 1; test -f made && git rev-parse HEAD > "$SEPAL_T/head"]] .. (fixed and " && test -f fixed" or "")
+  notified(function() send({ "Goal: slow check", "", "Done when: " .. chk }, "<c-c><c-w>") end)
+  local e = newest()
+  assert(vim.wait(5000, function() return e.status == "checking" end, 10), "never checked")
+  return e
+end
+local function checked_again(e)
+  reset()
+  os.remove(T .. "/head")
+  notified(function() agent.resume(e); idle() end)
+  sepal.config().prepare = nil
+  eq(read(T .. "/prompts"), nil, "the agent was launched again")
+  eq({ e.status, vim.trim(read(T .. "/head") or "") }, { "ready", e.result })
+end
+
+test("c on a task nvim quit on while sepal checked it: the check runs again, not the agent", function()
+  clean(); reset()
+  local old = slow_check()
+  inbox._t.reset() -- as if nvim quit now: read back what's on disk
+  local e = newest()
+  eq({ e.status, e.in_check }, { "interrupted", true })
+  agent.stop(old); idle() -- the old run's check, gone with the quit
+  checked_again(e)
+end)
+
+test("c on a task x stopped while sepal checked it: the check runs again; x in that check still stops", function()
+  clean(); reset()
+  local e = slow_check()
+  notified(function() agent.stop(e); idle() end)
+  eq({ e.status, e.in_check }, { "stopped", true })
+  reset()
+  sepal.config().prepare = "touch made"
+  notified(function()
+    agent.resume(e)
+    assert(vim.wait(5000, function() return e.status == "checking" end, 10), "never checked again")
+    agent.stop(e); idle()
+  end)
+  eq({ e.status, agent._t.jobs[e.id] }, { "stopped", nil })
+  checked_again(e)
+end)
+
+test("only a cut in sepal's check counts as one: a retry's agent doesn't, a retry's check does", function()
+  clean(); reset()
+  local e = slow_check(true) -- fails until the retry's agent makes `fixed`
+  vim.env.SEPAL_FIX, vim.env.SEPAL_SLEEP = "touch fixed", "0.5"
+  local function saved() -- what a quit now would read back
+    local f = assert(io.open(vim.fs.joinpath(T, "state", inbox.key(work) .. ".json")))
+    local l = vim.json.decode(f:read("a"), { luanil = { object = true } })
+    f:close()
+    local x = vim.iter(l):find(function(x) return x.id == e.id end)
+    return { x.status, x.in_check }
+  end
+  eq(saved(), { "checking", true })
+  assert(vim.wait(5000, function() return e.attempts == 1 and e.status == "running" end, 10), "never retried")
+  eq(saved(), { "running", nil }) -- c relaunches its agent
+  assert(vim.wait(5000, function() return e.status == "checking" end, 10), "the retry never checked")
+  eq(saved(), { "checking", true })
+  notified(function() vim.cmd("Sepal stop"); idle() end)
+  sepal.config().prepare = nil
+end)
+
 test("c preserves unfinished work from a legacy storage directory", function()
   clean(); reset()
   run({ "Goal: legacy worktree" }, "<c-c><c-w>")

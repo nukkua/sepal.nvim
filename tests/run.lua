@@ -17,6 +17,7 @@ local function sh(cmd) return vim.system({ "sh", "-c", cmd }, { cwd = work, text
 sh("git init -q && printf 'one\\ntwo\\nthree\\n' > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm init")
 vim.env.SEPAL_T = T
 vim.env.CLAUDE_CONFIG_DIR = vim.fs.joinpath(T, "claude") -- drop deletes chats from there
+vim.env.XDG_CONFIG_HOME = vim.fs.joinpath(T, "config") -- Devin's skills are looked up there
 
 -- replay FILE, shared by the fakes: the fixture's lines to $SEPAL_EVENTS, /tmp/sepal-rec/<dir>
 -- rewritten to the run's $PWD and transcript_path to the fake's transcript; after a line number in
@@ -264,6 +265,24 @@ test("/name in a task sends the skill along: from a SKILL.md path (no frontmatte
   local p = prompts()
   assert(p:find("Skill /how:\n# How\nExplore it.", 1, true), p)
   assert(not p:find("name: how", 1, true) and not p:find("Ask why.", 1, true), p)
+end)
+
+test("/name finds Claude Code's and Devin's user skills by name; the skills option wins", function()
+  reset()
+  local function put(dir, text)
+    vim.fn.mkdir(dir, "p")
+    local f = assert(io.open(vim.fs.joinpath(dir, "SKILL.md"), "w")); f:write(text); f:close()
+  end
+  put(vim.fs.joinpath(T, "config", "devin", "skills", "reframe"), "---\nname: reframe\n---\nReframe it.\n")
+  put(vim.fs.joinpath(T, "claude", "skills", "tidy"), "Tidy up.\n")
+  sepal.setup({ skills = { tidy = "Tidy mine." } })
+  local p = sepal.skills("Goal: /reframe and /tidy")
+  local words = vim.tbl_map(function(i) return i.word end, sepal.complete_skills(0, "/"))
+  sepal.setup({ skills = {} })
+  vim.fn.delete(vim.fs.joinpath(T, "config", "devin"), "rf")
+  vim.fn.delete(vim.fs.joinpath(T, "claude", "skills"), "rf")
+  assert(p:find("Skill /reframe:\nReframe it.", 1, true) and p:find("Skill /tidy:\nTidy mine.", 1, true), p)
+  assert(vim.deep_equal(words, { "/reframe", "/tidy" }), vim.inspect(words))
 end)
 
 test("/ in a task completes the skills' names", function()

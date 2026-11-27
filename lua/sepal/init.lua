@@ -23,7 +23,7 @@ local C = {
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
-  skills = {},         -- name -> a SKILL.md path or its text; /name in a task sends the skill along: { how = "~/.claude/skills/how/SKILL.md" }
+  skills = {},         -- name -> a SKILL.md path or its text, over ~/.claude/skills and ~/.config/devin/skills; /name in a task sends the skill along: { how = "~/.claude/skills/how/SKILL.md" }
 }
 local MODELS = { btw = "sonnet" } -- a question needs no top-tier model
 C.models = vim.tbl_extend("force", {}, MODELS)
@@ -340,11 +340,24 @@ function M.find_check(cwd)
   if s and s:match("%[tool%.pytest") then return "pytest", "pyproject.toml" end
 end
 
+-- name -> SKILL.md path or text: Claude Code's and Devin's user skills, then the skills option over them
+local function all_skills()
+  local out = {}
+  local claude = vim.env.CLAUDE_CONFIG_DIR or vim.fn.expand("~/.claude")
+  local devin = vim.fs.joinpath(vim.env.XDG_CONFIG_HOME or vim.fn.expand("~/.config"), "devin")
+  for _, dir in ipairs({ devin, claude }) do
+    for _, p in ipairs(vim.fn.glob(vim.fs.joinpath(dir, "skills", "*", "SKILL.md"), true, true)) do
+      out[vim.fs.basename(vim.fs.dirname(p))] = p
+    end
+  end
+  return vim.tbl_extend("force", out, C.skills or {})
+end
+
 -- the task with each skill it names as /name (the skills option) appended, frontmatter dropped, once each
 function M.skills(text)
-  local out, seen = text, {}
+  local out, seen, all = text, {}, all_skills()
   for name in (" " .. text):gmatch("%s/([%w_%-]+)") do
-    local s = (C.skills or {})[name]
+    local s = all[name]
     if type(s) == "string" and not seen[name] then
       seen[name] = true
       s = readf(vim.fn.expand(s)) or s
@@ -362,7 +375,7 @@ function M.complete_skills(findstart, base)
     return s and s - 2 or -3
   end
   local out = {}
-  for name, s in pairs(C.skills or {}) do
+  for name, s in pairs(all_skills()) do
     if ("/" .. name):find(base, 1, true) == 1 then
       local info = type(s) == "string" and s:match("^[^\n]*") or nil
       out[#out + 1] = { word = "/" .. name, menu = "skill", info = info }
@@ -590,7 +603,7 @@ function M.task(range, lines, kind, agent)
   if not package.loaded["blink.cmp"] then -- blink shows sepal.blink's items itself
     vim.api.nvim_create_autocmd("InsertCharPre", { buffer = buf, callback = function()
       local before = vim.api.nvim_get_current_line():sub(1, vim.fn.col(".") - 1)
-      if vim.v.char == "/" and next(C.skills or {}) and vim.fn.pumvisible() == 0 and (before == "" or before:match("%s$")) then
+      if vim.v.char == "/" and next(all_skills()) and vim.fn.pumvisible() == 0 and (before == "" or before:match("%s$")) then
         vim.schedule(function() vim.api.nvim_feedkeys(vim.keycode("<c-x><c-o>"), "n", false) end)
       end
     end })

@@ -196,7 +196,7 @@ require("sepal").setup({
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
-  skills = {},         -- name -> SKILL.md path or text; /name in a task sends it along: { how = "~/.claude/skills/how/SKILL.md" }
+  skills = {},         -- name -> SKILL.md path or text, over ~/.claude/skills and ~/.config/devin/skills; /name in a task sends it along: { how = "~/.claude/skills/how/SKILL.md" }
 })
 ```
 
@@ -321,7 +321,9 @@ deleted with the task; images of discarded drafts go after a day.
 
 `skills` names skills a task can ask for: `/name` as a word in the task appends that skill to what
 the agent gets (`Skill /name:` and its text, the frontmatter dropped), once per skill. Each value is
-a path to a `SKILL.md` or the skill's text itself:
+a path to a `SKILL.md` or the skill's text itself. Your Claude Code and Devin user skills
+(`~/.claude/skills/<name>/SKILL.md`, `~/.config/devin/skills/<name>/SKILL.md`) are found by name
+without listing them; an entry in `skills` with the same name wins:
 
 ```lua
 require("sepal").setup({ skills = { how = "~/.claude/skills/how/SKILL.md", terse = "Answer in one line." } })

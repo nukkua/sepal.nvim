@@ -143,7 +143,7 @@ btw is sent as you wrote it: no `<c-c><c-w>`, no `<c-c><c-s>`). It runs on a che
 and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
 `<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat. Copying its line (`yyp`, `:w`) turns the answer into
 a feat: a draft with the question and the answer under `Asked:`/`Answer:` as context,
-you write the `Goal:` and send it. The draft keeps the btw's agent; `<c-c><c-o>` picks another model.
+you write the `Goal:` and send it. The draft keeps the btw's agent; `<c-c><c-a>` picks another model.
 
 ### Guide
 
@@ -314,7 +314,7 @@ it does not rerun the check. Dropping a task removes its refs, chat and pasted i
 | `<c-c><c-c>` | send the task and close the buffer; it lands by itself once it passes  |
 | `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
 | `<c-c><c-s>` | feat: have `task_sharpen` sharpen it (deeper, not bigger); plan: write it (`u` undoes) |
-| `<c-c><c-o>` | pick the model it runs on (your agents' models by each agent's key, as in `:Sepal task`, or its number; the models option's; default `d` or one you type `o`, which move to `-` and `/` when an agent uses those keys; an agents' model runs on that agent) |
+| `<c-c><c-a>` | pick the model it runs on (your agents' models by each agent's key, as in `:Sepal task`, or its number; the models option's; default `d` or one you type `o`, which move to `-` and `/` when an agent uses those keys; an agents' model runs on that agent) |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |
 | `<c-c><c-k>` | discard the task                                                       |

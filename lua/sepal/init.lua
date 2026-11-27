@@ -510,7 +510,7 @@ local function keys(buf, text_only)
     or kind == "guide" and { "guide", "<c-c><c-c> guide me" }
     or kind == "orchestrate" and { "plan", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
     or { "<c-c><c-c> send", "<c-c><c-w> wait", C.task_sharpen and "<c-c><c-s> sharpen" or nil }
-  vim.list_extend(help, { "<c-c><c-o> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
+  vim.list_extend(help, { "<c-c><c-a> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
   local items = vim.tbl_map(function(s) return { { s, "SepalDim" } } end, help)
   local w = vim.b[buf].sepal_who
   local b = BUSY[buf]
@@ -679,7 +679,7 @@ function M.task(range, lines, kind, agent)
     if kind == "orchestrate" then return M.notify("planning: " .. e.title .. " · its tasks wait in :Sepal inbox, s starts them") end
     M.notify("working on it: " .. e.title .. (e.check and " · done when `" .. e.check .. "` passes" or "") .. " · :Sepal open watches")
   end
-  vim.keymap.set({ "n", "i" }, "<c-c><c-o>", function()
+  vim.keymap.set({ "n", "i" }, "<c-c><c-a>", function()
     local insert = vim.api.nvim_get_mode().mode:sub(1, 1) == "i"
     local pos = vim.api.nvim_win_get_cursor(0)
     vim.cmd.stopinsert()

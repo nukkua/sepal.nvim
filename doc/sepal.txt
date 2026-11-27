@@ -211,7 +211,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     <c-c><c-s>  feat: have |sepal-task_sharpen| sharpen
                                 it (its filled-in fields, deeper not bigger);
                                 plan: write it
-                    <c-c><c-o>  pick the model it runs on (your agents'
+                    <c-c><c-a>  pick the model it runs on (your agents'
                                 models by each agent's key, as in :Sepal
                                 task, or its number; the models option's;
                                 d default or o one you type, which move to

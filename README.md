@@ -327,6 +327,13 @@ a path to a `SKILL.md` or the skill's text itself:
 require("sepal").setup({ skills = { how = "~/.claude/skills/how/SKILL.md", terse = "Answer in one line." } })
 ```
 
+Typing `/` at the start of a word in the draft pops up the skill names (its `'omnifunc'`, `<c-x><c-o>`).
+With [blink.cmp](https://github.com/Saghen/blink.cmp) add the `sepal.blink` source instead:
+
+```lua
+sources = { default = { "lsp", "path", "buffer", "sepal" }, providers = { sepal = { name = "sepal", module = "sepal.blink" } } }
+```
+
 ### Writing the task for you
 
 Set `task_sharpen` and a large feat starts as just your idea and `Files:`, and `<c-c><c-s>` has

@@ -354,6 +354,24 @@ function M.skills(text)
   return out
 end
 
+-- 'omnifunc' of the task draft: /name completes the skills option's names (the blink source is sepal.blink)
+function M.complete_skills(findstart, base)
+  if findstart == 1 then
+    local before = vim.api.nvim_get_current_line():sub(1, vim.fn.col(".") - 1)
+    local s = (" " .. before):match("%s()/[%w_%-]*$")
+    return s and s - 2 or -3
+  end
+  local out = {}
+  for name, s in pairs(C.skills or {}) do
+    if ("/" .. name):find(base, 1, true) == 1 then
+      local info = type(s) == "string" and s:match("^[^\n]*") or nil
+      out[#out + 1] = { word = "/" .. name, menu = "skill", info = info }
+    end
+  end
+  table.sort(out, function(a, b) return a.word < b.word end)
+  return out
+end
+
 local function template(check)
   return { "Goal: ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
@@ -568,6 +586,15 @@ function M.task(range, lines, kind, agent)
   local l, m, name = who(kind, agent)
   vim.b[buf].sepal_who = { l[1], l[2], m or name }
   vim.bo[buf].filetype = "markdown"
+  vim.bo[buf].omnifunc = "v:lua.require'sepal'.complete_skills"
+  if not package.loaded["blink.cmp"] then -- blink shows sepal.blink's items itself
+    vim.api.nvim_create_autocmd("InsertCharPre", { buffer = buf, callback = function()
+      local before = vim.api.nvim_get_current_line():sub(1, vim.fn.col(".") - 1)
+      if vim.v.char == "/" and next(C.skills or {}) and vim.fn.pumvisible() == 0 and (before == "" or before:match("%s$")) then
+        vim.schedule(function() vim.api.nvim_feedkeys(vim.keycode("<c-x><c-o>"), "n", false) end)
+      end
+    end })
+  end
   vim.bo[buf].bufhidden = "wipe" -- closing the window drops the draft: :Sepal task always starts a new one
   -- the check option is used anyway when the line is gone, so only a found one says "dd: no check"
   local check = C.check

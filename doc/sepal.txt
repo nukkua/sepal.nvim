@@ -97,7 +97,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
              the other's default. `orchestrate`: a plan's planner model (unset:
-             Claude Code's default).
+             Claude Code's default). `verify`: the model `v` verifies a
+             swarmed plan's tasks on (unset: the planner's).
                                                              *sepal-agents*
 `agents`     the agents :Sepal task asks you to pick from after the kind
              by its `key` (unset: 1, 2… its place in the list), each
@@ -247,6 +248,12 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                     s     swarm a planned plan: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
+                    v     on a swarmed plan whose tasks are over: the
+                          planner checks each task's changes (git diff)
+                          against what it asked of it, read-only in its
+                          chat; <CR> reads the verdict. On
+                          `models.verify` (|sepal-models|) or the one m
+                          picks on the swarmed plan
                     m     on a planned plan, the model of the plan
                           item under the cursor (on the plan's own
                           line: of every item), from your |sepal-agents|'
@@ -256,7 +263,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           those keys); an item with an agent's model runs on
                           that agent. Or edit the `[model]` in the line and :w;
                           dd an item (or move it) and :w drops (or reorders)
-                          it. On any other task, the model of its next run:
+                          it. On a swarmed plan, the model v verifies on. On any other task, the model of its next run:
                           a queued one starts on it, r and c use it
                     dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim

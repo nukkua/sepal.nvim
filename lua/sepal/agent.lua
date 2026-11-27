@@ -54,8 +54,9 @@ local function cmd(extra, mode, e)
   return vim.list_extend(base(e), a)
 end
 -- the model for e's kind (models option), after args: it wins over a --model there
+-- a plan verifying its tasks (v): its verify model (m on it), else models.verify, else its own
 local function model(e)
-  local m = e.agent and e.agent.model or (C().models or {})[e.kind or "implement"]
+  local m = e.verifying and (e.verify_model or (C().models or {}).verify) or e.agent and e.agent.model or (C().models or {})[e.kind or "implement"]
   return m and { "--model", m } or {}
 end
 -- a btw (a question) and an orchestrate (a plan) read your repo itself and change nothing
@@ -570,6 +571,11 @@ agent = function(e, prompt, wt)
       end))
     end
     local reply = reply_of(ev)
+    if e.verifying then -- the plan stays swarmed: its verdict is kept beside its reply
+      e.verifying, e.verdict = nil, reply or e.verdict
+      if reply then notify("✔ verified: " .. e.title .. ": " .. (first(reply, 100) or "") .. " · <CR> in :Sepal inbox reads it") end
+      return finish(e, wt, "swarmed", not reply and not j.stopped and { error = "the agent ended its turn without a verdict" } or nil)
+    end
     if readonly(e.kind) then -- its answer is what it did: kept whole, nothing to land
       e.answer, e.summary = reply or e.answer, first(reply, 100) or e.summary
       local status = j.stopped and "stopped" or reply and "answered" or "error"
@@ -981,6 +987,27 @@ function M.swarm(e)
   notify(("swarm: %s · %s started"):format(e.title, plan_summary(e.plan)))
 end
 
+-- v: the planner checks what each swarmed task did against what it asked of it, in its own chat
+-- (read-only, in your repo), on the verify model (see model). The plan stays swarmed
+function M.verify(e)
+  if e.kind ~= "orchestrate" or e.status ~= "swarmed" then return notify("only a swarmed plan verifies its tasks") end
+  if M.running(e) then return notify("it's still verifying") end
+  local p = { "Verify the tasks your plan was swarmed into: did each do what you asked of it, and do they fit together?",
+    "Read each one's changes with the git diff under it; change nothing. For each task, say ok or what's wrong or missing,"
+      .. " then what to ask of it to fix that.", "" }
+  for i, id in ipairs(e.swarm or {}) do
+    local t, item = inbox.find(e.root, id), (e.plan or {})[i] or {}
+    if t and M.running(t) then return notify("its tasks are still running: v once they're over") end
+    local ck = t and t.check and t.checked ~= nil and (" · `%s` %s"):format(t.check, t.checked and "passes" or "fails") or ""
+    p[#p + 1] = ("%d. %s · %s%s"):format(i, item.title or t and t.title or "task", t and t.status or "gone from the inbox", ck)
+    if item.task then p[#p + 1] = (item.task:gsub("[^\n]+", "   %0")) end
+    if t and t.result then p[#p + 1] = ("   Changes: git diff %s %s"):format(t.base0 or t.base, t.result) end
+  end
+  endchat(e)
+  e.verifying, e.error, e.time = true, nil, os.time()
+  launch(e, table.concat(p, "\n"))
+end
+
 -- reply to e: the agent continues its chat, from what it did last, then check and land again
 -- (text nil: no agent, only the check again on its result)
 function M.continue(e, text)
@@ -1227,7 +1254,8 @@ function M.show(e)
   if not btw and not e.result then return notify("no changes yet") end
   if btw then
     vim.cmd.tabnew()
-    vim.api.nvim_win_set_buf(0, scratch(vim.split(e.answer, "\n"), nil, "markdown"))
+    local text = e.verdict and e.answer .. "\n\n---\n\n# Verified\n\n" .. e.verdict or e.answer -- v's verdict under its plan
+    vim.api.nvim_win_set_buf(0, scratch(vim.split(text, "\n"), nil, "markdown"))
     vim.wo.wrap, vim.wo.linebreak = true, true -- not the inbox's nowrap (a tab copies it)
     return
   end

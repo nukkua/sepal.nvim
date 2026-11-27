@@ -17,7 +17,7 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, orchestrate (the planner)
+  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, orchestrate (the planner), verify (v on a swarmed plan; nil: the planner's)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   panel_width = 46,    -- :Sepal panel's width: columns (46), a share of the editor's ("30%" or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
@@ -898,6 +898,7 @@ function M.pick_model(title, cur, set)
   add(C.models.implement)
   add(C.models.btw)
   add(C.models.orchestrate)
+  add(C.models.verify)
   add(cur)
   local panel, by, items = require("sepal.panel"), {}, {}
   local agents, used, n = C.agents or {}, {}, #(C.agents or {})

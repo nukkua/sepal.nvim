@@ -158,7 +158,7 @@ function M.spin() return SPIN[frame] end
 function M.tick() return ticks end
 local function cfg_icon(...) return require("sepal").icon(...) end
 local NS = vim.api.nvim_create_namespace("sepal.inbox")
-local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  m model  C clean  za fold  q close"
+local HELP = "<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  v verify  m model  C clean  za fold  q close"
 -- an orchestrate's plan item under it: "    2. [sonnet] title"; edit the model in it (or dd it) and :w
 local PLAN = "^%s+(%d+)%.%s*%[([^%]]*)%]"
 local function plan_line(i, p) return ("%d. [%s] %s"):format(i, p.model or "default", p.title) end
@@ -233,6 +233,7 @@ local function details(e)
     for _, l in ipairs(vim.list_slice(vim.split(vim.trim(e.check_out), "\n"), 1, 3)) do d[#d + 1] = "│ " .. l end
   end
   if e.status == "swarmed" then d[#d + 1] = ("→ swarmed into %d task%s, above in the inbox"):format(#(e.swarm or {}), #(e.swarm or {}) == 1 and "" or "s") end
+  if e.verdict and e.status == "swarmed" then d[#d + 1] = "✔ verified · <CR> reads it" end
   if e.status == "planned" or e.status == "swarmed" then
     for i, p in ipairs(e.plan or {}) do d[#d + 1] = plan_line(i, p) end
   end
@@ -589,6 +590,13 @@ function M.pick_model()
       M.changed(e)
     end)
   end
+  if e.status == "swarmed" then -- the model v verifies on
+    return sepal.pick_model(e.title .. " verify model", e.verify_model or sepal.config().models.verify, function(m)
+      e.verify_model = m
+      M.changed(e)
+      notify(("%s: verifies on %s"):format(e.title, m or "default"))
+    end)
+  end
   sepal.pick_model(e.title .. " model", e.agent and e.agent.model, function(m)
     local a = vim.deepcopy(e.agent or {})
     a.model = m
@@ -619,6 +627,7 @@ function M.open(root)
     vim.keymap.set("n", "o", on(agent.open), o("Watch the agent, or open the task's chat"))
     vim.keymap.set("n", "x", on(agent.stop), o("Stop it"))
     vim.keymap.set("n", "s", on(agent.swarm), o("Swarm a plan into its tasks"))
+    vim.keymap.set("n", "v", on(agent.verify), o("The planner verifies its swarmed tasks"))
     vim.keymap.set("n", "m", M.pick_model, o("Pick the model of the task's next run"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))

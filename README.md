@@ -94,7 +94,7 @@ buffers for affected files before landing or undoing.
 **6. When something needs you,** you get a warning instead. Open `<leader>ai`:
 
 ```
-<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  m model  C clean  za fold  q close
+<CR> diff  L land  U undo  :w apply  u revert  r reply  c continue  o watch/chat  x stop  s swarm  v verify  m model  C clean  za fold  q close
 
 ✔ landed       2m   Finish queued tasks…   2 files +31 −4  make test ✔
     · shutdown() blocks until the queue is empty
@@ -170,6 +170,11 @@ one, picked from your `agents`' models. The plan waits in the inbox, unfolded:
   its part. All of them start from one snapshot of your work
   tree, run in parallel up to `max_running`, and land the way you sent the plan (`<c-c><c-c>` by
   themselves, `<c-c><c-w>` on `L`). The plan stays as `swarmed`.
+- `v` on a swarmed plan, once its tasks are over: the planner verifies them, in its own chat (read-only,
+  in your repo). It's told what it asked of each task, its status and check, and the `git diff` of
+  its changes, and says for each whether it did that and what to ask of it if not. `<CR>` reads the
+  verdict under the plan. It runs on `models.verify` (unset: the planner's model); `m` on a swarmed
+  plan picks another for it.
 - `r` asks for a different plan, `<CR>` reads the agent's whole reply. A reply without a `Plan:`
   list fails; `r` asks again.
 
@@ -192,7 +197,7 @@ require("sepal").setup({
   worktrees = vim.fn.stdpath("state") .. "/sepal", -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout (see Tasks)
   max_running = 3,     -- tasks running at once, the rest wait as "queued"; nil: no limit
-  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's
+  models = { btw = "sonnet" }, -- each task kind's --model; implement = nil: Claude Code's default (or args'); orchestrate: the planner's; verify: v's (nil: the planner's)
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   panel_width = 46,    -- :Sepal panel's width: columns, or a share of the editor's: "30%" (or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors

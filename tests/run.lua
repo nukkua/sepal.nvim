@@ -2035,6 +2035,17 @@ test("p (plan) orchestrates: the agent plans the tasks and their models; edit th
   eq(a, { "--permission-mode acceptEdits --allowedTools Bash(test -n ok)", "--permission-mode acceptEdits --model sonnet --allowedTools Bash(true)" })
   assert(prompts():find("Part of a plan, task 2 of 2", 1, true), prompts())
   eq(msgs(notified(function() agent.swarm(e) end)), { "already swarmed: its tasks are in the inbox" })
+  -- v: the planner verifies its tasks, read-only, on the verify model m picked; the plan stays swarmed
+  e.verify_model = "haiku"
+  reset()
+  got = msgs(notified(function() agent.verify(e); idle() end))
+  eq({ e.status, e.verifying }, { "swarmed", nil })
+  assert(got[1]:match("^✔ verified: shout and add: Did it%."), got[1])
+  eq(args(), { "--permission-mode plan --disallowedTools ExitPlanMode --model haiku --allowedTools Bash(true) --resume s1" }) -- in the planner's chat
+  local pr = prompts()
+  assert(pr:find("1. Shout two · landed · `test -n ok` passes", 1, true) and pr:find("   Changes: git diff " .. l[1].base0 .. " " .. l[1].result, 1, true), pr)
+  assert(e.verdict:find("Did it.", 1, true), e.verdict)
+  eq(msgs(notified(function() agent.verify(l[1]) end)), { "only a swarmed plan verifies its tasks" })
   sepal.clean()
   eq(#inbox.list(work), 0) -- a swarmed orchestrate is over
   sepal.config().agents = nil

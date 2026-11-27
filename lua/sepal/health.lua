@@ -37,8 +37,8 @@ function M.check()
   elseif type(C.max_running) ~= "number" or C.max_running < 1 then h.error("max_running must be a number, 1 or more")
   else h.ok("max_running: " .. C.max_running .. " at once, the rest wait") end
   if type(C.models) ~= "table" then h.error("models must be a table: { implement = \"opus\", btw = \"sonnet\" }")
-  else h.ok(("models: implement %s, btw %s, orchestrate %s"):format(C.models.implement or "the agent's default",
-    C.models.btw or "the agent's default", C.models.orchestrate or "the agent's default")) end
+  else h.ok(("models: implement %s, btw %s, orchestrate %s, verify %s"):format(C.models.implement or "the agent's default",
+    C.models.btw or "the agent's default", C.models.orchestrate or "the agent's default", C.models.verify or "the planner's")) end
   local pm = require("sepal").plan_models()
   if #pm == 0 then h.info("a plan's tasks run on the default model: give your agents a model to pick from")
   else h.ok("a plan picks its tasks' models from your agents': " .. table.concat(pm, ", ")) end

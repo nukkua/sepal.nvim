@@ -959,7 +959,7 @@ end
 -- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by the agent with
 -- the item's model (agents option), else by the orchestrate's agent with that model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
 function M.swarm(e)
-  if e.kind ~= "orchestrate" then return notify("only an orchestrate task swarms into tasks") end
+  if e.kind ~= "orchestrate" then return notify("only a plan swarms into tasks") end
   if M.running(e) then return notify("it's still planning") end
   if e.status == "swarmed" then return notify("already swarmed: its tasks are in the inbox") end
   if e.status ~= "planned" or #(e.plan or {}) == 0 then return notify("it has no plan to swarm: r asks for one") end

@@ -1297,7 +1297,7 @@ test("checkhealth runs", function() require("sepal.health").check() end)
 
 local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n'; sed 's/^/- got: /'; printf '```\n']] }
 
-test("with task_sharpen a short feat keeps its fields; a large feat starts as the idea", function()
+test("with task_sharpen a feat keeps its fields; a plan starts as the idea", function()
   sepal.setup({ task_sharpen = suggest })
   sepal.task()
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 3, false), { "Goal: ", "", "Done when: " })
@@ -1308,7 +1308,7 @@ test("with task_sharpen a short feat keeps its fields; a large feat starts as th
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "graceful shutdown" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
   assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "task not written")
-  -- the idea went as written: no sharpen prompt for a large feat
+  -- the idea went as written: no sharpen prompt for a plan
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: graceful shutdown", "- got: ", "- got: Files:" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
@@ -1329,7 +1329,7 @@ test("<c-c><c-s> shows a spinner in the task's keys while it sharpens", function
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
-test("<c-c><c-s> sharpens a short feat's filled-in fields; a large feat's goes as written", function()
+test("<c-c><c-s> sharpens a feat's filled-in fields; a plan's goes as written", function()
   sepal.task(nil, { "Goal: retry flaky uploads", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.lua" })
   local b = task_buf()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
@@ -1349,7 +1349,7 @@ end)
 test("an empty idea line shows a hint that goes away when you type", function()
   local ns = vim.api.nvim_create_namespace("sepal.hint")
   local function marks(b) return #vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {}) end
-  sepal.task() -- a short feat keeps its fields: no hint, and "Goal: " is not the idea line
+  sepal.task() -- a feat keeps its fields: no hint, and "Goal: " is not the idea line
   eq(marks(task_buf()), 0)
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 1, false), { "Goal: " })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
@@ -1530,7 +1530,7 @@ test("<c-c><c-o> picks the model a draft runs on, from the list or typed", funct
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-o>"), "tx", false)
   eq(#shots, 1)
   eq(shots[1].lines, { "  1  ✻ sonnet", "", "  d    default  ●", "  o    other…" })
-  eq(shots[1].title, "sepal · short feat model")
+  eq(shots[1].title, "sepal · feat model")
   picker_closed(shots[1])
   eq(who(), { "✻", "SepalClaude", " sonnet" })
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
@@ -1661,7 +1661,7 @@ test(":'<,'>Sepal task puts the selected lines in the task and lists the file", 
   vim.cmd.edit("tests/pool.lua")
   vim.bo.filetype = "lua"
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { "local a = 1", "local b = a", "-", "return b" })
-  key("s")
+  key("f")
   vim.cmd("2,3Sepal task")
   local b = task_buf()
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Goal: ", "", "Done when: ", "",
@@ -1849,7 +1849,7 @@ test("c starts over a task that never got its agent going; x keeps what the agen
   eq({ e.status, e.stat and e.stat.list }, { "stopped", { "d.txt +1 −0" } })
 end)
 
-test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its model; i implements", function()
+test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its model; f implements", function()
   clean(); reset()
   sepal.setup({ max_running = 1 })
   vim.env.SEPAL_SLEEP = "0.5"
@@ -1911,7 +1911,7 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(sepal.config().models.btw, "sonnet") -- setting one keeps the other's default
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
   notified(function()
-    key("s")
+    key("f")
     sepal.pick()
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: implemented" })
     vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)
@@ -1951,7 +1951,7 @@ test("the orchestrate demo's self-check passes (tests/demo.lua, when it is there
   assert(r.code == 0, ("demo self-check exited %d\nstdout:\n%s\nstderr:\n%s"):format(r.code, r.stdout or "", r.stderr or ""))
 end)
 
-test("l (large feat) orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
+test("p (plan) orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
   clean(); reset()
   local cmd = sepal.config().cmd
   sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "opus", name = "lead" },
@@ -1962,7 +1962,7 @@ test("l (large feat) orchestrates: the agent plans the tasks and their models; e
     "   Files:", "   - @a.txt", "2. [haiku] Add b", "   Goal: add b.txt", "", "Assumptions:", "- two tasks are enough" }, "\n") } } } }) }, reply)
   vim.env.SEPAL_REPLY = reply
   local got = msgs(notified(function()
-    key("l", "1")
+    key("p", "1")
     sepal.pick()
     eq(vim.b[task_buf()].sepal_kind, "orchestrate")
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: shout and add", "", "Done when: true" })
@@ -2049,7 +2049,7 @@ test("a plan's models are your agents': m offers them, a task with one runs on i
   C.agents = nil
 end)
 
-test(":Sepal qf plans the quickfix list as a large feat, one task per file", function()
+test(":Sepal qf plans the quickfix list as a plan, one task per file", function()
   clean(); reset()
   local a, b = vim.fn.bufadd(work .. "/a.txt"), vim.fn.bufadd(work .. "/b.txt")
   vim.fn.setqflist({ { bufnr = a, lnum = 1, text = "one" }, { bufnr = b, lnum = 2, text = "two" },
@@ -2130,11 +2130,11 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   sepal.pick()
   local btw = draft()
   eq(#shots, 1)
-  eq(shots[1].lines, { "  l  large feat  ✻ claude", "  s  short feat  ✻ opus 5.5",
-    "  b  btw" .. (" "):rep(9) .. "✻ sonnet" })
+  eq(shots[1].lines, { "  p  plan  ✻ claude", "  f  feat  ✻ opus 5.5",
+    "  b  btw" .. (" "):rep(3) .. "✻ sonnet" })
   eq({ shots[1].title, shots[1].config.relative }, { "sepal", "" })
   eq(shots[1].wrap, false)
-  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "l"), true)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "p"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalClaude"), "✻"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalDim"), "claude"), true)
   picker_closed(shots[1])
@@ -2143,17 +2143,17 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
     { cmd = "devin", model = "gpt-5", key = "t" }, { cmd = "devin" }, { cmd = "devin", model = "opus", name = "opus" } } })
   local columns = vim.o.columns
   vim.o.columns = 40 -- long rows are cut, never wrapped
-  shots = picker_shots({ "s", "t" })
+  shots = picker_shots({ "f", "t" })
   local ok, err = pcall(sepal.pick)
   vim.o.columns = columns
   if not ok then error(err, 0) end
   local gpt = draft()
   sepal.setup({ models = {}, agents = nil })
   eq(#shots, 2)
-  eq(shots[1].lines, { "  l  large feat", "  s  short feat", "  b  btw" })
+  eq(shots[1].lines, { "  p  plan", "  f  feat", "  b  btw" })
   eq(shots[2].lines, { "  1  ✻ claude", "  2  ❖ fusion review  opus 5.5 medium + swe 2 high",
     "  t  ֎ devin" .. (" "):rep(10) .. "gpt 5", "  4  ❖ devin", "  5  ✻ opus" })
-  eq(shots[2].title, "sepal · short feat")
+  eq(shots[2].title, "sepal · feat")
   eq({ shots[2].width, shots[2].height, shots[2].wrap }, { 40, 7, false })
   local function detail_col(line, detail)
     return vim.fn.strdisplaywidth(line:sub(1, assert(line:find(detail, 1, true)) - 1))
@@ -2177,9 +2177,9 @@ test(":Sepal task asks which agent with agents set: devin runs with sepal's hook
   sepal.setup({ agents = { { cmd = { claude }, name = "claude" }, { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } } } })
   vim.env.SEPAL_EDIT = [[echo dv > a.txt]]
   local got = msgs(notified(function()
-    key("s")
+    key("f")
     local g = vim.fn.getcharstr
-    vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("2"); return "s" end
+    vim.fn.getcharstr = function() vim.fn.getcharstr = g; key("2"); return "f" end
     sepal.pick()
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: by devin", "", "Done when: true" })
     vim.api.nvim_feedkeys(vim.keycode("<c-c><c-c>"), "tx", false)

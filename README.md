@@ -37,8 +37,8 @@ vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>", { desc = "Agent: inbox
 ```
 
 **2. Write a task.** Select the code you mean (or don't) and press `<leader>as`, then pick what
-kind of task it is: `l` large feat (a bigger job, planned as several tasks, see Large feat), `s`
-short feat (a change, below) or `b` btw (a question, see Btw). Each kind shows the logo and model
+kind of task it is: `p` plan (a bigger job, planned as several tasks, see Plan), `f`
+feat (a change, below) or `b` btw (a question, see Btw). Each kind shows the logo and model
 of the agent that will run it; with several `agents` you pick the agent next, each shown with its
 logo and model (see Devin). Any other key cancels. A buffer opens above your code:
 
@@ -125,7 +125,7 @@ subagents`).
 - `o` shows the agent at work, live in Claude Code (once it's done: its chat). See Watching.
 - `x` stops a running or queued task (what it did so far is kept), or closes its chat.
 - `m` picks the model of the task's next run: a queued one starts on it, `r` and `c` use it. On a
-  planned orchestrate it picks the plan item's model (all of them on the plan's own line).
+  planned plan it picks the plan item's model (all of them on the plan's own line).
 - `L` lands a task, `U` takes a landed one back out, `C` drops the tasks that are over (`:Sepal clean`).
 - `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
@@ -136,18 +136,18 @@ That's all of it: write, send, keep working, read the `·` lines.
 
 ### Btw
 
-`b` instead of `s` asks the agent something about the project ("where are retries configured?").
+`b` instead of `f` asks the agent something about the project ("where are retries configured?").
 The buffer is just a line for the question and `Files:`. Write it and send it with `<c-c><c-c>` (a
 btw is sent as you wrote it: no `<c-c><c-w>`, no `<c-c><c-s>`). It runs on a cheaper model (sonnet by default, see
 `models`) in your repo itself, read-only (Claude Code's plan mode), so it starts at once: no worktree,
 and it doesn't wait for a `max_running` slot. You get the start of the answer as a notification, and
 `<CR>` in the inbox shows all of it. Nothing it does lands. `r` asks a follow-up and `o` opens its chat. Copying its line (`yyp`, `:w`) turns the answer into
-a short feat: a draft with the question and the answer under `Asked:`/`Answer:` as context,
+a feat: a draft with the question and the answer under `Asked:`/`Answer:` as context,
 you write the `Goal:` and send it. The draft keeps the btw's agent; `<c-c><c-o>` picks another model.
 
-### Large feat
+### Plan
 
-`l` (an orchestrate, inside sepal) is for a job too big for one task. Write it like a short feat
+`p` (`orchestrate` in the `models` keys and the Lua API) is for a job too big for one task. Write it like a feat
 (with `task_sharpen` set it starts as just your idea and `Files:`, and `<c-c><c-s>` writes it) and
 send it: `<c-c><c-c>` plans it, `<c-c><c-w>` plans it and has its tasks wait for `L`. The agent reads
 your repo (read-only, like a btw, on `models.orchestrate`) and plans it. It decides how many tasks
@@ -213,7 +213,7 @@ task sent to it fails. A `cmd` whose executable name starts with `devin`
 runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code, the same way: sepal adds its hooks
 and the check's allow rule to a copy of your `~/.config/devin/config.json`, so the panel shows what it
 does, a permission prompt warns you, and ctrl-c in it stops the task (what it did is kept). It runs
-in `dangerous` mode, tasks and chats, whatever `args` or `auto_mode` say (`auto`, read-only, for a btw or orchestrate). An agent's `model` wins over
+in `dangerous` mode, tasks and chats, whatever `args` or `auto_mode` say (`auto`, read-only, for a btw or plan). An agent's `model` wins over
 `models`, and its `args` replace `args` (Claude Code's flags aren't Devin's).
 The config path follows `$XDG_CONFIG_HOME` when set. It must be valid JSON: an unreadable or
 invalid config (including JSONC comments) is replaced by an empty config in sepal's copy.
@@ -242,7 +242,7 @@ and the `highlights` option wins over everything.
 (`●`) and needing you (`▲`), e.g. `~2 ●1 ▲1`, or nothing when there are none. A
 missed notification still shows there. sepal fires `User SepalChanged` and redraws the statusline
 when the counts move.
-Running includes queued and checking tasks; ready includes planned orchestrates; needing you
+Running includes queued and checking tasks; ready includes planned plans; needing you
 includes check failures and agent errors. `icons` overrides status icons and the provider logos
 (`devin`, `claude`, `openai`, `gemini`, `opencode`).
 
@@ -264,7 +264,7 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 | `:Sepal undo`        | take the newest landed task back out                                     |
 | `:Sepal open`        | watch the newest running task or task with a chat, in its agent         |
 | `:Sepal stop`        | stop running and queued tasks, and close their chats                    |
-| `:Sepal qf`          | the quickfix list as a planned large feat: one task per file, with its lines (`s` swarms it) |
+| `:Sepal qf`          | the quickfix list as a planned plan: one task per file, with its lines (`s` swarms it) |
 | `:Sepal clean`       | drop landed, no changes, undone, stopped, interrupted, answered and swarmed tasks |
 
 ## How it works
@@ -290,7 +290,7 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 Tasks move through `queued`, `running`, `checking`, then `ready` (manual landing) or `landed`.
 No diff gives `no changes`; exhausted checks give `check failed`; agent/setup errors give `failed`;
 unsafe automatic landing gives `needs you`. Stopping gives `stopped`, undo gives `undone`.
-Questions finish as `answered`; orchestrates as `planned`, then `swarmed` when their tasks start.
+Questions finish as `answered`; plans as `planned`, then `swarmed` when their tasks start.
 `L` / `:Sepal land` can also apply saved results from failed, stopped, interrupted or undone tasks:
 it does not rerun the check. Dropping a task removes its refs, chat and pasted images, not landed edits.
 
@@ -300,15 +300,15 @@ it does not rerun the check. Dropping a task removes its refs, chat and pasted i
 | ------------ | ---------------------------------------------------------------------- |
 | `<c-c><c-c>` | send the task and close the buffer; it lands by itself once it passes  |
 | `<c-c><c-w>` | send the task and close the buffer; it waits in the inbox for `L`      |
-| `<c-c><c-s>` | short feat: have `task_sharpen` sharpen it (deeper, not bigger); large feat: write it (`u` undoes) |
+| `<c-c><c-s>` | feat: have `task_sharpen` sharpen it (deeper, not bigger); plan: write it (`u` undoes) |
 | `<c-c><c-o>` | pick the model it runs on (your agents' models by each agent's key, as in `:Sepal task`, or its number; the models option's; default `d` or one you type `o`, which move to `-` and `/` when an agent uses those keys; an agents' model runs on that agent) |
 | `<c-c><c-f>` | add a file under `Files:` (fff.nvim if installed, else a prompt)       |
 | `<c-c><c-p>` | paste the clipboard's image (wl-paste, xclip or pngpaste)             |
 | `<c-c><c-k>` | discard the task                                                       |
 
 A dim line on top of the task shows who will work on it (the provider's logo and the model, or
-the agent's name) and lists these keys, like the one on top of the inbox. A large feat's
-`<c-c><c-c>` and `<c-c><c-w>` plan it (see Large feat); a btw has only `<c-c><c-c>`. While
+the agent's name) and lists these keys, like the one on top of the inbox. A plan's
+`<c-c><c-c>` and `<c-c><c-w>` plan it (see Plan); a btw has only `<c-c><c-c>`. While
 `task_sharpen` works, a spinner shows there; if you edit the task meanwhile, its answer is dropped
 rather than overwriting your text.
 
@@ -341,8 +341,8 @@ sources = { default = { "lsp", "path", "buffer", "sepal" }, providers = { sepal 
 
 ### Writing the task for you
 
-Set `task_sharpen` and a large feat starts as just your idea and `Files:`, and `<c-c><c-s>` has
-the command write the task. A short feat keeps its fields, and `<c-c><c-s>` sharpens them: its
+Set `task_sharpen` and a plan starts as just your idea and `Files:`, and `<c-c><c-s>` has
+the command write the task. A feat keeps its fields, and `<c-c><c-s>` sharpens them: its
 filled-in fields go to the command under a prompt asking for a deeper task, not a bigger one (what
 an expert would do, from the rawest material, with which methods, and what would prove it right),
 keeping its `Done when:` and `Files:`. The answer replaces the buffer; `u` undoes it:
@@ -385,7 +385,7 @@ require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowed
 Other flags go there too, e.g. `"--model", "opus"`.
 
 Or let Claude Code's auto mode decide for implementation runs and chats (it replaces the
-`--permission-mode` in `args`; btw and orchestrate runs still use plan mode, without its ExitPlanMode
+`--permission-mode` in `args`; btw and plan runs still use plan mode, without its ExitPlanMode
 approval prompt: the reply is the answer or plan):
 
 ```lua
@@ -412,7 +412,7 @@ fidget.nvim, info goes there (warnings and errors stay in `vim.notify`), and fid
 hidden while you're in an agent, the inbox or with the panel open.
 
 At most `max_running` implementation tasks (3 by default) run at once, including preparation and
-checking; the rest wait as `queued`. Btw and orchestrate runs bypass this limit.
+checking; the rest wait as `queued`. Btw and plan runs bypass this limit.
 
 Claude Code may ask to trust a task's new worktree before it starts. sepal warns
 (`▲ …: Claude Code asks to trust the worktree · :Sepal open`), and you answer it there. Devin runs
@@ -469,7 +469,7 @@ statusline; `.draft()` is the open task draft's buffer (nil when none).
 ```sh
 nvim -l tests/run.lua                         # all of them, with a fake agent: no Claude Code needed
 SEPAL_TEST="lands" nvim -l tests/run.lua      # only the tests whose name contains it
-SEPAL_DEMO_CHECK=1 nvim --headless -u tests/demo.lua  # the large feat demo, draft to two landed tasks
+SEPAL_DEMO_CHECK=1 nvim --headless -u tests/demo.lua  # the plan demo, draft to two landed tasks
 ```
 
 Designed and developed with AI-assisted implementation. I defined the requirements, workflows, and desired behavior.

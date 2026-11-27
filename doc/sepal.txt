@@ -21,8 +21,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
    vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal task<cr>")
    vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>")
 <
-2. Select the code you mean (or don't) and press <leader>as. Pick `o`
-   orchestrate (a plan), `i` implement or `b` btw (a question), then fill in
+2. Select the code you mean (or don't) and press <leader>as. Pick `p`
+   plan (a bigger job, as tasks), `f` feat or `b` btw (a question), then fill in
    the task. "Done when:" is a shell command to check, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
 4. "✔ landed: …" means it passed the check and is in your files, unstaged.
@@ -72,7 +72,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
 `auto_mode`  true: implementation runs and chats (|:Sepal-open|) use Claude
              Code's auto mode, --permission-mode auto instead of `args`'.
-             Btw and orchestrate runs stay in read-only plan mode,
+             Btw and plan runs stay in read-only plan mode,
              without ExitPlanMode: their reply is the answer or plan,
              no approval asked.
 `check`      the check for tasks without a "Done when:" line, e.g.
@@ -90,13 +90,13 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                                         *sepal-max_running*
 `max_running` tasks running at once; the rest wait in the inbox as
              "queued" and start when one is done. Preparation and checking
-             take a slot too. Btw and orchestrate bypass this limit.
+             take a slot too. Btw and plan runs bypass this limit.
              nil: no limit.
                                                              *sepal-models*
 `models`     each task kind's model, passed as `--model` (over one in `args`):
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
-             the other's default. `orchestrate`: the planner's model (unset:
+             the other's default. `orchestrate`: a plan's planner model (unset:
              Claude Code's default).
                                                              *sepal-agents*
 `agents`     the agents :Sepal task asks you to pick from after the kind
@@ -110,7 +110,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              ~/.config/devin/config.json (--config), so its activity shows,
              a permission prompt warns you, and ctrl-c stops the task. Its
              mode: dangerous for tasks and chats, whatever `args` or
-             `auto_mode` say (auto, read-only, for a btw or orchestrate). The config path follows
+             `auto_mode` say (auto, read-only, for a btw or plan). The config path follows
              $XDG_CONFIG_HOME when set. Invalid JSON (including JSONC) or
              an unreadable config becomes an empty config in sepal's copy. >lua
                agents = {
@@ -119,8 +119,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                }
 <                                                      *sepal-task_sharpen*
 `task_sharpen` argv that gets the task buffer on stdin and prints the
-             finished task. <c-c><c-s> runs it; a large feat's buffer is your
-             idea and Files:, a short feat's is a sharpen prompt above its
+             finished task. <c-c><c-s> runs it; a plan's buffer is your
+             idea and Files:, a feat's is a sharpen prompt above its
              filled-in fields. For Claude Code, pass -p and
              --no-session-persistence.
                                                              *sepal-skills*
@@ -166,15 +166,15 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 
                                                                       *:Sepal*
 :[range]Sepal [task]
-                  First pick its kind: `i` implement (below) or `b` btw:
+                  First pick its kind: `f` feat (below), `p` plan or `b` btw:
                   a question about the project, answered on the `btw`
                   model (|sepal-models|) in your repo itself, read-only
                   (--permission-mode plan): no worktree, no `prepare`, and
                   no wait for a |sepal-max_running| slot.
                   Nothing a btw does lands: <c-c><c-c> asks, the answer's
                   start is a notification, <CR> in the inbox shows all of
-                  it, r asks a follow-up. `o` orchestrate: the same
-                  template as implement, but the agent (read-only, like a
+                  it, r asks a follow-up. `p` plan: the same
+                  template as a feat, but the agent (read-only, like a
                   btw, on the `orchestrate` model) plans the job as tasks:
                   how many, what each does, its check, and the model for
                   each from your |sepal-agents|' models. The plan waits in the
@@ -203,9 +203,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                 itself once it passes
                     <c-c><c-w>  send it and close the buffer; it waits in
                                 the inbox for L
-                    <c-c><c-s>  short feat: have |sepal-task_sharpen| sharpen
+                    <c-c><c-s>  feat: have |sepal-task_sharpen| sharpen
                                 it (its filled-in fields, deeper not bigger);
-                                large feat: write it
+                                plan: write it
                     <c-c><c-o>  pick the model it runs on (your agents'
                                 models by each agent's key, as in :Sepal
                                 task, or its number; the models option's;
@@ -244,11 +244,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           `retries` budget), on the result the agent finished
                     o     watch it (running) or open its chat (done)
                     x     stop it
-                    s     swarm a planned orchestrate: one task per item of
+                    s     swarm a planned plan: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
-                    m     on a planned orchestrate, the model of the plan
-                          item under the cursor (on the orchestrate's own
+                    m     on a planned plan, the model of the plan
+                          item under the cursor (on the plan's own
                           line: of every item), from your |sepal-agents|'
                           models (each agent's key, as in :Sepal task, or its
                           number), the models option's, "default" (d) or one
@@ -304,7 +304,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted, answered, swarmed.
                                                                   *:Sepal-qf*
-:Sepal qf         The quickfix list as a planned orchestrate, no planner:
+:Sepal qf         The quickfix list as a planned plan, no planner:
                   one plan item per file (so its tasks never collide when
                   landing), each with its entries as "lnum: text" lines.
                   It opens the inbox; `s` swarms it, `m` sets the models.
@@ -317,7 +317,7 @@ picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
 require("sepal").status()
                   for your statusline: the tasks of the repo you're in that
                   are running (~: includes queued and checking), ready to
-                  land (●: includes planned orchestrates) and need you (▲:
+                  land (●: includes planned plans) and need you (▲:
                   needs you, check failed, failed), e.g. "~2 ●1 ▲1"; "" when
                   there are none. Icons follow |sepal-icons|. It only reads
                   what's loaded, so it's cheap to call on every redraw.
@@ -350,7 +350,7 @@ Lifecycle: queued -> running -> checking -> ready (manual) or landed.
 No diff: nochange ("no changes"); exhausted checks: failed ("check failed");
 agent/setup errors: error ("failed"); unsafe auto-landing: needs ("needs you").
 Stopping gives stopped; undo gives undone. Btw finishes as answered;
-orchestrate as planned, then swarmed when its tasks are made.
+plan as planned, then swarmed when its tasks are made.
 
                                                         *sepal-context*
 A task's card in the panel shows its context window: 10 cells, used

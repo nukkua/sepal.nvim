@@ -252,7 +252,7 @@ function M.inbox()
   local _, root = entries()
   if root then require("sepal.inbox").open(root) end
 end
--- :Sepal qf: the quickfix list as a planned large feat, one task per file, then the inbox
+-- :Sepal qf: the quickfix list as a planned plan, one task per file, then the inbox
 function M.qf()
   local e, why = require("sepal.agent").plan_from_qf(vim.fn.getcwd())
   if not e then return M.notify(why, vim.log.levels.WARN) end
@@ -394,11 +394,11 @@ end
 local function template(check)
   return { "Goal: ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
-local IDEA = { "", "", "Files:" } -- a large feat with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
+local IDEA = { "", "", "Files:" } -- a plan with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
 local HINT = { btw = "ask anything about the project; it answers, nothing changes",
   orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
 local HINT_NS = vim.api.nvim_create_namespace("sepal.hint")
--- <c-c><c-s> on a short feat: this goes to task_sharpen above the task's filled-in fields (M.tidy's)
+-- <c-c><c-s> on a feat: this goes to task_sharpen above the task's filled-in fields (M.tidy's)
 local SHARPEN = [[Make this task deeper, not bigger. First work out:
 1. What a top professional in this field would do here that I'm not asking for.
 2. The rawest material they'd start from, instead of what's been digested for me.
@@ -506,7 +506,7 @@ local function keys(buf, text_only)
   end
   local kind = vim.b[buf].sepal_kind
   local help = kind == "btw" and { "btw", "<c-c><c-c> ask" }
-    or kind == "orchestrate" and { "large feat", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
+    or kind == "orchestrate" and { "plan", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
     or { "<c-c><c-c> send", "<c-c><c-w> wait", C.task_sharpen and "<c-c><c-s> sharpen" or nil }
   vim.list_extend(help, { "<c-c><c-o> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
   local items = vim.tbl_map(function(s) return { { s, "SepalDim" } } end, help)
@@ -567,13 +567,13 @@ local function busy(buf, label)
 end
 
 -- the kinds :Sepal task picks from; the shown names (the kinds stay: saved inboxes, models keys)
-local KINDS = { s = "implement", b = "btw", l = "orchestrate" }
-local LABEL = { implement = "short feat", btw = "btw", orchestrate = "large feat" }
+local KINDS = { f = "implement", b = "btw", p = "orchestrate" }
+local LABEL = { implement = "feat", btw = "btw", orchestrate = "plan" }
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
 -- <c-c><c-k> discards, <c-c><c-f> adds a file (fff.nvim if installed), <c-c><c-p> pastes an image,
--- <c-c><c-s> has task_sharpen turn what's there (an idea + files) into the task; on a short feat
+-- <c-c><c-s> has task_sharpen turn what's there (an idea + files) into the task; on a feat
 -- (implement) it sharpens it: its filled-in fields go with the SHARPEN prompt.
 -- range: { first, last } lines of the current buffer to put in the task (:'<,'>Sepal task)
 -- lines: the text to start from (a task that could not be sent comes back with it)
@@ -621,7 +621,7 @@ function M.task(range, lines, kind, agent)
     local c, from = M.find_check(vim.fn.getcwd())
     if c then check, vim.b[buf].sepal_found = c, { c, from } end
   end
-  local idea = btw or (kind == "orchestrate" and C.task_sharpen) -- a short feat keeps its fields: <c-c><c-s> sharpens them
+  local idea = btw or (kind == "orchestrate" and C.task_sharpen) -- a feat keeps its fields: <c-c><c-s> sharpens them
   local template = idea and IDEA or template(check)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or template)
   if block then add_selection(buf, block, path) end
@@ -800,7 +800,7 @@ function M.implement(e)
   if vim.b.sepal_task then vim.api.nvim_win_set_cursor(0, { 1, #"Goal: " }) end
 end
 
--- :Sepal task: pick its kind first, l large feat (an orchestrate), s short feat (an implement) or b btw
+-- :Sepal task: pick its kind first, p plan (an orchestrate), f feat (an implement) or b btw
 -- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
 -- a pick in a bottom split like the inbox (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
 local CHOOSE_NS = vim.api.nvim_create_namespace("sepal.choose")
@@ -939,7 +939,7 @@ function M.pick(range)
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local items = {}
-  for _, k in ipairs({ "l", "s", "b" }) do
+  for _, k in ipairs({ "p", "f", "b" }) do
     local item = { key = k, label = LABEL[KINDS[k]] }
     if #agents < 2 then
       local l, m, name = who(KINDS[k])

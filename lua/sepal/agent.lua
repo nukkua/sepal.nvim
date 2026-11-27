@@ -214,7 +214,14 @@ local function notes(e, again)
   end
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
     "- You're in a git worktree: edit here, decide instead of asking. Don't commit, push or switch branches.",
-    "- Your shell starts in the worktree: never `cd` to its path." }
+    "- Your shell starts in the worktree: never `cd` to its path.",
+    "- The smallest change that fully does the task. First read the code it touches and list every place the change must reach:"
+      .. " callers, tests, fixtures, config, exports.",
+    "- Prefer, in order: not writing it, what this codebase already has (used its way), the standard library, an installed dependency, the minimum new code."
+      .. " No option, abstraction, wrapper or \"for later\" code nobody asked for; deletion beats addition; keep the codebase's structure and conventions.",
+    "- A bug: grep every caller of what you touch and fix the root cause once, in the shared code. Moved code keeps its error handling and validation.",
+    "- New non-trivial logic (a branch, loop or parser) gets one small test. Comment only the why the code can't show.",
+    "- Never cut validation at trust boundaries, error handling that prevents data loss, security or anything the task asked for." }
   if e.check then n[#n + 1] = ("- Done when `%s` passes. sepal runs it when you end and sends you its failures:"
     .. " don't run it yourself (its output costs tokens); to try your change, run only the narrowest test of it."):format(e.check) end
   n[#n + 1] = "- End with only what the user must know, no summary:"

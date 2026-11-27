@@ -163,7 +163,8 @@ local function notes(e, again)
   local n = { "", "---", "How to work on this (from sepal, not part of the task):",
     "- You're in a git worktree: edit here, decide instead of asking. Don't commit, push or switch branches.",
     "- Your shell starts in the worktree: never `cd` to its path." }
-  if e.check then n[#n + 1] = ("- Done when `%s` passes: run only that, and fix until it passes."):format(e.check) end
+  if e.check then n[#n + 1] = ("- Done when `%s` passes. sepal runs it when you end and sends you its failures:"
+    .. " don't run it yourself (its output costs tokens); to try your change, run only the narrowest test of it."):format(e.check) end
   n[#n + 1] = "- End with only what the user must know, no summary:"
   n[#n + 1] = "Not done:\n- <left undone or unchecked; drop if nothing>"
   n[#n + 1] = "Assumptions:\n- <a decision the task left open, one per line; end it with (path:line) when it is about one line>\n(or \"Assumptions: none\")"

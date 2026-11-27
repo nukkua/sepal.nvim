@@ -323,7 +323,8 @@ require("sepal").status()
 
 Your work tree (uncommitted and untracked files too) is saved as a commit
 through a temporary index; your index and branches aren't touched. The agent
-works in a worktree of it. Before the agent starts, sepal runs "Done when:"
+works in a worktree of it; it's told not to run the check itself (its
+output costs tokens), only narrower tests: sepal runs it. Before the agent starts, sepal runs "Done when:"
 on the base worktree as a shell command (costing no tokens); if it already
 passes, sepal only warns with ▲ because the check proves nothing. After the
 agent's work, sepal runs the check there. If the agent modifies existing

@@ -271,7 +271,7 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
    temporary index. Your own index and branches aren't touched. The agent gets a worktree of that
    commit, so it starts from exactly what you see.
 2. **Work**: the agent runs interactively in a hidden terminal with the task, plus a few rules from sepal: it's alone, it
-   shouldn't commit, it should run the check until it passes, and it should end with its
+   shouldn't commit, it shouldn't run the check itself (sepal does, and sends it the failures), only narrower tests, and it should end with its
    assumptions.
 3. **Check**: before the agent starts, sepal runs `Done when:` on the base worktree as a shell
    command (costing no tokens). If it already passes there, sepal only warns with `▲`: the check

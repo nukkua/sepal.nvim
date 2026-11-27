@@ -353,22 +353,29 @@ local function all_skills()
   return vim.tbl_extend("force", out, C.skills or {})
 end
 
+local function skill_body(s)
+  if type(s) ~= "string" then return nil end
+  s = (not s:find("\n") and readf(vim.fs.normalize(s))) or s
+  return vim.trim((s:gsub("\r\n", "\n"):gsub("^%-%-%-\n.-\n%-%-%-\n", "")))
+end
+
 -- the task with each skill it names as /name (the skills option) appended, frontmatter dropped, once each
 function M.skills(text)
   local out, seen, all = text, {}, all_skills()
   for name in (" " .. text):gmatch("%s/([%w_%-]+)") do
-    local s = all[name]
-    if type(s) == "string" and not seen[name] then
+    local body = not seen[name] and skill_body(all[name])
+    if body then
       seen[name] = true
-      s = readf(vim.fn.expand(s)) or s
-      out = out .. "\n\nSkill /" .. name .. ":\n" .. vim.trim((s:gsub("^%-%-%-\n.-\n%-%-%-\n", "")))
+      out = out .. "\n\nSkill /" .. name .. ":\n" .. body
     end
   end
   return out
 end
 
+function M.skill(name) return skill_body(all_skills()[name]) end
+
 -- 'omnifunc' of the task draft: /name completes the skills option's names (the blink source is sepal.blink)
-function M.complete_skills(findstart, base)
+function M.complete_skills(findstart, base, lazy)
   if findstart == 1 then
     local before = vim.api.nvim_get_current_line():sub(1, vim.fn.col(".") - 1)
     local s = (" " .. before):match("%s()/[%w_%-]*$")
@@ -377,8 +384,7 @@ function M.complete_skills(findstart, base)
   local out = {}
   for name, s in pairs(all_skills()) do
     if ("/" .. name):find(base, 1, true) == 1 then
-      local info = type(s) == "string" and s:match("^[^\n]*") or nil
-      out[#out + 1] = { word = "/" .. name, menu = "skill", info = info }
+      out[#out + 1] = { word = "/" .. name, menu = "skill", info = not lazy and skill_body(s) or nil }
     end
   end
   table.sort(out, function(a, b) return a.word < b.word end)

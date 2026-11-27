@@ -286,7 +286,9 @@ test("/name finds Claude Code's and Devin's user skills by name; the skills opti
 end)
 
 test("/ in a task completes the skills' names", function()
-  sepal.setup({ skills = { how = "~/how/SKILL.md", why = "Ask why." } })
+  local skill = vim.fs.joinpath(T, "complete.md")
+  local f = assert(io.open(skill, "w")); f:write("---\nname: how\n---\n\n# How\nComplete it.\n"); f:close()
+  sepal.setup({ skills = { how = skill, why = "Ask why." } })
   vim.cmd("new")
   vim.api.nvim_set_current_line("Goal: fix /wh")
   vim.api.nvim_win_set_cursor(0, { 1, 13 })
@@ -300,7 +302,42 @@ test("/ in a task completes the skills' names", function()
   assert(start == 10, start)
   assert(vim.deep_equal(words, { "/why" }), vim.inspect(words))
   assert(#all == 2 and all[1].word == "/how", vim.inspect(all))
+  assert(all[1].info == "# How\nComplete it.", vim.inspect(all[1]))
   assert(none == -3, none)
+end)
+
+test("blink resolves skill completion documentation lazily", function()
+  local skill = vim.fs.joinpath(T, "blink.md")
+  local f = assert(io.open(skill, "w")); f:write("---\nname: blinkhow\n---\n\n# Blink\nUse the body.\n"); f:close()
+  sepal.setup({ skills = { blinkhow = skill, why = "Ask why." } })
+  local old_cfg, old_types, old_blink = package.loaded["blink.cmp.config"], package.loaded["blink.cmp.types"], package.loaded["sepal.blink"]
+  package.loaded["blink.cmp.config"] = { sources = { transform_items = function(_, items) return items end } }
+  package.loaded["blink.cmp.types"] = { CompletionItemKind = { Keyword = 1 } }
+  package.loaded["sepal.blink"] = nil
+  local ok, err = pcall(function()
+    local blink = require("sepal.blink")
+    local source = blink.new()
+    vim.cmd("new")
+    vim.api.nvim_set_current_line("Goal: fix /wh")
+    vim.api.nvim_win_set_cursor(0, { 1, 13 })
+    local out
+    source:get_completions({ bufnr = vim.api.nvim_get_current_buf(), line = vim.api.nvim_get_current_line(), cursor = { 1, 13 } }, function(r) out = r end)
+    vim.cmd("bwipe!")
+    assert(out and #out.items == 2, vim.inspect(out))
+    local item = out.items[1]
+    assert(item.label == "/blinkhow" and item.data and item.data.sepal and item.data.skill == "blinkhow", vim.inspect(item))
+    assert(item.documentation == nil, vim.inspect(item))
+    local resolved
+    source:resolve(item, function(x) resolved = x end)
+    eq(resolved.documentation, { kind = "markdown", value = "# Blink\nUse the body." })
+    assert(not resolved.documentation.value:find(skill, 1, true) and not resolved.documentation.value:find("name: blinkhow", 1, true), resolved.documentation.value)
+    local inline
+    source:resolve(out.items[2], function(x) inline = x end)
+    eq(inline.documentation, { kind = "markdown", value = "Ask why." })
+  end)
+  package.loaded["blink.cmp.config"], package.loaded["blink.cmp.types"], package.loaded["sepal.blink"] = old_cfg, old_types, old_blink
+  sepal.setup({ skills = {} })
+  if not ok then error(err, 0) end
 end)
 
 test("a task runs in a worktree and lands as unstaged changes, with what the agent assumed", function()

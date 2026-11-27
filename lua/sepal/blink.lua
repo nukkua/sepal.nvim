@@ -7,7 +7,7 @@ local function only_skills(ctx, items)
   local sepal = require("sepal")
   if sepal.draft() ~= ctx.bufnr then return items end
   local name = (" " .. ctx.line:sub(1, ctx.cursor[2])):match("%s(/[%w_%-]*)$")
-  if not name or #sepal.complete_skills(0, name) == 0 then return items end
+  if not name or #sepal.complete_skills(0, name, true) == 0 then return items end
   return vim.tbl_filter(function(it) return it.data and it.data.sepal end, items)
 end
 
@@ -29,13 +29,19 @@ function S:get_completions(ctx, done)
   local start = sepal.complete_skills(1, "")
   if start < 0 then return done({ items = {} }) end
   local items = {}
-  for _, it in ipairs(sepal.complete_skills(0, "/")) do
+  for _, it in ipairs(sepal.complete_skills(0, "/", true)) do
     items[#items + 1] = {
-      label = it.word, data = { sepal = true }, kind = require("blink.cmp.types").CompletionItemKind.Keyword, documentation = it.info,
+      label = it.word, data = { sepal = true, skill = it.word:sub(2) }, kind = require("blink.cmp.types").CompletionItemKind.Keyword,
       textEdit = { newText = it.word, range = { start = { line = row, character = start }, ["end"] = { line = row, character = col } } },
     }
   end
   done({ items = items, is_incomplete_forward = false, is_incomplete_backward = false })
+end
+
+function S:resolve(item, done)
+  local body = item.data and item.data.skill and require("sepal").skill(item.data.skill)
+  if body and body ~= "" then item = vim.tbl_extend("force", item, { documentation = { kind = "markdown", value = body } }) end
+  done(item)
 end
 
 return S

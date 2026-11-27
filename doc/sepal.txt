@@ -107,8 +107,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              the check's allow rule go in a copy of your
              ~/.config/devin/config.json (--config), so its activity shows,
              a permission prompt warns you, and ctrl-c stops the task. Its
-             mode: accept-edits (auto for a btw or orchestrate, smart for
-             implementations with `auto_mode`). The config path follows
+             mode: dangerous for tasks and chats, whatever `args` or
+             `auto_mode` say (auto, read-only, for a btw or orchestrate). The config path follows
              $XDG_CONFIG_HOME when set. Invalid JSON (including JSONC) or
              an unreadable config becomes an empty config in sepal's copy. >lua
                agents = {

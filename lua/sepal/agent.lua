@@ -60,6 +60,13 @@ end
 local function readonly(kind) return kind == "btw" or kind == "orchestrate" end
 -- reading your repo itself: Claude Code's plan mode, so it can't change a file
 local function mode(e) return readonly(e.kind) and "plan" or nil end
+-- Devin's args with its mode: dangerous (approves every tool), but auto (read-only tools) for a btw or
+-- orchestrate, which run in your repo itself; any --permission-mode in args is replaced
+local function devin_args(e)
+  local a = vim.list_extend({}, args(e))
+  for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
+  return vim.list_extend(a, { "--permission-mode", readonly(e.kind) and "auto" or "dangerous" })
+end
 
 -- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update }
 local jobs = {}
@@ -504,15 +511,8 @@ agent = function(e, prompt, wt)
   local argv
   if dv then
     devin_config(conf, allow)
-    local a = vim.list_extend({}, args(e))
-    -- its modes: auto (read-only tools), accept-edits (and edits), smart (and what a fast model judges safe)
-    local m = readonly(e.kind) and "auto" or C().auto_mode and "smart" or not vim.tbl_contains(a, "--permission-mode") and "accept-edits"
-    if m then
-      for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
-      vim.list_extend(a, { "--permission-mode", m })
-    end
     -- the trust prompt would hold up each new worktree
-    argv = vim.list_extend(vim.list_extend(base(e), a), { "--config", conf, "--respect-workspace-trust", "false" })
+    argv = vim.list_extend(vim.list_extend(base(e), devin_args(e)), { "--config", conf, "--respect-workspace-trust", "false" })
     vim.list_extend(argv, model(e))
   else
     argv = vim.list_extend(cmd(args(e), mode(e), e), model(e))
@@ -1411,7 +1411,7 @@ function M.open(e, w, kept)
   local hidden = vim.api.nvim_open_win(b, false, vim.tbl_extend("force", screen(), { hide = true, focusable = false }))
   termwin(hidden)
   local ok, chan = pcall(vim.api.nvim_win_call, hidden, function()
-    local argv = devin(e) and vim.list_extend(vim.list_extend(vim.list_extend(base(e), args(e)), model(e)), { "-r", e.session })
+    local argv = devin(e) and vim.list_extend(vim.list_extend(vim.list_extend(base(e), devin_args(e)), model(e)), { "-r", e.session })
       or vim.list_extend(vim.list_extend(cmd({}, mode(e), e), model(e)), { "--resume", e.session })
     return vim.fn.jobstart(argv, { term = true, cwd = e.root,
       env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" } })

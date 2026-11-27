@@ -2067,7 +2067,7 @@ test(":Sepal task asks which agent with agents set: devin runs with sepal's hook
   local e = newest()
   eq({ e.status, e.session, e.model, e.agent, file("a.txt") },
     { "landed", "dv1", "fusion-x", { cmd = { dv }, model = "fusion-x", args = { "--sandbox" } }, "dv\n" })
-  eq(args(), { "--sandbox --permission-mode accept-edits --respect-workspace-trust false --model fusion-x" })
+  eq(args(), { "--sandbox --permission-mode dangerous --respect-workspace-trust false --model fusion-x" })
   local c = vim.json.decode(read(T .. "/devin.json"))
   eq({ c.permissions.allow, c.hooks.Stop ~= nil, c.hooks.PermissionRequest ~= nil }, { { "Exec(true)" }, true, true })
   assert(vim.tbl_contains(got, "▲ by devin: asks to run exec rm -rf x · :Sepal open"), vim.inspect(got))

@@ -211,7 +211,7 @@ task sent to it fails. A `cmd` whose executable name starts with `devin`
 runs the [Devin CLI](https://cli.devin.ai) instead of Claude Code, the same way: sepal adds its hooks
 and the check's allow rule to a copy of your `~/.config/devin/config.json`, so the panel shows what it
 does, a permission prompt warns you, and ctrl-c in it stops the task (what it did is kept). It runs
-in `accept-edits` (`auto` for a btw or orchestrate, `smart` for implementations with `auto_mode`). An agent's `model` wins over
+in `dangerous` mode, tasks and chats, whatever `args` or `auto_mode` say (`auto`, read-only, for a btw or orchestrate). An agent's `model` wins over
 `models`, and its `args` replace `args` (Claude Code's flags aren't Devin's).
 The config path follows `$XDG_CONFIG_HOME` when set. It must be valid JSON: an unreadable or
 invalid config (including JSONC comments) is replaced by an empty config in sepal's copy.

@@ -224,9 +224,22 @@ end
 local NUMSTAT = function(a, b) return { "diff", "--numstat", "-z", "--no-renames", a, b } end
 local FIRSTS = function(a, b) return { "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", a, b } end
 
--- files and lines changed from a to b, to cb(st): the diff runs off the main loop
+-- files and lines changed from a to b, to cb(st): the diffs run off the main loop
 function M.stat_bg(root, a, b, cb)
-  bg(root, NUMSTAT(a, b), nil, function(r) cb(stat_of(r.code == 0 and r.stdout or "")) end)
+  local num, names, pending = nil, nil, 2
+  local function one()
+    pending = pending - 1
+    if pending > 0 then return end
+    local st = stat_of(num)
+    local added = {}
+    for path in (names or ""):gmatch("[^%z]+") do added[path] = true end
+    if next(added) then st.new = added end
+    cb(st)
+  end
+  bg(root, NUMSTAT(a, b), nil, function(r) num = r.code == 0 and r.stdout or ""; one() end)
+  bg(root, { "diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", a, b }, nil, function(r)
+    names = r.code == 0 and r.stdout or ""; one()
+  end)
 end
 
 -- a git process started, not waited: { p } or nil when it couldn't start

@@ -151,7 +151,7 @@ local function bar(u, kind)
 end
 
 -- everything card reads of e, as a string: the cache key for its rows
-local function card_sig(e, w, now, C, icons_sig)
+local function card_sig(e, w, now, C, icons_sig, warns)
   local s, subs, u = e.stat, {}, e.usage
   for _, a in ipairs(e.subagents or {}) do subs[#subs + 1] = tostring(a.name) end
   if e.status == "planned" then
@@ -163,7 +163,7 @@ local function card_sig(e, w, now, C, icons_sig)
     tostring(not e.summary and e.task), #(e.assumptions or {}), tostring(e.model),
     tostring(u and u.used), tostring(u and u.limit), tostring(u and u.out), tostring(agent.kind(e)),
     tostring(e.agent and e.agent.cmd), tostring(require("sepal").icon(e.status, "?")),
-    tostring(C.retries), tostring(C.sakura), icons_sig }, "\0")
+    tostring(C.retries), tostring(C.sakura), tostring(e.vacuous), table.concat(warns, "\1"), icons_sig }, "\0")
 end
 
 
@@ -207,7 +207,8 @@ end
 -- a task as rows of { text, hl } chunks, behind a rail in its status's color (each row starts
 -- with the " " margin chunk: rows are cached whole by card_sig)
 local function card(e, w, now, C, icons_sig)
-  local sig = card_sig(e, w, now, C, icons_sig)
+  local warns = inbox.warnings(e)
+  local sig = card_sig(e, w, now, C, icons_sig, warns)
   local cached = card_c[sig]
   if cached then return cached end
   if memo_n > 4096 then memo_n, dw_c, wrap_c, card_c = 0, {}, {}, {} end
@@ -267,6 +268,7 @@ local function card(e, w, now, C, icons_sig)
     end
   end
   if e.why then para(e.why, "SepalWarn", "", 3) end
+  for _, warn in ipairs(warns) do para(warn, "SepalWarn", "", 3) end
   if e.error then para(e.error, "SepalError", "", 3) end
   if e.summary then para(e.summary, "Normal", "", 3)
   elseif not inbox.LIVE[e.status] and e.status ~= "queued" then -- nothing said yet: what was asked

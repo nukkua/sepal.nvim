@@ -318,9 +318,14 @@ require("sepal").status()
 
 Your work tree (uncommitted and untracked files too) is saved as a commit
 through a temporary index; your index and branches aren't touched. The agent
-works in a worktree of it, then sepal runs the check there. Landing applies
-the change to your work tree with a three-way merge per file (git
-merge-file), unstaged. With land = "auto" it only lands when that's clean: no
+works in a worktree of it. Before the agent starts, sepal runs "Done when:"
+on the base worktree as a shell command (costing no tokens); if it already
+passes, sepal only warns with ▲ because the check proves nothing. After the
+agent's work, sepal runs the check there. If the agent modifies existing
+test files (adding new ones is fine), the inbox and panel warn with
+"▲ it changed tests: …". Landing applies the change to your work tree with
+a three-way merge per file (git merge-file), unstaged. With land = "auto"
+it only lands when that's clean: no
 overlap with your edits and no unsaved buffer of a file it touches; otherwise
 the task waits as "needs you". Results are kept as refs/sepal/<id>/* until
 the task is dropped. Running, checking and queued tasks show as "interrupted"

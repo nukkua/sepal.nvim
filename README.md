@@ -273,8 +273,11 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 2. **Work**: the agent runs interactively in a hidden terminal with the task, plus a few rules from sepal: it's alone, it
    shouldn't commit, it should run the check until it passes, and it should end with its
    assumptions.
-3. **Check**: sepal runs `Done when:` in the worktree itself. If it fails, the agent gets the output
-   and `retries` more tries.
+3. **Check**: before the agent starts, sepal runs `Done when:` on the base worktree as a shell
+   command (costing no tokens). If it already passes there, sepal only warns with `▲`: the check
+   proves nothing. After the agent's work, sepal runs `Done when:` in the worktree itself. If it
+   fails, the agent gets the output and `retries` more tries. If the agent modifies existing test
+   files (adding new ones is fine), the inbox and panel warn with `▲ it changed tests: …`.
 4. **Land**: the change is applied to your work tree as unstaged changes, a three-way merge per file
    (`git merge-file`), so what you edited meanwhile is kept. With `land = "auto"` this happens on
    its own, but only when it's clean. If it overlaps your edits, or a buffer of a file it touches

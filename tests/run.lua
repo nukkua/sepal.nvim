@@ -1139,6 +1139,38 @@ test("assumptions are read from the end of a reply", function()
   eq(agent.assumptions("no list"), {})
 end)
 
+test("a decision ending in (path:line) shows on that line of the review; an edited · goes to the same chat", function()
+  eq({ agent.where("uses X (a.txt:3)") }, { "a.txt", 3 })
+  eq({ agent.where("uses X") }, {})
+  clean(); reset()
+  local reply = vim.fs.joinpath(T, "decide.jsonl")
+  vim.fn.writefile({ vim.json.encode({ type = "assistant", message = { content = { { type = "text",
+    text = "Did it.\n\nAssumptions:\n- uses X (a.txt:3)\n- no new deps" } } } }) }, reply)
+  vim.env.SEPAL_REPLY, vim.env.SEPAL_EDIT = reply, [[printf 'one\ntwo\nTHREE\n' > a.txt]]
+  run({ "Goal: decide" })
+  local e = newest()
+  eq(e.assumptions, { "uses X (a.txt:3)", "no new deps" })
+  agent.show(e)
+  local ns = vim.api.nvim_create_namespace("sepal.decisions")
+  local marks = vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { details = true })
+  eq(#marks, 1)
+  eq({ marks[1][2], marks[1][4].virt_lines[1][1][1] }, { 2, "· uses X (a.txt:3)" })
+  vim.cmd.tabclose()
+  vim.cmd("Sepal inbox")
+  local b = vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  for i, l in ipairs(lines) do
+    if l == "    · uses X (a.txt:3)" then vim.api.nvim_buf_set_lines(b, i - 1, i, false, { "    · uses Y (a.txt:3)" }) end
+  end
+  reset()
+  vim.env.SEPAL_FIX = [[printf 'one\ntwo\nY\n' > a.txt]]
+  notified(function() vim.cmd("write"); idle() end)
+  local p = prompts()
+  assert(p:find("Change these decisions", 1, true) and p:find("now: uses Y (a.txt:3)", 1, true), p)
+  eq(vim.tbl_contains({ "ready", "landed" }, newest().status), true, newest().status)
+  vim.cmd("close")
+end)
+
 test("a reply is read from the transcript's end, past a line that spans a read chunk", function()
   local reply_of = agent._t.reply_of
   local early = '{"type":"assistant","message":{"content":[{"type":"text","text":"early"}]}}'
@@ -1875,6 +1907,27 @@ test("a plan's models are your agents': m offers them, a task with one runs on i
   C.agents = { { cmd = "claude" }, { cmd = "claude", model = "opus" }, { cmd = "devin", model = "fusion-x" }, { cmd = "claude", model = "opus" } }
   eq(sepal.plan_models(), { "opus", "fusion-x" })
   C.agents = nil
+end)
+
+test(":Sepal qf plans the quickfix list as a large feat, one task per file", function()
+  clean(); reset()
+  local a, b = vim.fn.bufadd(work .. "/a.txt"), vim.fn.bufadd(work .. "/b.txt")
+  vim.fn.setqflist({ { bufnr = a, lnum = 1, text = "one" }, { bufnr = b, lnum = 2, text = "two" },
+    { bufnr = a, lnum = 3, text = "three" } })
+  local got = msgs(notified(function() vim.cmd("Sepal qf") end))
+  vim.cmd("close")
+  local e = inbox.list(work)[1]
+  eq({ e.kind, e.status, #e.plan }, { "orchestrate", "planned", 2 })
+  eq(got, { "◇ plan ready: " .. e.title .. " · 2 tasks: 2 default · s in :Sepal inbox makes the tasks, m sets a model" })
+  eq(e.plan[1], { title = "fix a.txt: 2 items", task = "Goal: fix these in a.txt\n1: one\n3: three\nFiles:\n- @a.txt" })
+  eq(e.plan[2].task, "Goal: fix these in b.txt\n2: two\nFiles:\n- @b.txt")
+  notified(function() agent.swarm(e); idle() end)
+  eq(#e.swarm, 2)
+  clean()
+  vim.fn.setqflist({}, "r")
+  got = msgs(notified(function() vim.cmd("Sepal qf") end))
+  eq(got, { "the quickfix list is empty" })
+  eq(#inbox.list(work), 0)
 end)
 
 test("m on a queued task sets the model it starts on", function()

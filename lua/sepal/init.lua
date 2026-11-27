@@ -252,6 +252,12 @@ function M.inbox()
   local _, root = entries()
   if root then require("sepal.inbox").open(root) end
 end
+-- :Sepal qf: the quickfix list as a planned large feat, one task per file, then the inbox
+function M.qf()
+  local e, why = require("sepal.agent").plan_from_qf(vim.fn.getcwd())
+  if not e then return M.notify(why, vim.log.levels.WARN) end
+  require("sepal.inbox").open(e.root)
+end
 -- :Sepal panel: a board at the right that shows each task and what its agent is doing (a toggle)
 function M.panel()
   local _, root = entries()

@@ -216,7 +216,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           file before | after in diff mode, all of them in
                           a location list (]q [q or ]l [l next file, ]c next
                           change, gf the file in your work tree, q closes);
-                          a btw's answer
+                          a decision ending in (path:line) shows above
+                          that line; a btw's answer
                     L     land it (with conflict markers if it overlaps
                           your edits)
                     U     take a landed task back out
@@ -243,6 +244,10 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           a queued one starts on it, r and c use it
                     dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim
+                    ·     edit a decision and :w: the change goes to the
+                          same chat, the agent redoes it and it's checked
+                          and lands again (u before :w takes it back; a
+                          deleted or added · line changes nothing)
                     yyp   a copied line opens, on :w, a new task with
                           that task's text, to add to and send; an
                           answered btw's opens an implement draft: its
@@ -283,6 +288,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 :Sepal stop       Stop every running or queued task, and close their chats.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted, answered, swarmed.
+                                                                  *:Sepal-qf*
+:Sepal qf         The quickfix list as a planned orchestrate, no planner:
+                  one plan item per file (so its tasks never collide when
+                  landing), each with its entries as "lnum: text" lines.
+                  It opens the inbox; `s` swarms it, `m` sets the models.
 
 Lua: `require("sepal").task(range, lines, kind)` (kind "implement", "btw" or "orchestrate", no
 picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,

@@ -490,19 +490,22 @@ end
 
 -- :w in the inbox: a task whose line is gone is dropped, a line put twice (yyp) opens a new task
 -- with that task's text, to add to and send (an answered btw: an implement draft, see sepal.implement). Under a planned orchestrate, its plan is what its
--- plan lines say now: the [model] in each, their order, and a deleted line drops that task
+-- plan lines say now: the [model] in each, their order, and a deleted line drops that task. An
+-- edited · decision (as many as before, some text changed) goes to the task's chat to redo
 function M.write(b)
   local root, seen, copies = vim.b[b].sepal_inbox, {}, {}
-  local cur, plans = nil, {} -- the task the lines are under; id -> { { item, model } } read under it
+  local cur, plans, decs = nil, {}, {} -- the task the lines are under; id -> { { item, model } } read under it; id -> its · texts
   for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
     local k = tkey(l)
     if ids[k] then
       seen[k] = (seen[k] or 0) + 1
       if seen[k] > #ids[k] then copies[#copies + 1], cur = ids[k][1], nil
-      else cur = ids[k][seen[k]]; plans[cur] = plans[cur] or {} end
+      else cur = ids[k][seen[k]]; plans[cur], decs[cur] = plans[cur] or {}, decs[cur] or {} end
     else
       local i, m = l:match(PLAN)
-      if cur and i then table.insert(plans[cur], { tonumber(i), m }) end
+      local d = l:match("^%s*· (.*)$")
+      if cur and i then table.insert(plans[cur], { tonumber(i), m })
+      elseif cur and d then table.insert(decs[cur], d) end
     end
   end
   local by = {}
@@ -534,6 +537,24 @@ function M.write(b)
   agent.drop_many(dropping) -- a running one stays
   drawn, prev_inbox = nil, nil
   render()
+  local notify = require("sepal").notify
+  for id, got in pairs(decs) do
+    local e, was = by[id], by[id] and by[id].assumptions or {}
+    local msg = {}
+    if e and #got == #was then -- one deleted or added: the counts differ, nothing to redo
+      for i, a in ipairs(was) do
+        if got[i] ~= a then msg[#msg + 1] = ("- was: %s\n  now: %s"):format(a, got[i]) end
+      end
+    end
+    if #msg > 0 then
+      if agent.running(e) then notify(e.title .. ": it's running, x first")
+      elseif not e.session then notify(e.title .. ": no chat to continue")
+      elseif vim.tbl_contains({ "ready", "landed", "failed", "needs", "stopped" }, e.status) then
+        e.assumptions = got
+        agent.continue(e, "Change these decisions, keep everything else:\n" .. table.concat(msg, "\n"))
+      end
+    end
+  end
   local queue = {}
   for _, id in ipairs(copies) do queue[#queue + 1] = M.find(root, id) end
   -- scheduled: :w puts you back in the inbox after BufWriteCmd, the draft should keep focus

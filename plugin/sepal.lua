@@ -2,8 +2,8 @@ if vim.g.loaded_sepal then return end
 vim.g.loaded_sepal = true
 
 -- :[range]Sepal [task] writes a task for the agent (s short feat, b btw: a question about the project, l large feat: a plan of tasks); :Sepal inbox lists every task (:Sepal panel shows them at the right); land, undo, open,
--- stop act on the newest one they apply to; clean drops the finished ones
-local SUB = { "task", "inbox", "panel", "land", "undo", "open", "stop", "clean" }
+-- stop act on the newest one they apply to; clean drops the finished ones; qf plans the quickfix list as a large feat, a task per file
+local SUB = { "task", "inbox", "panel", "land", "undo", "open", "stop", "clean", "qf" }
 vim.api.nvim_create_user_command("Sepal", function(o)
   local sub = o.fargs[1] or "task"
   local sepal = require("sepal")

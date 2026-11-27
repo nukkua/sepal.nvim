@@ -166,7 +166,7 @@ local function notes(e, again)
   if e.check then n[#n + 1] = ("- Done when `%s` passes: run only that, and fix until it passes."):format(e.check) end
   n[#n + 1] = "- End with only what the user must know, no summary:"
   n[#n + 1] = "Not done:\n- <left undone or unchecked; drop if nothing>"
-  n[#n + 1] = "Assumptions:\n- <a decision the task left open, one per line>\n(or \"Assumptions: none\")"
+  n[#n + 1] = "Assumptions:\n- <a decision the task left open, one per line; end it with (path:line) when it is about one line>\n(or \"Assumptions: none\")"
   return table.concat(n, "\n")
 end
 
@@ -184,6 +184,12 @@ function M.assumptions(reply)
     if b then out[#out + 1] = vim.trim(b) elseif vim.trim(lines[i]) ~= "" then break end
   end
   return out
+end
+
+-- the (path:line) an assumption ends with: path, lnum
+function M.where(a)
+  local p, l = a:match("%(([^%s():]+):(%d+)%)%s*$")
+  return p, tonumber(l)
 end
 
 -- a model as written in a plan line: "" and "default" are the agent's own (nil)
@@ -917,6 +923,33 @@ function M.start_many(specs, cwd, land, on_fail)
   return es
 end
 
+-- :Sepal qf: the quickfix list as a planned orchestrate, one task per file (siblings never collide
+-- when landing), no planner. The entry, or nil, why
+function M.plan_from_qf(cwd)
+  local root = git.root(cwd)
+  if not root then return nil, "not in a git repository: a task runs in a git worktree" end
+  local by, order = {}, {}
+  for _, it in ipairs(vim.fn.getqflist()) do
+    if it.bufnr > 0 and vim.api.nvim_buf_is_valid(it.bufnr) then
+      local name = vim.api.nvim_buf_get_name(it.bufnr)
+      local rel = vim.fs.relpath(root, name) or name
+      if not by[rel] then by[rel] = {}; order[#order + 1] = rel end
+      table.insert(by[rel], ("%d: %s"):format(it.lnum, vim.trim(it.text)))
+    end
+  end
+  if #order == 0 then return nil, "the quickfix list is empty" end
+  local items = vim.tbl_map(function(rel)
+    local l = by[rel]
+    return { title = ("fix %s: %s"):format(rel, plural(#l, "item")), model = nil,
+      task = "Goal: fix these in " .. rel .. "\n" .. table.concat(l, "\n") .. "\nFiles:\n- @" .. rel }
+  end, order)
+  local e = entry(("Fix the quickfix list (%d files)"):format(#order), root, nil, "orchestrate")
+  e.plan, e.status, e.check = items, "planned", C().check or (sepal().find_check(root))
+  inbox.changed(e)
+  notify(("◇ plan ready: %s · %s · s in :Sepal inbox makes the tasks, m sets a model"):format(e.title, plan_summary(e.plan)))
+  return e
+end
+
 -- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by the agent with
 -- the item's model (agents option), else by the orchestrate's agent with that model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
 function M.swarm(e)
@@ -1236,6 +1269,16 @@ function M.show(e)
     vim.bo[b].bufhidden, vim.b[b].sepal_path = "hide", path
     keys(b)
     after[i], idx[b] = b, i
+  end
+  local dns, at = vim.api.nvim_create_namespace("sepal.decisions"), {}
+  for i, p in ipairs(st.paths) do at[p] = i end
+  for _, d in ipairs(e.assumptions or {}) do -- each decision above the line it's about
+    local p, l = M.where(d)
+    local b = p and after[at[p]]
+    if b then
+      l = math.max(1, math.min(l, vim.api.nvim_buf_line_count(b)))
+      vim.api.nvim_buf_set_extmark(b, dns, l - 1, 0, { virt_lines_above = true, virt_lines = { { { "· " .. d, "SepalAccent" } } } })
+    end
   end
   vim.api.nvim_create_autocmd("BufWinEnter", { group = group, callback = function(ev)
     local i = idx[ev.buf]

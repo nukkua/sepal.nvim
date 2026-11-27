@@ -107,7 +107,9 @@ buffers for affected files before landing or undoing.
 The inbox is edited like a buffer, as in oil.nvim: `dd` a task's line and `:w` drops it,
 `u` before `:w` takes it back. Copy a line (`yyp`) and `:w` opens a new task with that task's text,
 to add to and send. Several copies open their drafts one after another, each once the one before is
-sent or discarded.
+sent or discarded. Edit a `·` decision and `:w` sends the change to the same chat: the agent redoes
+it, and the task is checked and lands again (`u` before `:w` takes it back; deleting or adding a
+`·` line changes nothing).
 
 Under each task are the lines worth reading: why it needs you, the error, the first lines of a
 failing check, the `·` decisions, conflict markers it left, its files with their `+`/`−` counts. A
@@ -125,7 +127,7 @@ subagents`).
 - `L` lands a task, `U` takes a landed one back out, `C` drops the tasks that are over (`:Sepal clean`).
 - `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
-  your work tree, `q` closes).
+  your work tree, `q` closes). A decision that ends in `(path:line)` shows above that line.
 - `j`/`k` go task to task. Each task is a fold, closed at first: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
 
 That's all of it: write, send, keep working, read the `·` lines.
@@ -260,6 +262,7 @@ vim.o.statusline = "%f %= %{v:lua.require'sepal'.status()}"
 | `:Sepal undo`        | take the newest landed task back out                                     |
 | `:Sepal open`        | watch the newest running task or task with a chat, in its agent         |
 | `:Sepal stop`        | stop running and queued tasks, and close their chats                    |
+| `:Sepal qf`          | the quickfix list as a planned large feat: one task per file, with its lines (`s` swarms it) |
 | `:Sepal clean`       | drop landed, no changes, undone, stopped, interrupted, answered and swarmed tasks |
 
 ## How it works

@@ -72,7 +72,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
 `auto_mode`  true: implementation runs and chats (|:Sepal-open|) use Claude
              Code's auto mode, --permission-mode auto instead of `args`'.
-             Btw and orchestrate runs stay in read-only plan mode.
+             Btw and orchestrate runs stay in read-only plan mode,
+             without ExitPlanMode: their reply is the answer or plan,
+             no approval asked.
 `check`      the check for tasks without a "Done when:" line, e.g.
              "make test". nil: those tasks aren't checked.
 `retries`    when the check fails, the agent gets its output and this many

@@ -1869,7 +1869,7 @@ test(":Sepal task picks the kind: b asks a btw in your repo, read-only, with its
   eq(got[1], "asking: how does landing work? · :Sepal open watches")
   assert(vim.tbl_contains(got, "● how does landing work?: Did it. · <CR> in :Sepal inbox reads it"), vim.inspect(got))
   -- plan: Claude Code's read-only mode; it started first: the other was still making its worktree
-  eq(args()[1], "--permission-mode plan --model sonnet")
+  eq(args()[1], "--permission-mode plan --disallowedTools ExitPlanMode --model sonnet")
   eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work) -- your repo itself, no worktree
   eq(vim.uv.fs_stat(work) ~= nil and file("a.txt"), "one\ntwo\nthree\n")
   sepal.setup({ max_running = 2 })
@@ -1974,7 +1974,7 @@ test("l (large feat) orchestrates: the agent plans the tasks and their models; e
     "◇ plan ready: shout and add · 2 tasks: 1 opus, 1 haiku · s in :Sepal inbox makes the tasks, m sets a model" })
   eq({ e.kind, e.status, e.check, e.assumptions }, { "orchestrate", "planned", "true", { "two tasks are enough" } })
   eq(vim.tbl_map(function(p) return { p.title, p.model } end, e.plan), { { "Shout two", "opus" }, { "Add b", "haiku" } })
-  eq(args(), { "--permission-mode plan --allowedTools Bash(true)" }) -- read-only, in your repo
+  eq(args(), { "--permission-mode plan --disallowedTools ExitPlanMode --allowedTools Bash(true)" }) -- read-only, in your repo
   eq(vim.split(vim.trim(read(T .. "/cwd")), "\n")[1], work)
   assert(prompts():find("only from these: opus, sonnet, haiku (or default", 1, true), prompts())
   eq(sepal.status(), "●1") -- waits for you, like a task ready to land

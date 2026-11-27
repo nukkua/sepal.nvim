@@ -385,7 +385,8 @@ require("sepal").setup({ args = { "--permission-mode", "acceptEdits", "--allowed
 Other flags go there too, e.g. `"--model", "opus"`.
 
 Or let Claude Code's auto mode decide for implementation runs and chats (it replaces the
-`--permission-mode` in `args`; btw and orchestrate runs still use plan mode):
+`--permission-mode` in `args`; btw and orchestrate runs still use plan mode, without its ExitPlanMode
+approval prompt: the reply is the answer or plan):
 
 ```lua
 require("sepal").setup({ auto_mode = true })

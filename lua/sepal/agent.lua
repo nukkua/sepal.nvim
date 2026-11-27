@@ -48,6 +48,8 @@ local function cmd(extra, mode, e)
   if mode then
     for i = #a - 1, 1, -1 do if a[i] == "--permission-mode" then table.remove(a, i); table.remove(a, i) end end
     vim.list_extend(a, { "--permission-mode", mode })
+    -- plan mode ends with ExitPlanMode, which asks you to approve it (and switch modes): the reply is the plan
+    if mode == "plan" then vim.list_extend(a, { "--disallowedTools", "ExitPlanMode" }) end
   end
   return vim.list_extend(base(e), a)
 end

@@ -71,7 +71,7 @@ local function devin_args(e)
   return vim.list_extend(a, { "--permission-mode", readonly(e.kind) and "auto" or "dangerous" })
 end
 
--- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped, done, update }
+-- running work per entry id: { job (the agent, check or prepare), buf (the agent's terminal), stopped }
 local jobs = {}
 local queue = {} -- { e, prompt, from } waiting for a free slot (max_running), oldest first
 local landing = {} -- id -> "being landed"/"being taken back": its plan runs off the main loop
@@ -374,7 +374,6 @@ local function finish(e, wt, status, extra)
   e.status, e.activity, e.subagents = status, nil, nil -- usage stays: the card shows what the run used
   for k, v in pairs(extra or {}) do e[k] = v end
   local auto = status == "planned" and #(e.plan or {}) == 1
-  if j and j.done then j.done(true) end
   if auto then
     inbox.batch(function()
       inbox.changed(e)
@@ -415,7 +414,6 @@ end
 local function check(e, wt)
   e.status, e.in_check = "checking", true
   inbox.changed(e)
-  jobs[e.id].update(e.title .. ": " .. e.check)
   local ok, job = pcall(vim.system, { "sh", "-c", e.check }, { cwd = wt, text = true }, vim.schedule_wrap(function(out)
     if not jobs[e.id] or jobs[e.id].stopped then return finish(e, wt, "stopped") end
     e.in_check = nil
@@ -715,7 +713,6 @@ agent = function(e, prompt, wt)
     local name = ev.hook_event_name
     if name == "PreToolUse" then
       e.activity = about({ name = ev.tool_name, input = ev.tool_input }, wt)
-      j.update(e.title .. ": " .. e.activity)
       dirty = true
     elseif name == "Notification" or name == "PermissionRequest" then -- Devin asks for a tool with the latter
       e.activity = "needs you"
@@ -840,14 +837,11 @@ agent = function(e, prompt, wt)
   end))
 end
 
--- no spinner while a task runs: finish notifies when it's over
-local function quiet() end
-
 -- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
 -- with max_running tasks already running it waits in the queue
 local function launch(e, prompt, from)
   if readonly(e.kind) then -- a question or a swarm: in your repo, read-only, at once; no worktree, prepare or slot
-    jobs[e.id] = { update = quiet, btw = true }
+    jobs[e.id] = { btw = true }
     e.status = "running"
     inbox.changed(e)
     vim.fn.mkdir(vim.fs.dirname(wtdir(e)), "p") -- for its events file
@@ -860,7 +854,7 @@ local function launch(e, prompt, from)
   end
   local wt = wtdir(e)
   if vim.uv.fs_stat(wt) then git.remove_worktree(e.root, wt) end
-  jobs[e.id] = { update = quiet } -- from here it counts as running: x stops it, max_running counts it
+  jobs[e.id] = {} -- from here it counts as running: x stops it, max_running counts it
   e.status = "running"
   inbox.changed(e)
   local ok, job = pcall(git.add_worktree, e.root, wt, from, function(made, err)
@@ -876,12 +870,10 @@ end
 
 -- C.prepare in the new worktree (if set), then the agent on prompt (nil: only the check, see M.resume)
 function M._prepare(e, prompt, wt)
-  local update = jobs[e.id].update
   local prepare = C().prepare
   local function go() if prompt then return agent(e, prompt, wt) end check(e, wt) end
   e.exclude = nil -- on e, not the job: c salvages a worktree left by a quit after a restart
   if not prepare then return go() end
-  update(e.title .. ": preparing")
   local pok, job = pcall(vim.system, { "sh", "-c", prepare }, { cwd = wt, text = true, env = { SEPAL_ROOT = e.root } }, vim.schedule_wrap(function(out)
     local j = jobs[e.id]
     if not j or j.stopped then return finish(e, wt, "stopped") end

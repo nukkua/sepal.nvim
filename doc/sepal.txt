@@ -1,16 +1,18 @@
-*sepal.txt*  Delegate, verify, land: tasks for Claude Code
+*sepal.txt*  Delegate, verify, land: tasks for Claude Code and Devin CLI
 
 ==============================================================================
 1. INTRODUCTION                                                        *sepal*
 
-You write a task next to your code; Claude Code works on it in a git worktree
-(your files never change under you); sepal runs the task's check itself; if
+You write a task next to your code; Claude Code or Devin CLI works on it in a
+git worktree (your files never change under you); sepal runs the check. If
 it passes, the result lands in your work tree as unstaged changes, to review
 with the git tools you already use. You hear about it when it's landed or
 when something needs you. |:Sepal-inbox| lists every task.
 
-Requirements: Neovim 0.12+, Claude Code or Devin CLI (|sepal-agents|), git.
-Optional: fff.nvim to pick files, fidget.nvim for notifications; wl-paste on
+Requirements: Neovim 0.12+, Claude Code or Devin CLI (|sepal-agents|), and
+Git with `git cat-file --batch -Z` support.
+Optional: fff.nvim to pick files, fidget.nvim for progress and info
+notifications, blink.cmp for skill completion (|sepal-skills|); wl-paste on
 Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 
 ==============================================================================
@@ -22,8 +24,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
    vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>")
 <
 2. Select the code you mean (or don't) and press <leader>as. Pick `s`
-   swarm (a bigger job, as tasks), `f` feat, `b` btw (a question) or `g` guide, then fill in
-   the task. "Done when:" is a shell command to check, e.g. `make test`.
+   swarm (a bigger job, as tasks), `f` feat, `b` btw (a question) or
+   `g` guide. For a feat, "Done when:" is a shell check, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
 4. "✔ landed: …" means it passed the check and is in your files, unstaged.
    The "·" lines under it are the decisions the agent made alone: read them.
@@ -57,10 +59,10 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
     skills = {},
   })
 <
-`cmd`        the agent: Claude Code. A task runs `cmd <args> <task>` in a
-             hidden terminal in its worktree; hooks passed with --settings
-             tell sepal what it does and when its turn is over. sepal runs
-             two agents, by the executable's name: claude… (Claude Code) and
+`cmd`        the agent argv (default: Claude Code). sepal runs it in a
+             hidden terminal; hooks tell sepal what it does and when its
+             turn is over. sepal runs two agents, by executable name:
+             claude… (Claude Code) and
              devin… (|sepal-agents|). Any other `cmd`, here or in `agents`,
              is an error in setup() and |sepal-health|, and its tasks fail.
                                                                 *sepal-args*
@@ -72,7 +74,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
 `auto_mode`  true: implementation runs and chats (|:Sepal-open|) use Claude
              Code's auto mode, --permission-mode auto instead of `args`'.
-             Btw and swarm runs stay in read-only plan mode,
+             Btw, guide and swarm runs and chats stay in read-only plan mode,
              without ExitPlanMode: their reply is the answer or plan,
              no approval asked.
 `check`      the check for tasks without a "Done when:" line, e.g.
@@ -80,8 +82,9 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 `retries`    when the check fails, the agent gets its output and this many
              more tries.
 `land`       "auto": a task that passes lands by itself, when it lands
-             cleanly. "manual": it waits in the inbox for `L`. Only for
-             tasks started from Lua: <c-c><c-c> and <c-c><c-w> choose.
+             cleanly. "manual": it waits in the inbox for `L`. This is the
+             fallback when no mode was chosen, e.g. |:Sepal-qf|.
+             <c-c><c-c> and <c-c><c-w> choose their own mode.
 `prepare`    shell command run in each new worktree before the agent, to
              bring in what git doesn't have: `ln -s "$SEPAL_ROOT/node_modules"
              node_modules`. $SEPAL_ROOT is your repo. What it makes isn't
@@ -90,29 +93,33 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                                         *sepal-max_running*
 `max_running` tasks running at once; the rest wait in the inbox as
              "queued" and start when one is done. Preparation and checking
-             take a slot too. Btw and swarm runs bypass this limit.
-             nil: no limit.
+             take a slot too. Btw, guide and swarm planning/verification
+             bypass this limit.
+             Set a number of at least 1; omitting it keeps the default.
                                                              *sepal-models*
 `models`     each task kind's model, passed as `--model` (over one in `args`):
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
-             Claude Code's default; `btw` unset: "sonnet". Setting one keeps
-             the other's default. `guide`: a guide's (unset: the
-             agent's default). `orchestrate`: a swarm's planner model (unset:
-             Claude Code's default). `verify`: the model `v` verifies a
-             swarmed plan's tasks on (unset: the planner's).
+             the agent's default (or a model in `args`); `btw` unset:
+             "sonnet". Setting one keeps the other's default. `guide`:
+             a guide's model; `orchestrate`: a swarm planner's model.
+             `verify`: the model `v` verifies a swarmed plan's tasks on
+             (unset: the planner's).
                                                              *sepal-agents*
 `agents`     the agents :Sepal task asks you to pick from after the kind
              by its `key` (unset: 1, 2… its place in the list), each
              `{ cmd = "claude" | argv, model = "…", args = {…}, name = "…",
-             key = "s" }`. Its model wins over `models`, its args replace
-             `args`. Unset: `cmd`. One: used without asking. An executable
+             key = "s" }`. Its model wins over the kind's entry in `models`.
+             Its args replace `args`, which only apply globally to Claude
+             Code. Unset: `cmd`. One: used without asking. An executable
              name starting with devin runs the Devin CLI like Claude Code:
              sepal's hooks and
              the check's allow rule go in a copy of your
              ~/.config/devin/config.json (--config), so its activity shows,
              a permission prompt warns you, and ctrl-c stops the task. Its
-             mode: dangerous for tasks and chats, whatever `args` or
-             `auto_mode` say (auto, read-only, for a btw or swarm). The config path follows
+             mode: dangerous for feats and their chats (tools are approved
+             without prompting); read-only auto for btw, guide and swarm
+             runs and chats. This overrides the permission mode in `args`
+             and `auto_mode`. The config path follows
              $XDG_CONFIG_HOME when set. Invalid JSON (including JSONC) or
              an unreadable config becomes an empty config in sepal's copy. >lua
                agents = {
@@ -131,19 +138,23 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              `~/.claude/skills/` ($CLAUDE_CONFIG_DIR) and
              `~/.config/devin/skills/` ($XDG_CONFIG_HOME). Write /name in a
              task (`Goal: /how does the inbox save?`) and the skill is sent
-             with it, below the task, its frontmatter dropped. Typing / at
-             the start of a word in the draft pops up the names (its
-             'omnifunc', CTRL-X CTRL-O); with blink.cmp add the source
+             with it, below the task, its frontmatter dropped. Claude's
+             skill wins over Devin's for the same name; `skills` wins over
+             both. Typing / at the start of a word in the draft pops up the
+             names (its 'omnifunc', CTRL-X CTRL-O). When blink.cmp is loaded,
+             it handles the popup instead: add the source
              `sepal = { name = "sepal", module = "sepal.blink" }` to its
-             providers and "sepal" to its default sources. >lua
+             providers and "sepal" to its default sources for completion
+             with skill previews. >lua
                skills = { how = "~/.claude/skills/how/SKILL.md" }
 <                                                       *sepal-panel_width*
 `panel_width` the width of |:Sepal-panel|: columns (46, the default), or a
              share of the editor's width, `"30%"` or `0.3`, that follows it
-             when Neovim is resized. At least 20 columns.
+             when Neovim is resized. Clamped to at least 20 columns when
+             there is room to leave 20 columns for the editor.
                                                             *sepal-sakura*
-`sakura`     true: cherry-blossom pinks for SepalTitle, SepalAccent
-             and SepalInfo (lighter on a dark 'background', deeper
+`sakura`     true: cherry-blossom colors for SepalTitle, SepalAccent,
+             SepalInfo and SepalShimmer (lighter on a dark 'background', deeper
              on a light one). false: those groups link to your colorscheme's.
                                                          *sepal-highlights*
 `highlights` group -> |nvim_set_hl()| spec, applied over everything:
@@ -154,7 +165,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              (@markup.strong), SepalAgent (SepalClaude: running subagents),
              SepalShimmer (SepalPanelTitle: the light over a working task in the panel).
              SepalOk (green), SepalError (red) and SepalWarn (amber) are
-             fixed colors, not the theme's. A colorscheme that defines one wins over the links and sakura.
+             fixed colors by default, as is SepalClaude (terracotta).
+             A colorscheme that defines one wins over the links and sakura.
                                                               *sepal-icons*
 `icons`      inbox status -> icon: `{ landed = "✔", running = "~" }`.
              Statuses: queued, running, checking, landed, ready, nochange,
@@ -168,22 +180,25 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 
                                                                       *:Sepal*
 :[range]Sepal [task]
-                  First pick its kind: `f` feat (below), `s` swarm or `b` btw:
-                  a question about the project, answered on the `btw`
-                  model (|sepal-models|) in your repo itself, read-only
-                  (--permission-mode plan): no worktree, no `prepare`, and
+                  First pick its kind: `s` swarm, `f` feat (below), `b` btw
+                  or `g` guide. A btw is a question about the project,
+                  answered on the `btw` model (|sepal-models|) in your repo
+                  itself, read-only (Claude Code plan mode or Devin auto
+                  mode): no worktree, no `prepare`, and
                   no wait for a |sepal-max_running| slot.
                   Nothing a btw does lands: <c-c><c-c> asks, the answer's
                   start is a notification, <CR> in the inbox shows all of
                   it, r asks a follow-up. `g` guide: a btw that answers
                   with an implementation guide (steps with where, what,
                   why, watch out; verification; open decisions) for you
-                  to write the code from. `s` swarm: the same
-                  template as a feat, but the agent (read-only, like a
+                  to write the code from. `s` swarm: the feat template, or
+                  just an idea and Files: with |sepal-task_sharpen| set.
+                  The agent (read-only, like a
                   btw, on the `orchestrate` model) plans the job as tasks:
                   how many, what each does, its check, and the model for
-                  each from your |sepal-agents|' models. The swarm waits in the
-                  inbox as `planned` (|:Sepal-inbox| `s`, `m`), its plan unfolded;
+                  each from your |sepal-agents|' models or the default.
+                  A multi-task swarm waits in the inbox as `planned`
+                  (|:Sepal-inbox| `s`, `m`), its plan unfolded;
                   each task gets the swarm's `Done when:` when it has none, and
                   they land like it was sent (<c-c><c-c> by themselves,
                   <c-c><c-w> on L). A plan with only one task doesn't wait for
@@ -196,10 +211,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   Implement: write a task in a buffer above the code: Goal,
                   Done when, Files. Fields left
                   empty aren't sent; an empty Goal: sends nothing.
-                  Done when: starts as the project's test command when
-                  sepal finds one: a `Tests:` line with a `command` in
-                  AGENTS.md or CLAUDE.md, a Makefile test target, a
-                  package.json test script, Cargo.toml, go.mod or pytest.
+                  Done when: starts as `check` when set. Otherwise sepal
+                  looks for a test command: a `Test:` or `Tests:` line with
+                  a command in backticks in AGENTS.md or CLAUDE.md, a
+                  Makefile test target, a package.json test script,
+                  Cargo.toml, go.mod or pytest.
                   Pytest needs pytest.ini or a [tool.pytest…] section in
                   pyproject.toml. Its line says where it was found; dd it
                   to skip that check. Empty or missing Done when: uses
@@ -218,11 +234,14 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                 d default or o one you type, which move to
                                 - and / when an agent uses those keys; an
                                 agents' model runs on that agent)
-                    <c-c><c-f>  add a file under Files: as @path
+                    <c-c><c-f>  add a file under Files: as @path (fff.nvim
+                                if installed, otherwise a path prompt)
                     <c-c><c-p>  paste the clipboard's image (wl-paste,
                                 xclip or pngpaste); the agent may read it
                     <c-c><c-k>  discard the task
-                  With a [range], those lines go in as a "Selection:
+                  A btw or guide only sends with <c-c><c-c>; it doesn't
+                  use <c-c><c-w> or task_sharpen. With a [range], those
+                  lines go in as a "Selection:
                   path:10-20" code block. Closing the window drops the
                   draft: :Sepal task always starts a new one. Outside a
                   git repo the task stays in its buffer.
@@ -235,13 +254,16 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           a location list (]q [q or ]l [l next file, ]c next
                           change, gf the file in your work tree, q closes);
                           a decision ending in (path:line) shows above
-                          that line; a btw's answer
-                    L     land it (with conflict markers if it overlaps
-                          your edits)
+                          that line. For a btw or guide, it reads the
+                          answer; for a swarm, the plan reply and verdict
+                    L     land it; overlapping text edits can leave
+                          conflict markers
                     U     take a landed task back out
-                    r     reply: the agent continues in the same chat from
-                          what it did; it's checked and lands again (only
-                          what's new)
+                    r     open a reply to the task's chat: <c-c><c-c>
+                          sends it, <c-c><c-k> discards it. The agent
+                          continues in the same chat; a feat is checked
+                          again and lands only what's new, following its
+                          landing mode
                     c     continue a task cut short (Neovim quit, x, Esc,
                           a crash): what it did so far is kept and the
                           agent goes on in its chat; one that never started
@@ -249,14 +271,16 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           the check runs again (after `prepare`, with a fresh
                           `retries` budget), on the result the agent finished
                     o     watch it (running) or open its chat (done)
-                    x     stop it
+                    x     stop a running or queued task (including prep
+                          or checking), or close its chat
                     s     start a planned swarm: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
                     v     on a swarm once it is swarmed and its tasks
-                          are over: the planner checks each task's changes
-                          (git diff) against what it asked of it, read-only in its
-                          chat; <CR> reads the verdict. On
+                          are over: the planner checks each task against
+                          its instructions, with its status, check outcome
+                          and git diff command when available. It runs
+                          read-only in your repo; <CR> reads the verdict. On
                           `models.verify` (|sepal-models|) or the one m
                           picks on it
                     m     on a planned swarm, the model of the plan
@@ -270,13 +294,16 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           dd an item (or move it) and :w drops (or reorders)
                           it. On a swarmed one, the model v verifies on.
                           On any other task, the model of its next run:
-                          a queued one starts on it, r and c use it
+                          a queued one starts on it, r and c use it.
+                          Unlike a plan item or draft, it keeps its agent
                     dd    drop it, once you :w (u before :w takes it
-                          back): the inbox is edited like oil.nvim
-                    ·     edit a decision and :w: the change goes to the
-                          same chat, the agent redoes it and it's checked
-                          and lands again (u before :w takes it back; a
-                          deleted or added · line changes nothing)
+                          back): the inbox is edited like oil.nvim.
+                          Running tasks stay
+                    ·     edit a decision and :w to send the change back
+                          to its chat. For ready, landed, check-failed,
+                          needs-you and stopped tasks with a chat. u before
+                          :w takes it back; changing the number of · lines
+                          doesn't send anything
                     yyp   a copied line opens, on :w, a new task with
                           that task's text, to add to and send; an
                           answered btw's opens an implement draft: its
@@ -299,7 +326,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                                                 *:Sepal-land*
 :Sepal land       Land the newest ready, needs-you, undone, check-failed,
                   failed, interrupted or stopped task. Needs a saved result;
-                  does not rerun the check. Overlaps leave conflict markers;
+                  does not rerun the check. Overlapping text edits can
+                  leave conflict markers;
                   unsaved buffers must be saved first, even with L.
                                                                 *:Sepal-undo*
 :Sepal undo       Take the newest landed task back out (a merge too: your
@@ -318,13 +346,16 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   stopped, interrupted, answered, swarmed.
                                                                   *:Sepal-qf*
 :Sepal qf         The quickfix list as a planned swarm, no planner:
-                  one plan item per file (so its tasks never collide when
-                  landing), each with its entries as "lnum: text" lines.
-                  It opens the inbox; `s` swarms it, `m` sets the models.
+                  one plan item per file, each with its entries as
+                  "lnum: text" lines. It opens the inbox; `s` swarms it
+                  (even for one item), `m` sets the models. It uses
+                  `check` or the detected test command, and `land`.
 
-Lua: `require("sepal").task(range, lines, kind)` (kind "implement", "btw", "guide" or "orchestrate", no
-picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
-`.panel()`, `.stop()`, `.clean()`.
+Lua: `require("sepal").task(range, lines, kind, agent)` (no picker; kind
+"implement", "btw", "guide" or "orchestrate"; agent: an entry in `agents`).
+`.pick(range)` is :Sepal task; `.inbox()`, `.land()`, `.undo()`, `.open()`,
+`.panel()`, `.stop()`, `.clean()`, `.qf()` are the other commands.
+`.draft()` returns the open draft buffer or nil.
 
                                                   *sepal-status* *SepalChanged*
 require("sepal").status()
@@ -346,31 +377,35 @@ require("sepal").status()
 
 Your work tree (uncommitted and untracked files too) is saved as a commit
 through a temporary index; your index and branches aren't touched. The agent
-works in a worktree of it; it's told not to run the check itself (its
-output costs tokens), only narrower tests: sepal runs it there and sends
-it the failures. Landing applies
-the change to your work tree with a three-way merge per file (git
-merge-file), unstaged. With land = "auto" it only lands when that's clean: no
-overlap with your edits and no unsaved buffer of a file it touches; otherwise
-the task waits as "needs you". Results are kept as refs/sepal/<id>/* until
-the task is dropped. Running, checking and queued tasks show as "interrupted"
-after Neovim quits; `c` continues from what was in the worktree (a task cut
-short in its check reruns only the check). If the initial
-snapshot never finished, send the task again. Dropping removes the task's refs,
-chat and pasted images, not its landed edits.
+works in a worktree of it. It's told to make the smallest complete change
+following the codebase's conventions, test new non-trivial logic, and
+report unfinished work and decisions. sepal runs the full check and sends
+it failures; the agent is told to run only narrower tests. Landing applies
+the change to your work tree, unstaged, with a three-way merge per file
+(git merge-file for overlapping text edits). In auto mode it waits as
+"needs you" if a change conflicts or an affected buffer is unsaved. Landing
+and undo handle executable bits and symlinks without merging through them.
+Where conflict markers aren't possible (e.g. binary, symlink or delete/modify
+conflicts), manual landing keeps your version. Results are kept as
+refs/sepal/<id>/* until the task is dropped. Running, checking and queued
+tasks show as "interrupted" after Neovim quits; `c` continues from what
+was in the worktree (a task cut short in its check reruns only the check).
+If the initial snapshot never finished, send the task again. Dropping
+removes the task's refs, chat and pasted images, not its landed edits.
 
 Lifecycle: queued -> running -> checking -> ready (manual) or landed.
 No diff: nochange ("no changes"); exhausted checks: failed ("check failed");
 agent/setup errors: error ("failed"); unsafe auto-landing: needs ("needs you").
-Stopping gives stopped; undo gives undone. Btw finishes as answered;
-a swarm as planned, then swarmed when its tasks are made.
+Stopping gives stopped; undo gives undone. Btw and guide finish as answered;
+a swarm becomes swarmed when its tasks start.
 
                                                         *sepal-context*
 A task's card in the panel shows its context window: 10 cells, used
 / window and the percent ("████░░░░░░ 80k/200k · 40%"), amber at 70%, red at
 90%, "over the limit" past it. The panel header shows the running task
-closest to its limit: "████████░░ 80% · fullest of 3: <title>"
-(one task: "80% context · <title>"). Queued tasks aren't paused at a
+closest to its limit, among running tasks with a reported limit:
+"████████░░ 80% · fullest of 3: <title>" (one such task:
+"80% context · <title>"). Queued tasks aren't paused at a
 limit. Only the agent's own numbers:
 Claude Code    its statusLine JSON (sepal sets its own statusLine in its
                hidden terminals): current_usage (input + cache creation +
@@ -393,6 +428,17 @@ it there.
 `:checkhealth sepal` checks Neovim, git, `cmd`, `args`, `check`, `retries`,
 `land`, `prepare`, `max_running`, `models`, `agents` and their executables,
 swarm models, `task_sharpen`, `panel_width`, `sakura`, `highlights`, `icons`, fidget and fff.
-It also reports `auto_mode`, the worktree/inbox path and worktree trust prompts.
+It also reports `auto_mode` when enabled, the worktree/inbox path, context
+bar sources and the Claude Code worktree trust prompt.
+
+==============================================================================
+7. TESTS                                                         *sepal-tests*
+
+From the repo root, `nvim -l tests/run.lua` runs the suite with a fake agent.
+Set `SEPAL_TEST` to part of a test name to run only matches.
+`SEPAL_DEMO_CHECK=1 nvim --headless -u tests/demo.lua` runs the swarm demo
+and verifies that both tasks land. If Git uses diff3 or zdiff3, set
+`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=merge.conflictStyle GIT_CONFIG_VALUE_0=merge`
+for the test command so the conflict-marker test sees the expected markers.
 
  vim:tw=78:ts=8:ft=help:norl:

@@ -956,7 +956,7 @@ test(":Sepal panel shows each task as a card at the right, and redraws with the 
   eq(vim.fn.bufwinid(b), -1)
 end)
 
-test("j/k in the inbox go task to task, past the lines under each", function()
+test("inbox tasks are folds: j/k move over closed ones", function()
   clean(); reset()
   vim.env.SEPAL_EDIT = [[echo x > a.txt]]
   run({ "Goal: first" })
@@ -977,8 +977,9 @@ test("j/k in the inbox go task to task, past the lines under each", function()
   inbox.render()
   eq(vim.fn.foldclosed(3), -1)
   eq(vim.fn.foldclosed(6), 6)
-  vim.cmd("normal j")
-  eq(inbox.current().title, "first")
+  vim.cmd("normal j") -- plain j: onto second's first open line
+  eq(vim.api.nvim_win_get_cursor(0)[1], 4)
+  eq(inbox.current().title, "second")
   vim.cmd("normal kza")
   eq(vim.fn.foldclosed(3), 3)
   vim.cmd("close")

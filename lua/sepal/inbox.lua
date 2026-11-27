@@ -394,6 +394,12 @@ draw = function()
       lines[#lines + 1] = "    " .. d; rows[#lines] = e.id
       if d:match("^↳ ") then agents[#lines] = true -- not dimmed: these are what's running
       elseif d:match("^▲ ") then warns[#lines] = true -- nor a warning: amber, not dimmed
+      elseif d:match("^· ") then -- nor a decision: what you read, plain text after an accent bullet
+        plans[#lines] = true
+        mark(#lines, 4, 4 + #"·", "SepalAccent")
+      elseif d:match("^  ") then -- a file: dimmed, its counts colored like a diff
+        for a, z in d:gmatch("()%+%d+()") do mark(#lines, 3 + a, 3 + z, "SepalAdded") end
+        for a, z in d:gmatch("()−%d+()") do mark(#lines, 3 + a, 3 + z, "SepalRemoved") end
       elseif e.status == "planned" and lines[#lines]:match(PLAN) then -- nor these: what s makes, the model to edit in color
         plans[#lines] = true
         local aa, zz = lines[#lines]:find("%[[^%]]*%]")
@@ -640,22 +646,6 @@ function M.open(root)
     vim.keymap.set("n", "m", M.pick_model, o("Pick the model of the task's next run"))
     vim.keymap.set("n", "C", function() require("sepal").clean() end, o("Drop the tasks that are over"))
     vim.keymap.set("n", "q", function() require("sepal").close() end, o("Close the inbox"))
-    -- j/k go task to task, past the detail lines under each
-    local function step(dir)
-      return function()
-        local row = vim.api.nvim_win_get_cursor(0)[1]
-        for _ = 1, vim.v.count1 do
-          local r = row + dir
-          local n = vim.api.nvim_buf_line_count(b)
-          while r >= 1 and r <= n and not head(b, r) do r = r + dir end
-          if r < 1 or r > n then break end
-          row = r
-        end
-        vim.api.nvim_win_set_cursor(0, { row, 0 })
-      end
-    end
-    vim.keymap.set("n", "j", step(1), o("Next task"))
-    vim.keymap.set("n", "k", step(-1), o("Previous task"))
   end
   vim.b[b].sepal_inbox = root
   local w = vim.fn.bufwinid(b)

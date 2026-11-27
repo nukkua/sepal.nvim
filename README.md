@@ -128,7 +128,7 @@ subagents`).
 - `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
   your work tree, `q` closes). A decision that ends in `(path:line)` shows above that line.
-- `j`/`k` go task to task. Each task is a fold, closed at first: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
+- Each task is a fold, closed at first: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
 
 That's all of it: write, send, keep working, read the `·` lines.
 

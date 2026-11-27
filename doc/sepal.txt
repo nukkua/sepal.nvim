@@ -262,7 +262,6 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           another, each once the one before is sent or
                           discarded
                     C     drop the tasks that are over (:Sepal clean)
-                    j/k   next/previous task
                     za    expand/collapse a task's fold (zM/zR: all)
                     q     close the inbox
                                                               *:Sepal-panel*

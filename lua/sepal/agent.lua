@@ -54,12 +54,12 @@ local function cmd(extra, mode, e)
   return vim.list_extend(base(e), a)
 end
 -- the model for e's kind (models option), after args: it wins over a --model there
--- a plan verifying its tasks (v): its verify model (m on it), else models.verify, else its own
+-- a swarm verifying its tasks (v): its verify model (m on it), else models.verify, else its own
 local function model(e)
   local m = e.verifying and (e.verify_model or (C().models or {}).verify) or e.agent and e.agent.model or (C().models or {})[e.kind or "implement"]
   return m and { "--model", m } or {}
 end
--- a btw (a question) and an orchestrate (a plan) read your repo itself and change nothing
+-- a btw (a question) and an orchestrate (a swarm) read your repo itself and change nothing
 local function readonly(kind) return kind == "btw" or kind == "guide" or kind == "orchestrate" end
 -- reading your repo itself: Claude Code's plan mode, so it can't change a file
 local function mode(e) return readonly(e.kind) and "plan" or nil end
@@ -373,8 +373,16 @@ local function finish(e, wt, status, extra)
   if wt and wt ~= e.root then git.remove_worktree(e.root, wt) end -- a btw runs in your repo: never that
   e.status, e.activity, e.subagents = status, nil, nil -- usage stays: the card shows what the run used
   for k, v in pairs(extra or {}) do e[k] = v end
-  inbox.changed(e)
+  local auto = status == "planned" and #(e.plan or {}) == 1
   if j and j.done then j.done(true) end
+  if auto then
+    inbox.batch(function()
+      inbox.changed(e)
+      M.swarm(e)
+    end)
+  else
+    inbox.changed(e)
+  end
   if status == "stopped" then notify("stopped: " .. e.title)
   elseif status == "error" then notify("✘ " .. e.title .. ": " .. tostring(e.error) .. " · :Sepal inbox", ERROR)
   elseif status == "failed" then
@@ -382,7 +390,7 @@ local function finish(e, wt, status, extra)
     notify(("✘ %s: `%s` still fails after %d %s · :Sepal inbox"):format(e.title, e.check, tries, tries == 1 and "try" or "tries"), WARN)
   elseif status == "nochange" then notify("no changes: " .. e.title .. (e.summary and ": " .. e.summary or ""))
   elseif status == "answered" then notify("● " .. e.title .. ": " .. tostring(e.summary) .. " · <CR> in :Sepal inbox reads it")
-  elseif status == "planned" then
+  elseif status == "planned" and not auto then
     notify(("◇ plan ready: %s · %s · s in :Sepal inbox makes the tasks, m sets a model"):format(e.title, plan_summary(e.plan)))
   end
   -- watched to its end: its chat in the same float (or the float goes, with nothing to show)
@@ -620,7 +628,7 @@ agent = function(e, prompt, wt)
       end))
     end
     local reply = reply_of(ev)
-    if e.verifying then -- the plan stays swarmed: its verdict is kept beside its reply
+    if e.verifying then -- the swarm stays swarmed: its verdict is kept beside its reply
       e.verifying, e.verdict = nil, reply or e.verdict
       if reply then notify("✔ verified: " .. e.title .. ": " .. (first(reply, 100) or "") .. " · <CR> in :Sepal inbox reads it") end
       return finish(e, wt, "swarmed", not reply and not j.stopped and { error = "the agent ended its turn without a verdict" } or nil)
@@ -629,7 +637,7 @@ agent = function(e, prompt, wt)
       e.answer, e.summary = reply or e.answer, first(reply, 100) or e.summary
       local status = j.stopped and "stopped" or reply and "answered" or "error"
       local extra = not reply and not j.stopped and { error = "the agent ended its turn without an answer" } or nil
-      if e.kind == "orchestrate" and status == "answered" then -- a plan: its tasks, to swarm it into
+      if e.kind == "orchestrate" and status == "answered" then -- a swarm: its tasks, to swarm it into
         e.assumptions = M.assumptions(reply)
         local plan = M.plan(reply)
         if #plan > 0 then e.plan, status = plan, "planned"
@@ -838,7 +846,7 @@ local function quiet() end
 -- a fresh worktree of `from` for e, prepared (C.prepare), then the agent on prompt;
 -- with max_running tasks already running it waits in the queue
 local function launch(e, prompt, from)
-  if readonly(e.kind) then -- a question or a plan: in your repo, read-only, at once; no worktree, prepare or slot
+  if readonly(e.kind) then -- a question or a swarm: in your repo, read-only, at once; no worktree, prepare or slot
     jobs[e.id] = { update = quiet, btw = true }
     e.status = "running"
     inbox.changed(e)
@@ -907,7 +915,7 @@ end
 local function entry(text, root, land, kind, agent)
   local check, title = M.parse(text)
   local btw = kind == "btw" or kind == "guide"
-  -- a question has nothing to check (nor the check option); a plan's is its tasks'
+  -- a question has nothing to check (nor the check option); a swarm's is its tasks'
   local e = { id = os.date("%Y%m%d-%H%M%S") .. ("-%04x"):format(vim.uv.hrtime() % 0x10000), root = root, title = title,
     task = text, check = not btw and (check or C().check) or nil, time = os.time(),
     status = not readonly(kind) and full() and "queued" or "running",
@@ -955,7 +963,7 @@ end
 -- run a new task from cwd; nil, why when it can't. Your work tree is saved in the background, then
 -- it starts (or waits its turn); on_fail(why) if saving fails (the task is gone from the inbox then)
 -- land: "auto" / "manual" for this task, nil: the land option
--- kind: "btw" for a question, "orchestrate" for a plan of tasks (see sepal.task), nil/"implement" for a change
+-- kind: "btw" for a question, "orchestrate" for a swarm (see sepal.task), nil/"implement" for a change
 -- agent: { cmd, model } from the agents option (nil: its first, or cmd and models when it's not set)
 function M.start(text, cwd, land, on_fail, kind, agent)
   local root = git.root(cwd)
@@ -1014,7 +1022,7 @@ end
 -- s: a planned orchestrate becomes its tasks, one per item of its plan, each run by the agent with
 -- the item's model (agents option), else by the orchestrate's agent with that model; they land like the orchestrate was sent (<c-c><c-c> by themselves, <c-c><c-w> on L)
 function M.swarm(e)
-  if e.kind ~= "orchestrate" then return notify("only a plan swarms into tasks") end
+  if e.kind ~= "orchestrate" then return notify("only a swarm has a plan to swarm") end
   if M.running(e) then return notify("it's still planning") end
   if e.status == "swarmed" then return notify("already swarmed: its tasks are in the inbox") end
   if e.status ~= "planned" or #(e.plan or {}) == 0 then return notify("it has no plan to swarm: r asks for one") end

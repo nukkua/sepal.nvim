@@ -1297,7 +1297,7 @@ test("checkhealth runs", function() require("sepal.health").check() end)
 
 local suggest = { "sh", "-c", [[sleep 0.2; printf '```\nScope: from the idea\n'; sed 's/^/- got: /'; printf '```\n']] }
 
-test("with task_sharpen a feat keeps its fields; a plan starts as the idea", function()
+test("with task_sharpen a feat keeps its fields; a swarm starts as the idea", function()
   sepal.setup({ task_sharpen = suggest })
   sepal.task()
   eq(vim.api.nvim_buf_get_lines(task_buf(), 0, 3, false), { "Goal: ", "", "Done when: " })
@@ -1308,7 +1308,7 @@ test("with task_sharpen a feat keeps its fields; a plan starts as the idea", fun
   vim.api.nvim_buf_set_lines(b, 0, 1, false, { "graceful shutdown" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
   assert(vim.wait(5000, function() return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == "Scope: from the idea" end, 20), "task not written")
-  -- the idea went as written: no sharpen prompt for a plan
+  -- the idea went as written: no sharpen prompt for a swarm
   eq(vim.api.nvim_buf_get_lines(b, 0, -1, false), { "Scope: from the idea", "- got: graceful shutdown", "- got: ", "- got: Files:" })
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
@@ -1329,7 +1329,7 @@ test("<c-c><c-s> shows a spinner in the task's keys while it sharpens", function
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-k>"), "tx", false)
 end)
 
-test("<c-c><c-s> sharpens a feat's filled-in fields; a plan's goes as written", function()
+test("<c-c><c-s> sharpens a feat's filled-in fields; a swarm's goes as written", function()
   sepal.task(nil, { "Goal: retry flaky uploads", "", "Constraints:", "- ", "", "Done when: ", "", "Files:", "- @a.lua" })
   local b = task_buf()
   vim.api.nvim_feedkeys(vim.keycode("<c-c><c-s>"), "tx", false)
@@ -1967,7 +1967,7 @@ test("the orchestrate demo's self-check passes (tests/demo.lua, when it is there
   assert(r.code == 0, ("demo self-check exited %d\nstdout:\n%s\nstderr:\n%s"):format(r.code, r.stdout or "", r.stderr or ""))
 end)
 
-test("p (plan) orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
+test("s (swarm) orchestrates: the agent plans the tasks and their models; edit them in the inbox, s starts each with its model", function()
   clean(); reset()
   local cmd = sepal.config().cmd
   sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "opus", name = "lead" },
@@ -1978,7 +1978,7 @@ test("p (plan) orchestrates: the agent plans the tasks and their models; edit th
     "   Files:", "   - @a.txt", "2. [haiku] Add b", "   Goal: add b.txt", "", "Assumptions:", "- two tasks are enough" }, "\n") } } } }) }, reply)
   vim.env.SEPAL_REPLY = reply
   local got = msgs(notified(function()
-    key("p", "1")
+    key("s", "1")
     sepal.pick()
     eq(vim.b[task_buf()].sepal_kind, "orchestrate")
     vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: shout and add", "", "Done when: true" })
@@ -2068,7 +2068,61 @@ test("p (plan) orchestrates: the agent plans the tasks and their models; edit th
   clean()
 end)
 
-test("a plan's models are your agents': m offers them, a task with one runs on its agent", function()
+test("a 1-task swarm starts by itself: it lands like it was sent", function()
+  clean(); reset()
+  local cmd = sepal.config().cmd
+  sepal.config().agents = { { cmd = cmd, name = "claude" }, { cmd = cmd, model = "sonnet" } }
+  local reply = vim.fs.joinpath(T, "one-plan.jsonl")
+  vim.fn.writefile({ vim.json.encode({ type = "assistant", message = { content = { { type = "text", text = table.concat({
+    "One part.", "", "Plan:", "1. [sonnet] Add b", "   Goal: add b.txt" }, "\n") } } } }) }, reply)
+  local function send_one(send_key)
+    reset()
+    vim.env.SEPAL_REPLY = reply
+    vim.env.SEPAL_EDIT = [[case "$PWD" in */work) ;; *) echo hi > b.txt ;; esac]]
+    return msgs(notified(function()
+      key("s", "1")
+      sepal.pick()
+      eq(vim.b[task_buf()].sepal_kind, "orchestrate")
+      vim.api.nvim_buf_set_lines(task_buf(), 0, -1, false, { "Goal: add b", "", "Done when: true" })
+      vim.api.nvim_feedkeys(vim.keycode(send_key), "tx", false)
+      idle()
+    end))
+  end
+  local function swarm_entry()
+    for _, x in ipairs(inbox.list(work)) do if x.kind == "orchestrate" then return x end end
+  end
+
+  local got = send_one("<c-c><c-c>")
+  local all = table.concat(got, "\n")
+  assert(all:find("planning: add b", 1, true), all)
+  assert(all:find("swarm: add b · 1 task: 1 sonnet started", 1, true), all)
+  assert(all:find("landed: add b.txt", 1, true), all)
+  assert(not all:find("plan ready", 1, true), all)
+  local e = swarm_entry()
+  eq({ e.status, #e.swarm }, { "swarmed", 1 })
+  local l = inbox.list(work)
+  eq(l[1].id, e.swarm[1])
+  eq({ l[1].status, l[1].check }, { "landed", "true" })
+  assert(vim.tbl_contains(args(), "--permission-mode acceptEdits --model sonnet --allowedTools Bash(true)"), vim.inspect(args()))
+  assert(not prompts():find("Part of a plan", 1, true), prompts())
+  eq(file("b.txt"), "hi\n")
+
+  clean()
+  got = send_one("<c-c><c-w>")
+  all = table.concat(got, "\n")
+  assert(all:find("swarm: add b · 1 task: 1 sonnet started", 1, true), all)
+  assert(not all:find("plan ready", 1, true), all)
+  e = swarm_entry()
+  eq({ e.status, #e.swarm }, { "swarmed", 1 })
+  l = inbox.list(work)
+  eq({ l[1].id, l[1].status }, { e.swarm[1], "ready" })
+  eq(file("b.txt"), nil)
+
+  sepal.config().agents = nil
+  clean()
+end)
+
+test("a swarm's models are your agents': m offers them, a task with one runs on its agent", function()
   local C = sepal.config()
   eq(sepal.plan_models(), {}) -- no agents: the tasks run on the default model
   C.agents = { { cmd = "claude" }, { cmd = "claude", model = "opus" }, { cmd = "devin", model = "fusion-x" }, { cmd = "claude", model = "opus" } }
@@ -2076,7 +2130,7 @@ test("a plan's models are your agents': m offers them, a task with one runs on i
   C.agents = nil
 end)
 
-test(":Sepal qf plans the quickfix list as a plan, one task per file", function()
+test(":Sepal qf plans the quickfix list as a swarm, one task per file", function()
   clean(); reset()
   local a, b = vim.fn.bufadd(work .. "/a.txt"), vim.fn.bufadd(work .. "/b.txt")
   vim.fn.setqflist({ { bufnr = a, lnum = 1, text = "one" }, { bufnr = b, lnum = 2, text = "two" },
@@ -2157,11 +2211,11 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   sepal.pick()
   local btw = draft()
   eq(#shots, 1)
-  eq(shots[1].lines, { "  p  plan   ✻ claude", "  f  feat   ✻ opus 5.5",
+  eq(shots[1].lines, { "  s  swarm  ✻ claude", "  f  feat   ✻ opus 5.5",
     "  b  btw    ✻ sonnet", "  g  guide  ✻ claude" })
   eq({ shots[1].title, shots[1].config.relative }, { "sepal", "" })
   eq(shots[1].wrap, false)
-  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "p"), true)
+  eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalAccent"), "s"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalClaude"), "✻"), true)
   eq(vim.tbl_contains(marked_texts(shots[1], 0, "SepalDim"), "claude"), true)
   picker_closed(shots[1])
@@ -2177,7 +2231,7 @@ test(":Sepal task shows who works on it: each kind's or agent's provider logo an
   local gpt = draft()
   sepal.setup({ models = {}, agents = nil })
   eq(#shots, 2)
-  eq(shots[1].lines, { "  p  plan", "  f  feat", "  b  btw", "  g  guide" })
+  eq(shots[1].lines, { "  s  swarm", "  f  feat", "  b  btw", "  g  guide" })
   eq(shots[2].lines, { "  1  ✻ claude", "  2  ❖ fusion review  opus 5.5 medium + swe 2 high",
     "  t  ֎ devin" .. (" "):rep(10) .. "gpt 5", "  4  ❖ devin", "  5  ✻ opus" })
   eq(shots[2].title, "sepal · feat")

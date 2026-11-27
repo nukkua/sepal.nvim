@@ -17,7 +17,7 @@ local C = {
   worktrees = vim.fs.joinpath(vim.fn.stdpath("state"), "sepal"), -- where worktrees and the inbox live
   task_sharpen = nil,  -- argv: rough task on stdin -> finished task on stdout; <c-c><c-s> in a task runs it
   max_running = 3,     -- tasks running at once, the rest wait in a queue; nil: no limit
-  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, guide, orchestrate (the planner), verify (v on a swarmed plan; nil: the planner's)
+  models = {},         -- task kind -> its --model: implement (nil: the agent's default, or args'), btw, guide, orchestrate (the swarm planner), verify (v on a swarm; nil: the planner's)
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   panel_width = 46,    -- :Sepal panel's width: columns (46), a share of the editor's ("30%" or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
@@ -50,7 +50,7 @@ function M.setup(opts)
 end
 function M.config() return C end
 
--- the models a plan's tasks are picked from (m in the inbox too): your agents' (agents option), in order
+-- the models a swarm's tasks are picked from (m in the inbox too): your agents' (agents option), in order
 function M.plan_models()
   local out = {}
   for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do
@@ -252,7 +252,7 @@ function M.inbox()
   local _, root = entries()
   if root then require("sepal.inbox").open(root) end
 end
--- :Sepal qf: the quickfix list as a planned plan, one task per file, then the inbox
+-- :Sepal qf: the quickfix list as a planned swarm, one task per file, then the inbox
 function M.qf()
   local e, why = require("sepal.agent").plan_from_qf(vim.fn.getcwd())
   if not e then return M.notify(why, vim.log.levels.WARN) end
@@ -394,7 +394,7 @@ end
 local function template(check)
   return { "Goal: ", "", "Done when: " .. (check or ""), "", "Files:" }
 end
-local IDEA = { "", "", "Files:" } -- a plan with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
+local IDEA = { "", "", "Files:" } -- a swarm with task_sharpen (or a btw): the idea goes on top, <c-c><c-s> writes the task
 local HINT = { btw = "ask anything about the project; it answers, nothing changes",
   guide = "a bug, feature or change; it writes you a step-by-step guide, you write the code",
   orchestrate = "the whole job; it's planned as tasks, each with its model; <c-c><c-s> writes it" }
@@ -508,7 +508,7 @@ local function keys(buf, text_only)
   local kind = vim.b[buf].sepal_kind
   local help = kind == "btw" and { "btw", "<c-c><c-c> ask" }
     or kind == "guide" and { "guide", "<c-c><c-c> guide me" }
-    or kind == "orchestrate" and { "plan", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
+    or kind == "orchestrate" and { "swarm", "<c-c><c-c> plan", "<c-c><c-w> plan, its tasks wait", C.task_sharpen and "<c-c><c-s> write" or nil }
     or { "<c-c><c-c> send", "<c-c><c-w> wait", C.task_sharpen and "<c-c><c-s> sharpen" or nil }
   vim.list_extend(help, { "<c-c><c-a> model", "<c-c><c-f> file", "<c-c><c-p> image", "<c-c><c-k> discard" })
   local items = vim.tbl_map(function(s) return { { s, "SepalDim" } } end, help)
@@ -569,8 +569,8 @@ local function busy(buf, label)
 end
 
 -- the kinds :Sepal task picks from; the shown names (the kinds stay: saved inboxes, models keys)
-local KINDS = { f = "implement", b = "btw", p = "orchestrate", g = "guide" }
-local LABEL = { implement = "feat", btw = "btw", orchestrate = "plan", guide = "guide" }
+local KINDS = { f = "implement", b = "btw", s = "orchestrate", g = "guide" }
+local LABEL = { implement = "feat", btw = "btw", orchestrate = "swarm", guide = "guide" }
 
 -- :Sepal task: write a task in a buffer above the code, then run it in the background.
 -- <c-c><c-c> runs it and lands it by itself, <c-c><c-w> runs it and has it wait for L,
@@ -802,7 +802,7 @@ function M.implement(e)
   if vim.b.sepal_task then vim.api.nvim_win_set_cursor(0, { 1, #"Goal: " }) end
 end
 
--- :Sepal task: pick its kind first, p plan (an orchestrate), f feat (an implement) or b btw
+-- :Sepal task: pick its kind first, s swarm (an orchestrate), f feat (an implement) or b btw
 -- (any other key cancels); an open draft just gets the focus (and the range), whatever its kind
 -- a pick in a bottom split like the inbox (here and the inbox's m): one item a row, the key you press (nil: <Esc>, <c-c>)
 local CHOOSE_NS = vim.api.nvim_create_namespace("sepal.choose")
@@ -943,7 +943,7 @@ function M.pick(range)
   -- each kind with its provider's logo and model, unless the agent is picked next
   local agents = C.agents or {}
   local items = {}
-  for _, k in ipairs({ "p", "f", "b", "g" }) do
+  for _, k in ipairs({ "s", "f", "b", "g" }) do
     local item = { key = k, label = LABEL[KINDS[k]] }
     if #agents < 2 then
       local l, m, name = who(KINDS[k])

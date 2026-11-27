@@ -82,7 +82,7 @@ sepal.setup({
 vim.schedule(function()
   vim.api.nvim_echo({
     { "sepal demo", "SepalTitle" }, { " — a throwaway repo at " .. T },
-    { "\n:Sepal task", "SepalAccent" }, { "  then o, write a Goal, <c-c><c-c> sends it" },
+    { "\n:Sepal task", "SepalAccent" }, { "  then s, write a Goal, <c-c><c-c> sends it" },
     { "\n:Sepal inbox", "SepalAccent" }, { "  m picks a plan task's model, s swarms it into tasks" },
     { "\n:Sepal panel", "SepalAccent" }, { "  the tasks and their agents at the right" },
   }, true, {})

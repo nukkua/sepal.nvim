@@ -40,8 +40,8 @@ function M.check()
   else h.ok(("models: implement %s, btw %s, orchestrate %s, verify %s"):format(C.models.implement or "the agent's default",
     C.models.btw or "the agent's default", C.models.orchestrate or "the agent's default", C.models.verify or "the planner's")) end
   local pm = require("sepal").plan_models()
-  if #pm == 0 then h.info("a plan's tasks run on the default model: give your agents a model to pick from")
-  else h.ok("a plan picks its tasks' models from your agents': " .. table.concat(pm, ", ")) end
+  if #pm == 0 then h.info("a swarm's tasks run on the default model: give your agents a model to pick from")
+  else h.ok("a swarm picks its tasks' models from your agents': " .. table.concat(pm, ", ")) end
   if C.agents then
     if type(C.agents) ~= "table" then h.error("agents must be a list: { { cmd = \"devin\", model = \"...\" } }") end
     for _, a in ipairs(type(C.agents) == "table" and C.agents or {}) do

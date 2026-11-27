@@ -21,8 +21,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
    vim.keymap.set({ "n", "x" }, "<leader>as", ":Sepal task<cr>")
    vim.keymap.set("n", "<leader>ai", "<cmd>Sepal inbox<cr>")
 <
-2. Select the code you mean (or don't) and press <leader>as. Pick `p`
-   plan (a bigger job, as tasks), `f` feat, `b` btw (a question) or `g` guide, then fill in
+2. Select the code you mean (or don't) and press <leader>as. Pick `s`
+   swarm (a bigger job, as tasks), `f` feat, `b` btw (a question) or `g` guide, then fill in
    the task. "Done when:" is a shell command to check, e.g. `make test`.
 3. <c-c><c-c> sends it. Keep working; more tasks run in parallel.
 4. "✔ landed: …" means it passed the check and is in your files, unstaged.
@@ -72,7 +72,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              "Bash(npm run lint)" }`. Other flags too: `"--model", "opus"`.
 `auto_mode`  true: implementation runs and chats (|:Sepal-open|) use Claude
              Code's auto mode, --permission-mode auto instead of `args`'.
-             Btw and plan runs stay in read-only plan mode,
+             Btw and swarm runs stay in read-only plan mode,
              without ExitPlanMode: their reply is the answer or plan,
              no approval asked.
 `check`      the check for tasks without a "Done when:" line, e.g.
@@ -90,14 +90,14 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                                         *sepal-max_running*
 `max_running` tasks running at once; the rest wait in the inbox as
              "queued" and start when one is done. Preparation and checking
-             take a slot too. Btw and plan runs bypass this limit.
+             take a slot too. Btw and swarm runs bypass this limit.
              nil: no limit.
                                                              *sepal-models*
 `models`     each task kind's model, passed as `--model` (over one in `args`):
              `{ implement = "opus", btw = "haiku" }`. `implement` unset:
              Claude Code's default; `btw` unset: "sonnet". Setting one keeps
              the other's default. `guide`: a guide's (unset: the
-             agent's default). `orchestrate`: a plan's planner model (unset:
+             agent's default). `orchestrate`: a swarm's planner model (unset:
              Claude Code's default). `verify`: the model `v` verifies a
              swarmed plan's tasks on (unset: the planner's).
                                                              *sepal-agents*
@@ -112,7 +112,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              ~/.config/devin/config.json (--config), so its activity shows,
              a permission prompt warns you, and ctrl-c stops the task. Its
              mode: dangerous for tasks and chats, whatever `args` or
-             `auto_mode` say (auto, read-only, for a btw or plan). The config path follows
+             `auto_mode` say (auto, read-only, for a btw or swarm). The config path follows
              $XDG_CONFIG_HOME when set. Invalid JSON (including JSONC) or
              an unreadable config becomes an empty config in sepal's copy. >lua
                agents = {
@@ -121,7 +121,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                }
 <                                                      *sepal-task_sharpen*
 `task_sharpen` argv that gets the task buffer on stdin and prints the
-             finished task. <c-c><c-s> runs it; a plan's buffer is your
+             finished task. <c-c><c-s> runs it; a swarm's buffer is your
              idea and Files:, a feat's is a sharpen prompt above its
              filled-in fields. For Claude Code, pass -p and
              --no-session-persistence.
@@ -168,7 +168,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 
                                                                       *:Sepal*
 :[range]Sepal [task]
-                  First pick its kind: `f` feat (below), `p` plan or `b` btw:
+                  First pick its kind: `f` feat (below), `s` swarm or `b` btw:
                   a question about the project, answered on the `btw`
                   model (|sepal-models|) in your repo itself, read-only
                   (--permission-mode plan): no worktree, no `prepare`, and
@@ -178,16 +178,17 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   it, r asks a follow-up. `g` guide: a btw that answers
                   with an implementation guide (steps with where, what,
                   why, watch out; verification; open decisions) for you
-                  to write the code from. `p` plan: the same
+                  to write the code from. `s` swarm: the same
                   template as a feat, but the agent (read-only, like a
                   btw, on the `orchestrate` model) plans the job as tasks:
                   how many, what each does, its check, and the model for
-                  each from your |sepal-agents|' models. The plan waits in the
-                  inbox (|:Sepal-inbox| `s`, `m`); its tasks get its
-                  `Done when:` when they have none, and land like it was
-                  sent (<c-c><c-c> by themselves, <c-c><c-w> on L). Any
-                  other key cancels. With a draft open, it goes to the
-                  draft.
+                  each from your |sepal-agents|' models. The swarm waits in the
+                  inbox as `planned` (|:Sepal-inbox| `s`, `m`), its plan unfolded;
+                  each task gets the swarm's `Done when:` when it has none, and
+                  they land like it was sent (<c-c><c-c> by themselves,
+                  <c-c><c-w> on L). A plan with only one task doesn't wait for
+                  `s`: the task starts at once, landing the same way. Any other
+                  key cancels. With a draft open, it goes to the draft.
                   To try it by hand: `nvim -u tests/demo.lua` (a throwaway
                   repo, a fake agent that plans two tasks), or
                   `SEPAL_DEMO_REAL=1 nvim -u tests/demo.lua` uses the real
@@ -210,7 +211,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                                 the inbox for L
                     <c-c><c-s>  feat: have |sepal-task_sharpen| sharpen
                                 it (its filled-in fields, deeper not bigger);
-                                plan: write it
+                                swarm: write it
                     <c-c><c-a>  pick the model it runs on (your agents'
                                 models by each agent's key, as in :Sepal
                                 task, or its number; the models option's;
@@ -249,17 +250,17 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           `retries` budget), on the result the agent finished
                     o     watch it (running) or open its chat (done)
                     x     stop it
-                    s     swarm a planned plan: one task per item of
+                    s     start a planned swarm: one task per item of
                           its plan, each with its model, all from one
                           snapshot of your work tree
-                    v     on a swarmed plan whose tasks are over: the
-                          planner checks each task's changes (git diff)
-                          against what it asked of it, read-only in its
+                    v     on a swarm once it is swarmed and its tasks
+                          are over: the planner checks each task's changes
+                          (git diff) against what it asked of it, read-only in its
                           chat; <CR> reads the verdict. On
                           `models.verify` (|sepal-models|) or the one m
-                          picks on the swarmed plan
-                    m     on a planned plan, the model of the plan
-                          item under the cursor (on the plan's own
+                          picks on it
+                    m     on a planned swarm, the model of the plan
+                          item under the cursor (on the swarm's own
                           line: of every item), from your |sepal-agents|'
                           models (each agent's key, as in :Sepal task, or its
                           number), the models option's, "default" (d) or one
@@ -267,7 +268,8 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                           those keys); an item with an agent's model runs on
                           that agent. Or edit the `[model]` in the line and :w;
                           dd an item (or move it) and :w drops (or reorders)
-                          it. On a swarmed plan, the model v verifies on. On any other task, the model of its next run:
+                          it. On a swarmed one, the model v verifies on.
+                          On any other task, the model of its next run:
                           a queued one starts on it, r and c use it
                     dd    drop it, once you :w (u before :w takes it
                           back): the inbox is edited like oil.nvim
@@ -315,7 +317,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 :Sepal clean      Drop the tasks that are over: landed, no changes, undone,
                   stopped, interrupted, answered, swarmed.
                                                                   *:Sepal-qf*
-:Sepal qf         The quickfix list as a planned plan, no planner:
+:Sepal qf         The quickfix list as a planned swarm, no planner:
                   one plan item per file (so its tasks never collide when
                   landing), each with its entries as "lnum: text" lines.
                   It opens the inbox; `s` swarms it, `m` sets the models.
@@ -328,7 +330,7 @@ picker), `.pick()` (:Sepal task), `.inbox()`, `.land()`, `.undo()`, `.open()`,
 require("sepal").status()
                   for your statusline: the tasks of the repo you're in that
                   are running (~: includes queued and checking), ready to
-                  land (●: includes planned plans) and need you (▲:
+                  land (●: includes planned swarms) and need you (▲:
                   needs you, check failed, failed), e.g. "~2 ●1 ▲1"; "" when
                   there are none. Icons follow |sepal-icons|. It only reads
                   what's loaded, so it's cheap to call on every redraw.
@@ -361,7 +363,7 @@ Lifecycle: queued -> running -> checking -> ready (manual) or landed.
 No diff: nochange ("no changes"); exhausted checks: failed ("check failed");
 agent/setup errors: error ("failed"); unsafe auto-landing: needs ("needs you").
 Stopping gives stopped; undo gives undone. Btw finishes as answered;
-plan as planned, then swarmed when its tasks are made.
+a swarm as planned, then swarmed when its tasks are made.
 
                                                         *sepal-context*
 A task's card in the panel shows its context window: 10 cells, used
@@ -390,7 +392,7 @@ it there.
 
 `:checkhealth sepal` checks Neovim, git, `cmd`, `args`, `check`, `retries`,
 `land`, `prepare`, `max_running`, `models`, `agents` and their executables,
-plan models, `task_sharpen`, `panel_width`, `sakura`, `highlights`, `icons`, fidget and fff.
+swarm models, `task_sharpen`, `panel_width`, `sakura`, `highlights`, `icons`, fidget and fff.
 It also reports `auto_mode`, the worktree/inbox path and worktree trust prompts.
 
  vim:tw=78:ts=8:ft=help:norl:

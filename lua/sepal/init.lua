@@ -21,6 +21,7 @@ local C = {
   agents = nil,        -- the agents :Sepal task asks you to pick from, { cmd = "devin", model = "fusion-…", args = {…}, name = "devin", key = "d" }; nil: cmd
   panel_width = 46,    -- :Sepal panel's width: columns (46), a share of the editor's ("30%" or 0.3)
   sakura = true,       -- blossom pinks for sepal's accents; false: only your colorscheme's colors
+  diff_ribbons = true, -- add a ribbon gutter to task review when diff-ribbons.nvim is installed
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything else: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
   skills = {},         -- name -> a SKILL.md path or its text, over ~/.claude/skills and ~/.config/devin/skills; /name in a task sends the skill along: { how = "~/.claude/skills/how/SKILL.md" }
@@ -146,6 +147,7 @@ local function optional(name)
   if ok then missing[name] = nil; return mod end
   missing[name] = true
 end
+M._optional = optional
 vim.api.nvim_create_autocmd("OptionSet", { group = "sepal.hl", pattern = "runtimepath", callback = function() missing = {} end })
 -- while you're in the agent (or a chat) they wait, shown once you leave it
 local held = {}

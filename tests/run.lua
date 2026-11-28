@@ -364,7 +364,13 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   agent.show(e)
   local wins = vim.api.nvim_tabpage_list_wins(0)
   local function names() return vim.tbl_map(function(w) return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match("[^/]+/[^/]+$") or vim.bo[vim.api.nvim_win_get_buf(w)].buftype end, wins) end
-  eq(names(), { "before/a.txt", "after/a.txt", "quickfix" })
+  local function bars()
+    return vim.tbl_map(function(w)
+      return vim.trim(vim.api.nvim_eval_statusline(vim.wo[w].winbar, { winid = w, use_winbar = true }).str)
+    end, { wins[1], wins[2] })
+  end
+  eq(names(), { "base/a.txt", "result/a.txt", "quickfix" })
+  eq(bars(), { "base · a.txt", "result · a.txt" })
   eq({ #vim.fn.getqflist(), #vim.fn.getloclist(wins[2]) }, { 0, 2 }) -- the global list is left alone
   eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[3]), 0, -1, false), { "a.txt +1 −1", "b.txt +1 −0" })
   eq({ vim.wo[wins[1]].diff, vim.wo[wins[2]].diff }, { true, true })
@@ -372,10 +378,11 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "one", "TWO", "three" })
   vim.api.nvim_set_current_win(wins[1])
   vim.api.nvim_feedkeys("]q", "x", false) -- from the before side too
-  eq(names(), { "before/b.txt", "after/b.txt", "quickfix" })
+  eq(names(), { "base/b.txt", "result/b.txt", "quickfix" })
+  eq(bars(), { "base · b.txt", "result · b.txt" })
   eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[1]), 0, -1, false), { "" }) -- added: nothing before
   vim.api.nvim_feedkeys("[q", "x", false)
-  eq(names(), { "before/a.txt", "after/a.txt", "quickfix" })
+  eq(names(), { "base/a.txt", "result/a.txt", "quickfix" })
   local review, tabs = vim.api.nvim_get_current_tabpage(), vim.fn.tabpagenr("$")
   vim.api.nvim_set_current_win(wins[2])
   vim.api.nvim_win_set_cursor(0, { 2, 0 })
@@ -385,13 +392,29 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   vim.api.nvim_set_current_tabpage(review)
   vim.api.nvim_feedkeys("q", "x", false)
   eq(vim.fn.tabpagenr("$"), tabs - 1)
-  eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/after/") end, vim.api.nvim_list_bufs()), 0, "after buffers left")
+  eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/result/") end, vim.api.nvim_list_bufs()), 0, "result buffers left")
+
+  local old_ribbons, attached = package.loaded.diff_ribbons, nil
+  package.loaded.diff_ribbons = { attach = function(before, after) attached = { before, after } end }
+  agent.show(e)
+  local diff_wins = vim.tbl_filter(function(w) return vim.wo[w].diff end, vim.api.nvim_tabpage_list_wins(0))
+  eq(attached, diff_wins)
+  eq(#vim.fn.getloclist(attached[2]), 2)
+  eq(vim.api.nvim_get_current_win(), attached[2])
+  vim.cmd.tabclose()
+  sepal.setup({ diff_ribbons = false })
+  attached = nil
+  agent.show(e)
+  eq(attached, nil, "review opened a gutter despite diff_ribbons=false")
+  vim.cmd.tabclose()
+  sepal.setup({ diff_ribbons = true })
+  package.loaded.diff_ribbons = old_ribbons
 end)
 
 test("review preserves non-ASCII and escaped filenames and their first changed lines", function()
   clean(); reset()
   local git = require("sepal.git")
-  local paths = { "日本語.txt", 'quote"tab\tback\\slash.txt', "with space.txt", "a\nnewline.txt" }
+  local paths = { "日本語.txt", 'quote"tab\tback\\slash.txt', "with space.txt", "a\nnewline.txt", "100%.txt" }
   local before, after = {}, {}
   for i, path in ipairs(paths) do
     before[path], after[path] = "one\nbefore " .. i .. "\n", "one\nafter " .. i .. "\n"
@@ -432,6 +455,9 @@ test("review preserves non-ASCII and escaped filenames and their first changed l
   for i = 1, #paths do
     local path = vim.b.sepal_path
     eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), vim.split(vim.trim(after[path]), "\n"))
+    if path == "100%.txt" then
+      eq(vim.trim(vim.api.nvim_eval_statusline(vim.wo.winbar, { use_winbar = true }).str), "result · 100%.txt")
+    end
     local wins = vim.api.nvim_tabpage_list_wins(0)
     eq(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(wins[1]), 0, -1, false), vim.split(vim.trim(before[path]), "\n"))
     if i < #paths then vim.cmd.lnext() end

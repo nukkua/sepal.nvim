@@ -54,6 +54,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
     agents = nil,
     panel_width = 46,
     sakura = true,
+    diff_ribbons = true,
     highlights = {},
     icons = {},
     skills = {},
@@ -156,6 +157,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
 `sakura`     true: cherry-blossom colors for SepalTitle, SepalAccent,
              SepalInfo and SepalShimmer (lighter on a dark 'background', deeper
              on a light one). false: those groups link to your colorscheme's.
+                                                       *sepal-diff_ribbons*
+`diff_ribbons` Add colorscheme-aware connectors to the task review when
+             diff-ribbons.nvim is installed
+             (https://github.com/nukkua/diff-ribbons.nvim). Set to false
+             for native diff without the gutter. Default: true.
                                                          *sepal-highlights*
 `highlights` group -> |nvim_set_hl()| spec, applied over everything:
              `{ SepalOk = { fg = "#a3be8c" }, SepalDim = { link = "NonText" } }`
@@ -250,7 +256,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   under each (assumptions, why it needs you, the failing
                   check's output). In it:
                     <CR>  everything the task changed, in a new tab: each
-                          file before | after in diff mode, all of them in
+                          file's base and result in diff mode, all of them in
                           a location list (]q [q or ]l [l next file, ]c next
                           change, gf the file in your work tree, q closes);
                           a decision ending in (path:line) shows above

@@ -135,6 +135,8 @@ subagents`).
 - `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
   your work tree, `q` closes). A decision that ends in `(path:line)` shows above that line.
+  Install [diff-ribbons.nvim](https://github.com/nukkua/diff-ribbons.nvim) to connect matching
+  changes across the panes using your colorscheme.
 - Each task is a fold: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
   `q` closes the inbox.
 
@@ -222,6 +224,7 @@ require("sepal").setup({
   agents = nil,        -- agents :Sepal task asks you to pick from (see Devin)
   panel_width = 46,    -- :Sepal panel's width: columns, or a share of the editor's: "30%" (or 0.3)
   sakura = true,       -- blossom colors for sepal's accents; false: use theme links for those groups
+  diff_ribbons = true, -- use the optional diff-ribbons.nvim gutter in task review
   highlights = {},     -- Sepal* group -> nvim_set_hl spec, over everything: { SepalOk = { fg = "#a3be8c" } }
   icons = {},          -- inbox status -> icon: { landed = "✔", running = "~" }
   skills = {},         -- name -> SKILL.md path or text, over ~/.claude/skills and ~/.config/devin/skills; /name in a task sends it along: { how = "~/.claude/skills/how/SKILL.md" }

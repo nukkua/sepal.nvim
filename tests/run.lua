@@ -386,6 +386,22 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   vim.api.nvim_feedkeys("q", "x", false)
   eq(vim.fn.tabpagenr("$"), tabs - 1)
   eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/after/") end, vim.api.nvim_list_bufs()), 0, "after buffers left")
+
+  local old_ribbons, attached = package.loaded.diff_ribbons, nil
+  package.loaded.diff_ribbons = { attach = function(before, after) attached = { before, after } end }
+  agent.show(e)
+  local diff_wins = vim.tbl_filter(function(w) return vim.wo[w].diff end, vim.api.nvim_tabpage_list_wins(0))
+  eq(attached, diff_wins)
+  eq(#vim.fn.getloclist(attached[2]), 2)
+  eq(vim.api.nvim_get_current_win(), attached[2])
+  vim.cmd.tabclose()
+  sepal.setup({ diff_ribbons = false })
+  attached = nil
+  agent.show(e)
+  eq(attached, nil, "review opened a gutter despite diff_ribbons=false")
+  vim.cmd.tabclose()
+  sepal.setup({ diff_ribbons = true })
+  package.loaded.diff_ribbons = old_ribbons
 end)
 
 test("review preserves non-ASCII and escaped filenames and their first changed lines", function()

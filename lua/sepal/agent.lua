@@ -1424,6 +1424,10 @@ function M.show(e)
   end
   vim.api.nvim_set_current_win(new)
   vim.cmd.lfirst()
+  if C().diff_ribbons then
+    local ribbons = sepal()._optional("diff_ribbons")
+    if ribbons then ribbons.attach(old, new) end
+  end
 end
 
 -- b in a full-screen float, the size its terminal started at whatever tabs, splits or statusline there

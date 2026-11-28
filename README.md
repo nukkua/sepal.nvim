@@ -136,7 +136,10 @@ subagents`).
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
   your work tree, `q` closes). A decision that ends in `(path:line)` shows above that line.
   Install [diff-ribbons.nvim](https://github.com/nukkua/diff-ribbons.nvim) to connect matching
-  changes across the panes using your colorscheme.
+  changes across the panes. Click `>` on a ribbon to apply that hunk or `<` to reverse it in
+  your local buffer (`gf` opens it; write to save). From a changed line,
+  `:DiffRibbonsApply` and `:DiffRibbonsRevert` do the same. These actions do not change the task
+  result or stage anything. They require an existing text file and refuse overlapping edits.
 - Each task is a fold: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
   `q` closes the inbox.
 

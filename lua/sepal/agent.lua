@@ -1320,7 +1320,7 @@ function M.show(e)
   -- the two diffs run concurrently; once the file list is in, one cat-file starts for every
   -- file's before and after contents, overlapping the -U0 diff and the window setup below
   local spec_idx = { {}, {} } -- rev side (after, before) -> file index -> batch index; binaries aren't read
-  local st, first, cat = git.review(e.root, a, z, function(s)
+  local st, first, cat, regular = git.review(e.root, a, z, function(s)
     local specs = {}
     for side, rev in ipairs({ z, a }) do
       for i, p in ipairs(s.paths) do
@@ -1342,7 +1342,14 @@ function M.show(e)
     local rel, l = vim.b.sepal_path, vim.fn.line(".")
     local p = vim.fs.joinpath(e.root, rel)
     if not vim.uv.fs_stat(p) then return notify(rel .. " isn't in your work tree", WARN) end
-    vim.cmd("tab drop " .. vim.fn.fnameescape(p))
+    local buf = vim.fn.bufnr(p)
+    if buf ~= -1 and vim.bo[buf].modified then
+      local win = vim.fn.win_findbuf(buf)[1]
+      if win then vim.api.nvim_set_current_win(win)
+      else vim.cmd("tab sbuffer " .. buf) end
+    else
+      vim.cmd("tab drop " .. vim.fn.fnameescape(p))
+    end
     pcall(vim.api.nvim_win_set_cursor, 0, { l, 0 })
   end
   local function keys(b) -- the list is the after window's: from the before side too
@@ -1427,7 +1434,28 @@ function M.show(e)
   vim.cmd.lfirst()
   if C().diff_ribbons then
     local ribbons = sepal()._optional("diff_ribbons")
-    if ribbons then ribbons.attach(old, new) end
+    if ribbons then
+      local function edit_hunk(hunk, reverse)
+        local path = vim.b[hunk.after.buf].sepal_path
+        if not regular[path] then return notify("Hunk actions require an existing text file on both sides", WARN) end
+        local root = vim.uv.fs_realpath(e.root)
+        local abs = root and vim.fs.joinpath(root, path)
+        local file = abs and vim.uv.fs_lstat(abs)
+        if not file or file.type ~= "file" or vim.uv.fs_realpath(abs) ~= abs then
+          return notify("Hunk actions require a regular file in your work tree", WARN)
+        end
+        local buf = vim.fn.bufadd(abs)
+        vim.fn.bufload(buf)
+        local ok, err = ribbons.copy_hunk(hunk, buf, reverse)
+        if not ok then return notify(err, WARN) end
+        vim.bo[buf].buflisted = true
+        notify((reverse and "Hunk reverted" or "Hunk applied") .. " in your work tree buffer · gf opens it; write to save")
+      end
+      ribbons.attach(old, new, { actions = ribbons.copy_hunk and {
+        apply = function(hunk) edit_hunk(hunk, false) end,
+        revert = function(hunk) edit_hunk(hunk, true) end,
+      } or nil })
+    end
   end
 end
 

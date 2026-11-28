@@ -1362,7 +1362,7 @@ function M.show(e)
   local group = vim.api.nvim_create_augroup("sepal.review." .. tab, { clear = true })
   local after, idx, busy = {}, {}, false
   for i, path in ipairs(st.paths) do
-    local b = scratch(content(z, i), ("sepal://%s/after/%s"):format(e.id, path))
+    local b = scratch(content(z, i), ("sepal://%s/result/%s"):format(e.id, path))
     vim.bo[b].bufhidden, vim.b[b].sepal_path = "hide", path
     keys(b)
     after[i], idx[b] = b, i
@@ -1385,13 +1385,14 @@ function M.show(e)
     busy = true -- setting the windows' buffers below fires this again
     if vim.bo[b].filetype == "" then vim.bo[b].filetype = vim.filetype.match({ filename = path }) or "" end -- once shown: it may start a parser
     local w = vim.api.nvim_get_current_win()
-    local before = scratch(content(a, i), ("sepal://%s/before/%s"):format(e.id, path), vim.bo[b].filetype)
+    local before = scratch(content(a, i), ("sepal://%s/base/%s"):format(e.id, path), vim.bo[b].filetype)
     vim.b[before].sepal_path = path
     keys(before)
     -- after on the right, before on the left, whichever window the quickfix list opened it in
-    for _, s in ipairs({ { old, before, "before" }, { new, b, "after" } }) do
+    local filename = path:gsub("%%", "%%%%")
+    for _, s in ipairs({ { old, before, "base" }, { new, b, "result" } }) do
       vim.api.nvim_win_call(s[1], function() vim.cmd("diffoff"); vim.api.nvim_win_set_buf(s[1], s[2]); vim.cmd("diffthis") end)
-      vim.wo[s[1]].winbar = s[3] .. ": " .. path
+      vim.wo[s[1]].winbar = "%#Comment# " .. s[3] .. " · %*" .. filename
     end
     if w == old then vim.api.nvim_set_current_win(new) end
     busy = false

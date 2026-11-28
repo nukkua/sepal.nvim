@@ -132,7 +132,7 @@ subagents`).
   planned swarm it picks the plan item's model (all of them on the plan's own line). Unlike the
   draft picker or a plan item's picker, changing an existing task's model doesn't switch its agent.
 - `L` lands a task, `U` takes a landed one back out, `C` drops the tasks that are over (`:Sepal clean`).
-- `<CR>` reviews what the task changed in a new tab: each file before | after in diff mode, all of them
+- `<CR>` reviews what the task changed in a new tab: each file's `base` and `result` side by side, all of them
   in a location list (it looks like the quickfix one) with their `+`/`−` counts (`]q` `[q` or `]l` `[l` next file, `]c` next change, `gf` the file in
   your work tree, `q` closes). A decision that ends in `(path:line)` shows above that line.
   Install [diff-ribbons.nvim](https://github.com/nukkua/diff-ribbons.nvim) to connect matching

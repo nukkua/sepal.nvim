@@ -256,7 +256,7 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
                   under each (assumptions, why it needs you, the failing
                   check's output). In it:
                     <CR>  everything the task changed, in a new tab: each
-                          file before | after in diff mode, all of them in
+                          file's base and result in diff mode, all of them in
                           a location list (]q [q or ]l [l next file, ]c next
                           change, gf the file in your work tree, q closes);
                           a decision ending in (path:line) shows above

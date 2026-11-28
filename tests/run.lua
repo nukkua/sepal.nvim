@@ -434,6 +434,53 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   package.loaded.diff_ribbons = old_ribbons
 end)
 
+test("review hunk actions normalize tracked CRLF and refuse final newline changes", function()
+  clean(); reset()
+  local git = require("sepal.git")
+  local function snapshot()
+    local ref
+    git.snapshot(work, nil, function(id) ref = id end)
+    assert(vim.wait(10000, function() return ref ~= nil end, 10))
+    return ref
+  end
+  put("a-crlf.txt", "one\r\nold\r\n")
+  put("b-empty.txt", "")
+  put("c-eof.txt", "before\n")
+  local base = snapshot()
+  put("a-crlf.txt", "one\r\nnew\r\n")
+  put("b-empty.txt", "first\n")
+  put("c-eof.txt", "after")
+  local result = snapshot()
+  put("a-crlf.txt", "one\r\nold\r\n")
+  put("b-empty.txt", "")
+  put("c-eof.txt", "before\n")
+  local old_ribbons, change, win, actions = package.loaded.diff_ribbons
+  package.loaded.diff_ribbons = {
+    attach = function(_, after, opts) win, actions = after, opts.actions end,
+    copy_hunk = function(hunk, target)
+      change = vim.b[hunk.after.buf].sepal_path
+      if change == "a-crlf.txt" then
+        eq(vim.bo[target].fileformat, "dos")
+        eq(vim.api.nvim_buf_get_lines(hunk.after.buf, 0, -1, true), { "one", "new" })
+      end
+      return true
+    end,
+  }
+  agent.show({ id = "line-endings", root = work, base = base, result = result })
+  local function apply()
+    change = nil
+    actions.apply({ after = { buf = vim.api.nvim_win_get_buf(win) } })
+    return change
+  end
+  eq(apply(), "a-crlf.txt")
+  vim.cmd.lnext()
+  eq(apply(), "b-empty.txt")
+  vim.cmd.lnext()
+  eq(apply(), nil)
+  vim.cmd.tabclose()
+  package.loaded.diff_ribbons = old_ribbons
+end)
+
 test("review preserves non-ASCII and escaped filenames and their first changed lines", function()
   clean(); reset()
   local git = require("sepal.git")

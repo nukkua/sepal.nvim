@@ -139,7 +139,8 @@ subagents`).
   changes across the panes. Click `>` on a ribbon to apply that hunk or `<` to reverse it in
   your local buffer (`gf` opens it; write to save). From a changed line,
   `:DiffRibbonsApply` and `:DiffRibbonsRevert` do the same. These actions do not change the task
-  result or stage anything. They require an existing text file and refuse overlapping edits.
+  result or stage anything. They require an existing text file and refuse overlapping edits
+  or changes to file line endings.
 - Each task is a fold: `za` collapses or expands the lines under it, `zM`/`zR` all of them.
   `q` closes the inbox.
 

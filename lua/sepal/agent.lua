@@ -1359,10 +1359,20 @@ function M.show(e)
     end
   end
   local all = git.files_wait(cat) -- a missing side reads as ""
+  local function blob(rev, i)
+    local idx = spec_idx[rev == a and 2 or 1][i]
+    return idx and all[idx] or ""
+  end
+  local function line_ending(raw)
+    if not raw:find("\r\n", 1, true) then return "unix" end
+    return (raw:sub(1, 1) == "\n" or raw:find("[^\r]\n")) and "mixed" or "dos"
+  end
   local function content(rev, i)
     if st.list[i]:match(" binary$") then return { "binary file" } end
-    local idx = spec_idx[rev == a and 2 or 1][i]
-    return vim.split(((idx and all[idx] or ""):gsub("\n$", "")), "\n")
+    local raw = blob(rev, i)
+    if raw == "" then return {} end
+    if line_ending(raw) == "dos" then raw = raw:gsub("\r\n", "\n") end
+    return vim.split((raw:gsub("\n$", "")), "\n")
   end
   -- the after side of each file, for the quickfix list to point at. Filled now: filling it later
   -- would move the list's line numbers; the before buffers are made lazily, from the same batch
@@ -1438,6 +1448,14 @@ function M.show(e)
       local function edit_hunk(hunk, reverse)
         local path = vim.b[hunk.after.buf].sepal_path
         if not regular[path] then return notify("Hunk actions require an existing text file on both sides", WARN) end
+        local i = idx[hunk.after.buf]
+        local before, after = blob(a, i), blob(z, i)
+        local before_format, after_format = line_ending(before), line_ending(after)
+        if before_format == "mixed" or after_format == "mixed"
+          or (before ~= "" and after ~= "" and before_format ~= after_format)
+          or (before == "" or before:sub(-1) == "\n") ~= (after == "" or after:sub(-1) == "\n") then
+          return notify("Hunk actions cannot change file line endings", WARN)
+        end
         local root = vim.uv.fs_realpath(e.root)
         local abs = root and vim.fs.joinpath(root, path)
         local file = abs and vim.uv.fs_lstat(abs)

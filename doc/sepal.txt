@@ -162,6 +162,11 @@ Wayland, pngpaste on macOS or xclip on X11 to paste clipboard images.
              diff-ribbons.nvim is installed
              (https://github.com/nukkua/diff-ribbons.nvim). Set to false
              for native diff without the gutter. Default: true.
+             Click > to apply or < to reverse a hunk in your local work
+             tree buffer (gf opens it; write to save). On a changed line,
+             use :DiffRibbonsApply or :DiffRibbonsRevert. Text hunks only;
+             overlapping local edits or changes to file line endings are
+             refused. The task stays unchanged.
                                                          *sepal-highlights*
 `highlights` group -> |nvim_set_hl()| spec, applied over everything:
              `{ SepalOk = { fg = "#a3be8c" }, SepalDim = { link = "NonText" } }`

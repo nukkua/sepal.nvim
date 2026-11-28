@@ -394,13 +394,36 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   eq(vim.fn.tabpagenr("$"), tabs - 1)
   eq(#vim.tbl_filter(function(b) return vim.api.nvim_buf_get_name(b):match("^sepal://.*/result/") end, vim.api.nvim_list_bufs()), 0, "result buffers left")
 
-  local old_ribbons, attached = package.loaded.diff_ribbons, nil
-  package.loaded.diff_ribbons = { attach = function(before, after) attached = { before, after } end }
+  local old_ribbons, attached, actions, copied = package.loaded.diff_ribbons
+  package.loaded.diff_ribbons = {
+    attach = function(before, after, opts) attached, actions = { before, after }, opts.actions end,
+    copy_hunk = function(hunk, buf, reverse) copied = { hunk, vim.api.nvim_buf_get_name(buf), reverse }; return true end,
+  }
   agent.show(e)
   local diff_wins = vim.tbl_filter(function(w) return vim.wo[w].diff end, vim.api.nvim_tabpage_list_wins(0))
   eq(attached, diff_wins)
   eq(#vim.fn.getloclist(attached[2]), 2)
   eq(vim.api.nvim_get_current_win(), attached[2])
+  local hunk = { after = { buf = vim.api.nvim_win_get_buf(attached[2]) } }
+  actions.apply(hunk)
+  eq(copied, { hunk, vim.fs.joinpath(work, "a.txt"), false })
+  actions.revert(hunk)
+  eq(copied, { hunk, vim.fs.joinpath(work, "a.txt"), true })
+  local local_buf, review_tab = vim.fn.bufnr(copied[2]), vim.api.nvim_get_current_tabpage()
+  local disk = vim.fn.readfile(copied[2])
+  vim.api.nvim_buf_set_lines(local_buf, 0, -1, true, { "unsaved hunk" })
+  vim.api.nvim_feedkeys("gf", "x", false)
+  eq(vim.api.nvim_get_current_buf(), local_buf)
+  eq(vim.api.nvim_buf_get_lines(local_buf, 0, -1, true), { "unsaved hunk" })
+  eq(vim.fn.readfile(copied[2]), disk)
+  vim.cmd("tabclose!")
+  vim.api.nvim_buf_call(local_buf, function() vim.cmd("edit!") end)
+  vim.api.nvim_set_current_tabpage(review_tab)
+  vim.cmd.lnext()
+  hunk.after.buf = vim.api.nvim_win_get_buf(attached[2])
+  copied = nil
+  actions.revert(hunk)
+  eq(copied, nil, "whole-file creation or removal is not a buffer hunk action")
   vim.cmd.tabclose()
   sepal.setup({ diff_ribbons = false })
   attached = nil
@@ -408,6 +431,53 @@ test("<CR> shows the file before | after in diff mode, its files in a location l
   eq(attached, nil, "review opened a gutter despite diff_ribbons=false")
   vim.cmd.tabclose()
   sepal.setup({ diff_ribbons = true })
+  package.loaded.diff_ribbons = old_ribbons
+end)
+
+test("review hunk actions normalize tracked CRLF and refuse final newline changes", function()
+  clean(); reset()
+  local git = require("sepal.git")
+  local function snapshot()
+    local ref
+    git.snapshot(work, nil, function(id) ref = id end)
+    assert(vim.wait(10000, function() return ref ~= nil end, 10))
+    return ref
+  end
+  put("a-crlf.txt", "one\r\nold\r\n")
+  put("b-empty.txt", "")
+  put("c-eof.txt", "before\n")
+  local base = snapshot()
+  put("a-crlf.txt", "one\r\nnew\r\n")
+  put("b-empty.txt", "first\n")
+  put("c-eof.txt", "after")
+  local result = snapshot()
+  put("a-crlf.txt", "one\r\nold\r\n")
+  put("b-empty.txt", "")
+  put("c-eof.txt", "before\n")
+  local old_ribbons, change, win, actions = package.loaded.diff_ribbons
+  package.loaded.diff_ribbons = {
+    attach = function(_, after, opts) win, actions = after, opts.actions end,
+    copy_hunk = function(hunk, target)
+      change = vim.b[hunk.after.buf].sepal_path
+      if change == "a-crlf.txt" then
+        eq(vim.bo[target].fileformat, "dos")
+        eq(vim.api.nvim_buf_get_lines(hunk.after.buf, 0, -1, true), { "one", "new" })
+      end
+      return true
+    end,
+  }
+  agent.show({ id = "line-endings", root = work, base = base, result = result })
+  local function apply()
+    change = nil
+    actions.apply({ after = { buf = vim.api.nvim_win_get_buf(win) } })
+    return change
+  end
+  eq(apply(), "a-crlf.txt")
+  vim.cmd.lnext()
+  eq(apply(), "b-empty.txt")
+  vim.cmd.lnext()
+  eq(apply(), nil)
+  vim.cmd.tabclose()
   package.loaded.diff_ribbons = old_ribbons
 end)
 

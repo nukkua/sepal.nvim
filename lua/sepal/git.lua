@@ -191,7 +191,7 @@ end
 
 -- the -U0 diff of a -> b parsed: { [path] = line of its first change }
 local function firsts_of(s)
-  local t = {}
+  local t, regular = {}, {}
   local sec_start
   if s:sub(1, 11) == "diff --git " then sec_start = 1
   else
@@ -211,13 +211,18 @@ local function firsts_of(s)
         if h and h < sec_end then
           local heol = s:find("\n", h + 1, true) or #s + 1
           local n = s:sub(h + 1, heol - 1):match("^@@ %-%S+ %+(%d+)")
-          if n then t[path] = math.max(1, tonumber(n)) end
+          if n then
+            t[path] = math.max(1, tonumber(n))
+            local meta = s:sub(sec_start, p)
+            regular[path] = meta:match("\nindex %x+%.%.%x+ 100[67]%d%d\n") ~= nil
+              or (meta:match("\nold mode 100[67]%d%d\n") and meta:match("\nnew mode 100[67]%d%d\n")) ~= nil
+          end
         end
       end
     end
     sec_start = nxt and nxt + 1 or nil
   end
-  return t
+  return t, regular
 end
 
 
@@ -246,7 +251,8 @@ function M.review(root, a, b, on_stat)
   local num, uni = start(root, NUMSTAT(a, b)), start(root, FIRSTS(a, b))
   local st = stat_of(text(num))
   local extra = on_stat(st)
-  return st, firsts_of(text(uni)), extra
+  local first, regular = firsts_of(text(uni))
+  return st, first, extra, regular
 end
 
 -- delete every ref under a list of prefixes, then cb() (at once when there is nothing): one
